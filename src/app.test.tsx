@@ -121,6 +121,21 @@ describe('gamecast forecast rendering', () => {
     expect(screen.getAllByText('Cedar Foxes').length).toBeGreaterThan(0)
   })
 
+  it('disables backward stepping at the opening endpoint', () => {
+    render(<App />)
+
+    expect(screen.getByRole('button', { name: /step replay backward/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /step replay forward/i })).toBeEnabled()
+  })
+
+  it('disables forward stepping at the final endpoint', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /jump to final whistle/i }))
+
+    expect(screen.getByRole('button', { name: /step replay backward/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /step replay forward/i })).toBeDisabled()
+  })
+
   it('advances the visible checkpoint while playing', () => {
     vi.useFakeTimers()
     render(<App />)
