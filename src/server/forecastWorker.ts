@@ -26,6 +26,7 @@ import type {
   JsonValue,
 } from '../shared/forecastRecords'
 import { InMemoryForecastStore } from '../persistence/forecastStore'
+import type { FeedStatus } from '../types'
 
 export type { JevProvider } from './jev'
 export type {
@@ -49,6 +50,7 @@ export interface ForecastJob {
   gameId: string
   providerEventId: string
   providerPlayId?: string
+  sourceStatus?: FeedStatus
   state: unknown
 }
 
@@ -275,14 +277,15 @@ export class ForecastWorker {
   private async executeForecast(job: NormalizedForecastJob): Promise<ForecastResult> {
     const currentTime = this.now()
     const requestedAt = nowIso(currentTime)
-    if (this.mode !== 'live') {
-      const limited = this.limitNonLiveRecord(job, currentTime)
+    const mode = this.modeFor(job)
+    if (mode !== 'live') {
+      const limited = this.limitNonLiveRecord(job, currentTime, mode)
       if (limited) return { record: await this.persistRecord(limited), cacheHit: false }
       this.lastAttemptAt = currentTime
     }
-    const reservation = this.mode === 'live' ? await this.reserveBudget(job, currentTime) : undefined
+    const reservation = mode === 'live' ? await this.reserveBudget(job, currentTime) : undefined
     if (reservation && reservation.status === 'limited') {
-      return { record: await this.persistRecord(this.limitedRecord(job, currentTime, reservation.code)), cacheHit: false }
+      return { record: await this.persistRecord(this.limitedRecord(job, currentTime, mode, reservation.code)), cacheHit: false }
     }
     const budgetReservation = reservation?.status === 'reserved' ? reservation.reservation : undefined
     let providerInvoked = false
@@ -299,7 +302,7 @@ export class ForecastWorker {
     }
     const startedAt = currentTime
     try {
-      const provider = this.resolveProvider()
+      const provider = this.resolveProvider(mode)
       providerInvoked = true
       const result = await provider.forecast(asProviderRequest(job))
       await settleBudget('consumed')
@@ -313,7 +316,7 @@ export class ForecastWorker {
         rawNormalizedState: recordState(job.state),
         model: result.model || JEV_MODEL,
         status: 'success',
-        source: this.mode,
+        source: mode,
         requestedAt,
         completedAt: nowIso(completedAtMs),
         latencyMs: Math.max(0, completedAtMs - startedAt),
@@ -337,7 +340,7 @@ export class ForecastWorker {
           rawNormalizedState: recordState(job.state),
           model: JEV_MODEL,
           status: 'error',
-          source: this.mode,
+          source: mode,
           requestedAt,
           completedAt: nowIso(completedAtMs),
           latencyMs: Math.max(0, completedAtMs - startedAt),
@@ -351,11 +354,18 @@ export class ForecastWorker {
     }
   }
 
-  private resolveProvider(): JevProvider {
-    if (this.mode === 'mock') return this.mockProvider
-    if (this.mode === 'replay') {
-      if (!this.replayProvider) throw new ReplayMissError()
-      return this.replayProvider
+  private modeFor(job: NormalizedForecastJob): ForecastMode {
+    return this.mode === 'live' && job.sourceStatus === 'REPLAY' ? 'replay' : this.mode
+  }
+
+  private resolveProvider(mode: ForecastMode): JevProvider {
+    if (mode === 'mock') return this.mockProvider
+    if (mode === 'replay') {
+      if (this.replayProvider) return this.replayProvider
+      // A live worker entering replay because its source fell back must never
+      // reach the configured live provider; deterministic output is explicit.
+      if (this.mode === 'live') return this.mockProvider
+      throw new ReplayMissError()
     }
     return this.provider ?? new TypeSafeJevProvider()
   }
@@ -379,14 +389,14 @@ export class ForecastWorker {
     })
   }
 
-  private limitNonLiveRecord(job: NormalizedForecastJob, currentTime: number): ForecastRecord | undefined {
+  private limitNonLiveRecord(job: NormalizedForecastJob, currentTime: number, mode: ForecastMode): ForecastRecord | undefined {
     if (this.lastAttemptAt !== undefined && currentTime - this.lastAttemptAt < this.limits.cadenceMs) {
-      return this.limitedRecord(job, currentTime, 'CADENCE_LIMIT')
+      return this.limitedRecord(job, currentTime, mode, 'CADENCE_LIMIT')
     }
     return undefined
   }
 
-  private limitedRecord(job: NormalizedForecastJob, currentTime: number, code: string): ForecastRecord {
+  private limitedRecord(job: NormalizedForecastJob, currentTime: number, mode: ForecastMode, code: string): ForecastRecord {
     return {
       idempotencyKey: job.idempotencyKey,
       gameId: job.gameId,
@@ -396,7 +406,7 @@ export class ForecastWorker {
       rawNormalizedState: recordState(job.state),
       model: JEV_MODEL,
       status: 'limited',
-      source: this.mode,
+      source: mode,
       requestedAt: nowIso(currentTime),
       completedAt: nowIso(currentTime),
       latencyMs: 0,

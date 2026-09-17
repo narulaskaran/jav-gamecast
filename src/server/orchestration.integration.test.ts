@@ -127,6 +127,24 @@ describe('bounded ESPN → forecast → persistence → browser read orchestrati
     expect(result.forecast.record).toEqual(expect.objectContaining({ source: 'replay', status: 'success' }))
   })
 
+  it('does not invoke a live provider or label a replay fallback as live', async () => {
+    const calls: string[] = []
+    const failingFetch: EspnFetch = async () => new Response('{}', { status: 503 })
+    const store = new InMemoryForecastStore()
+
+    const result = await runForecastCycle({
+      espn: { fetch: failingFetch, maxRetries: 0, backoffMs: 0, sleep: async () => undefined },
+      store,
+      provider: provider(calls),
+      now: () => 1_000,
+    })
+
+    expect(result.snapshot.status).toBe('REPLAY')
+    expect(calls).toHaveLength(0)
+    expect(result.forecast.record).toEqual(expect.objectContaining({ source: 'replay', status: 'success', rawNormalizedState: expect.objectContaining({ sourceStatus: 'REPLAY' }) }))
+    expect(result.forecast.record.source).not.toBe('live')
+  })
+
   it('exposes one bounded handler invocation and leaves cadence to the scheduler', async () => {
     let polls = 0
     const store = new InMemoryForecastStore()

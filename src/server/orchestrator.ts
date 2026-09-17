@@ -100,7 +100,7 @@ export const runForecastCycle = async (options: ForecastCycleOptions = {}): Prom
   const worker = workerFor(options, mode)
   const snapshot = await source.poll()
   const job = forecastJobFromSnapshot(snapshot)
-  const forecast = await worker.forecast(job)
+  const forecast = await worker.forecast({ ...job, sourceStatus: snapshot.status })
   return { snapshot, job, forecast }
 }
 
