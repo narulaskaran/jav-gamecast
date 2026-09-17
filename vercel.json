@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/share/:analysisId", "destination": "/index.html" }
+  ],
   "crons": [
     { "path": "/api/cron/forecast", "schedule": "*/2 * * * *" }
   ]

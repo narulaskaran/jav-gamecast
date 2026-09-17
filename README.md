@@ -42,12 +42,12 @@ Regenerate from verified local source assets with `node scripts/generate-footbal
 - `api/cron/forecast.ts` is a Vercel-compatible POST entrypoint. It authenticates the cron request, polls ESPN once, invokes the server-only Jev provider, and persists through Convex. It never starts a long-lived loop. Convex claims and budgets protect against overlapping workers and process restarts; the local `running` flag is only an optimization.
 - `api/gamecast.ts` is the public, browser-safe read route. It exposes only the featured game, strips Convex system fields, applies CORS/read-rate controls, and returns `503` rather than inventing live data when provisioning is missing or the durable read fails.
 - `src/browser/forecastHttp.ts` and `src/browser/forecastRead.ts` consume the public read response. They do not import ESPN, TypeSafe, Convex server code, or credentials. `VITE_GAMECAST_MODE=live` opts into this source; failed live reads retain the replay points instead of silently labeling them live.
-- `api/analysis/draft`, `api/analysis/run`, `api/analysis/[analysisId]`, and `api/share/[analysisId]` implement the fixture-first Jev Data Analysis contract documented in `docs/analysis-api.md`. Drafting uses server-only OpenRouter; only a run can invoke server-only Jev. The current analysis store is explicitly process-local and non-production until the Convex adapter lands.
+- `api/analysis/draft`, `api/analysis/run`, `api/analysis/[analysisId]`, and `api/share/[analysisId]` implement the fixture-first Jev Data Analysis contract documented in `docs/analysis-api.md`. Drafting uses server-only OpenRouter; only a run can invoke server-only Jev. `src/server/analysisStore.ts` provides the server-only `ConvexAnalysisStore`, which persists bounded snapshots, claims, and public share readbacks in Convex. The production runtime fails closed with `ANALYSIS_STORAGE_NOT_CONFIGURED` until both a valid `CONVEX_URL` and `CONVEX_WRITE_SECRET` are provisioned; `InMemoryAnalysisStore` is reserved for deterministic local tests.
 - `vercel.json` schedules the bounded cron route every two minutes. This is compatible with the 90-second worker cadence and leaves scheduler ownership outside application code.
 
 ## Convex provisioning (operator step)
 
-A real Convex deployment and its URL are required for live operation. This repository does not claim that an external deployment has been provisioned.
+A real Convex deployment and its URL are required for live operation and for durable analysis/share reads. This repository does not claim that an external deployment has been provisioned; the checked-in adapter is the integration boundary, not proof of a live deployment.
 
 1. Install the dependencies and authenticate with Convex using the official CLI:
 

@@ -75,7 +75,9 @@ This reconstructs the same bounded, deterministic snapshot from the storage inte
 
 ## Storage boundary
 
-`AnalysisStorage` is intentionally small (`get` and `put`). `InMemoryAnalysisStore` is a temporary non-production implementation used for this lane and local tests; it is process-local and non-durable. A later Convex adapter can replace it without changing the API/domain or UI contract. Snapshot cloning and row sorting keep local reads and share serialization deterministic.
+`AnalysisStorage` is intentionally small and is implemented in production by the server-only `ConvexAnalysisStore` (`src/server/analysisStore.ts`). It uses the generated Convex functions for authorized snapshot writes/claims and the public share query for read-only share pages, so queued, incremental, completed, and partial-error snapshots survive process restarts and can be read across instances. `InMemoryAnalysisStore` remains available only for deterministic local tests; it is process-local and is not a production fallback. Snapshot cloning and row sorting keep reads and share serialization deterministic.
+
+The production runtime requires both a valid `CONVEX_URL` and `CONVEX_WRITE_SECRET` before constructing the Convex adapter. If either is absent or invalid, API reads and writes fail closed with `ANALYSIS_STORAGE_NOT_CONFIGURED` rather than silently using process-local storage. Provisioning is an operator step: deploy the checked-in `convex/` schema/functions with the official Convex CLI, set the server-side environment variables, and verify the deployment before enabling the app. The repository and its tests do not claim that a real Convex deployment has been provisioned.
 
 ## Server boundary
 
