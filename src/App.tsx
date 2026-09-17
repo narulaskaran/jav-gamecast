@@ -1,17 +1,15 @@
 import { useEffect, useState } from 'react'
+import { AnalysisRunView } from './components/AnalysisRunView'
 import { DatasetIntake } from './components/DatasetIntake'
 import { DatasetPreviewCard } from './components/DatasetPreview'
-import { ResultsChart } from './components/ResultsChart'
 import { getSampleDatasetPreview, SAMPLE_DATASET_ID } from './dataset/sampleDataset'
 import { DatasetError, plainDatasetError, PUBLIC_DATA_WARNING } from './dataset/csvTypes'
 import { validateCsvText } from './dataset/validateDataset'
 import type {
   AnalysisDraftResult,
-  AnalysisResultRow,
   AnalysisSnapshot,
-  AnalysisStatus,
 } from './shared/analysis'
-import type { AnalysisRowInput, DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
+import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
 import './styles.css'
 
 export interface AnalysisApiClient {
@@ -51,67 +49,10 @@ export const defaultAnalysisApi: AnalysisApiClient = {
 }
 
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
-const statusLabels: Record<AnalysisStatus, string> = { queued: 'Queued', running: 'Running', complete: 'Complete', error: 'Error' }
-const statusCopy: Record<AnalysisStatus, string> = {
-  queued: 'Run accepted. Waiting for the bounded Jev worker.',
-  running: 'Each persisted row prediction updates the chart.',
-  complete: 'All accepted rows have a bounded classification result.',
-  error: 'The run stopped with a stable error code; partial rows remain readable.',
-}
-const percent = (value: number | undefined) => value === undefined ? '—' : `${Math.round(value * 100)}%`
 const shortError = (error: unknown, fallback: string) => {
   if (error instanceof DatasetError) return plainDatasetError(error.code, fallback)
   if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) return plainDatasetError(error.message, `${fallback} (${error.message})`)
   return fallback
-}
-const cell = (value: unknown): string => (value === null || value === undefined || value === '' ? '—' : String(value))
-
-const StatusBadge = ({ status }: { status: AnalysisStatus }) => (
-  <span className={`analysis-status status-${status}`} role="status">
-    <span className="status-dot" aria-hidden="true" />
-    {statusLabels[status]}
-  </span>
-)
-
-const Progress = ({ snapshot }: { snapshot: AnalysisSnapshot }) => {
-  const { completedRows, totalRows, completedCalls, totalCalls } = snapshot.progress
-  const ratio = totalRows ? Math.min(100, Math.round((completedRows / totalRows) * 100)) : 0
-  return (
-    <div className="progress-block" aria-label="Analysis progress">
-      <div className="progress-line"><span>{completedRows} / {totalRows} rows</span><b>{ratio}%</b></div>
-      <div className="progress-track"><span style={{ width: `${ratio}%` }} /></div>
-      <p>{completedCalls} / {totalCalls} bounded Jev calls · {statusCopy[snapshot.status]}</p>
-    </div>
-  )
-}
-
-const CurrentRow = ({ row, columns }: { row?: { rowIndex: number; input: AnalysisRowInput }; columns: readonly string[] }) => {
-  const fields = (columns.length ? columns : Object.keys(row?.input ?? {})).slice(0, 8)
-  return (
-    <section className="inspector" aria-label="Current row inspector">
-      <div className="section-heading"><div><p className="eyebrow">Cursor</p><h3>Current row</h3></div><span className="inspector-note">worker + replay</span></div>
-      {!row ? <p className="empty-copy">No current row is available yet. The inspector follows the worker cursor, then the replay scrubber.</p> : (
-        <dl className="field-grid">
-          <div><dt>Row</dt><dd>#{row.rowIndex + 1}</dd></div>
-          {fields.map((name) => <div key={name}><dt>{name}</dt><dd>{cell(row.input[name])}</dd></div>)}
-        </dl>
-      )}
-    </section>
-  )
-}
-
-const ResultsTable = ({ rows, columns }: { rows: readonly AnalysisResultRow[]; columns: readonly string[] }) => {
-  const previewColumns = columns.slice(0, 2)
-  return (
-    <section className="results-card" aria-labelledby="results-heading">
-      <div className="section-heading"><div><p className="eyebrow">Readback</p><h3 id="results-heading">Incremental results</h3></div><span className="table-count">{rows.length} rows</span></div>
-      {rows.length === 0 ? <p className="empty-copy">Results append here as each row prediction is persisted.</p> : (
-        <div className="table-scroll"><table aria-label="Incremental analysis results"><thead><tr><th>Row</th>{previewColumns.map((name) => <th key={name}>{name}</th>)}<th>Selected class</th><th>Confidence</th></tr></thead><tbody>
-          {rows.map((row) => <tr key={row.rowIndex}><td>#{row.rowIndex + 1}</td>{previewColumns.map((name) => <td key={name}>{cell(row.input[name])}</td>)}<td><span className="class-chip">{row.selectedClass ?? row.error?.code ?? 'Pending'}</span></td><td>{percent(row.confidence)}</td></tr>)}
-        </tbody></table></div>
-      )}
-    </section>
-  )
 }
 
 const sharePathId = (): string | undefined => {
@@ -135,7 +76,6 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const [starting, setStarting] = useState(false)
   const [intakeBusy, setIntakeBusy] = useState(false)
   const [error, setError] = useState<string | undefined>()
-  const [replayIndex, setReplayIndex] = useState(0)
   const [shareMessage, setShareMessage] = useState('')
   const [shareLoading, setShareLoading] = useState(false)
 
@@ -183,17 +123,6 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     return () => { active = false; if (timer !== undefined) window.clearTimeout(timer) }
   }, [api, isShareView, snapshot?.analysisId, snapshot?.status])
 
-  const rows = snapshot?.resultRows ?? []
-  useEffect(() => {
-    if (snapshot?.status === 'running' || snapshot?.status === 'queued') setReplayIndex(Math.max(0, rows.length - 1))
-  }, [rows.length, snapshot?.status])
-
-  const chartRows = rows.slice(0, rows.length ? replayIndex + 1 : 0)
-  const activeRow = rows[replayIndex] ?? rows[rows.length - 1]
-  const columns = snapshot?.columns?.length ? snapshot.columns : dataset?.columns.map((column) => column.name) ?? []
-  const inspectorRow = snapshot?.status === 'running' || snapshot?.status === 'queued'
-    ? snapshot.currentFixtureRow
-    : activeRow ? { rowIndex: activeRow.rowIndex, input: activeRow.input } : snapshot?.currentFixtureRow
   const shareUrl = snapshot ? `${window.location.origin}/share/${encodeURIComponent(snapshot.analysisId)}` : ''
   const datasetId = dataset?.datasetId
 
@@ -202,7 +131,6 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     setQuery('')
     setQueryEdited(false)
     setSnapshot(undefined)
-    setReplayIndex(0)
     setShareMessage('')
     setError(undefined)
   }
@@ -220,7 +148,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
 
   const handleRun = async () => {
     if (!draft || !query.trim() || !queryEdited || !datasetId) return
-    setStarting(true); setError(undefined); setSnapshot(undefined); setReplayIndex(0); setShareMessage('')
+    setStarting(true); setError(undefined); setSnapshot(undefined); setShareMessage('')
     try {
       setSnapshot(await api.start({
         datasetId,
@@ -319,23 +247,14 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
           </>}
           {isShareView && shareLoading && <p className="empty-copy" role="status">Loading public snapshot…</p>}
           {isShareView && error && <div className="error-banner" role="alert"><b>Public snapshot unavailable</b><span>{error}</span></div>}
-          {snapshot && <section className="analysis-card" aria-labelledby="analysis-heading">
-            <div className="analysis-head"><div><p className="eyebrow">03 · Readback</p><h2 id="analysis-heading">Jev analysis run</h2></div><div className="analysis-actions"><StatusBadge status={snapshot.status} /><button className="text-button" type="button" onClick={() => void copyShareUrl()} disabled={!shareUrl} aria-label="Copy shareable public URL">↗ Share</button></div></div>
-            <p className="run-id">Run {snapshot.analysisId} · no provider credentials are exposed to the browser</p>
-            <Progress snapshot={snapshot} />
-            {snapshot.error && <div className="error-banner compact" role="alert"><b>{snapshot.error.code}</b><span>{snapshot.error.retryable ? 'Retryable provider boundary error.' : 'This run is not retrying automatically.'}</span></div>}
-            <ResultsChart rows={chartRows} classes={snapshot.classes} totalRows={snapshot.progress.totalRows} />
-            <div className="analysis-grid">
-              <CurrentRow row={inspectorRow} columns={columns} />
-            </div>
-            <ResultsTable rows={rows} columns={columns} />
-            <section className="replay-card" aria-label="Deterministic analysis replay">
-              <div className="section-heading"><div><p className="eyebrow">Replay</p><h3>Scrub the chart</h3></div><span>{rows.length ? `${replayIndex + 1} / ${rows.length}` : 'Waiting'}</span></div>
-              <input aria-label="Analysis replay position" type="range" min="0" max={Math.max(0, rows.length - 1)} value={rows.length ? replayIndex : 0} disabled={!rows.length} onChange={(event) => setReplayIndex(Number(event.target.value))} />
-              <div className="replay-summary">{activeRow ? <><strong>{activeRow.selectedClass ?? 'No class yet'}</strong><span>{Object.entries(activeRow.probabilities ?? {}).map(([name, value]) => `${name} ${percent(value)}`).join(' · ')}</span></> : <span>No completed rows to replay yet.</span>}</div>
-            </section>
-            <div className="share-footer"><span>{shareMessage || 'Public URL reads the same bounded snapshot without calling a provider.'}</span>{shareUrl && <a href={shareUrl} target="_blank" rel="noreferrer">Open public snapshot ↗</a>}</div>
-          </section>}
+          {snapshot && (
+            <AnalysisRunView
+              snapshot={snapshot}
+              shareUrl={shareUrl}
+              shareMessage={shareMessage}
+              onCopyShare={() => void copyShareUrl()}
+            />
+          )}
         </div>
         <aside className="side-column">
           <div className="boundary-card">

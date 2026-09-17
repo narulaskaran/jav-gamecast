@@ -108,7 +108,7 @@ describe('Jev playground flow', () => {
     expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: 'Use only visible columns.', classes: draft.metadata.classes })
   })
 
-  it('renders progress, current-row inspector, incremental results, live chart, replay, and share action', async () => {
+  it('renders progress, live chart, processed-row rail, secondary results, and share action', async () => {
     const api = makeApi({ read: vi.fn(async () => snapshot({
       status: 'running',
       progress: { completedRows: 12, totalRows: 39, completedCalls: 12, totalCalls: 39 },
@@ -117,10 +117,14 @@ describe('Jev playground flow', () => {
     await startSampleRun(api)
     expect(await screen.findByText(/running/i)).toBeInTheDocument()
     expect(screen.getByText('12 / 39 rows')).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: /current row inspector/i })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
-    expect(screen.getByRole('slider', { name: /analysis replay position/i })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
+    const rail = screen.getByRole('complementary', { name: /processed rows/i })
+    expect(within(rail).getByRole('button', { name: /row 1 of 39/i })).toBeInTheDocument()
+    expect(within(rail).getByRole('button', { name: /row 3 of 39/i })).toBeInTheDocument()
+    expect(within(rail).queryByText(String(input.play_id))).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /current row inspector/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
   })
 
@@ -148,28 +152,49 @@ describe('Jev playground flow', () => {
     })
     await startSampleRun(api)
     expect(await screen.findByText('Waiting for the first row…')).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('img', { name: /class distribution/i })).toHaveTextContent('K.Walker'))
-    expect(screen.queryByText('Waiting for the first row…')).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('img', { name: /class distribution/i })).toHaveTextContent('C.Kupp'))
+    expect(within(screen.getByRole('complementary', { name: /processed rows/i })).queryByRole('button')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Waiting for the first row…')).not.toBeInTheDocument())
+    await waitFor(() => expect(document.querySelector('[data-class="K.Walker"]')).toHaveAttribute('data-count', '1'))
+    await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '1'))
     expect(api.read).toHaveBeenCalled()
   })
 
-  it('keeps the cursor inspector on the worker current row instead of a replay result', async () => {
-    const replayInput = { ...input, play_id: Number(input.play_id) + 1 }
-    const api = makeApi({ read: vi.fn(async () => snapshot({
+  it('follows the live edge until the user scrubs back, then seeks from the row rail', async () => {
+    const running = (count: number): AnalysisSnapshot => snapshot({
       status: 'running',
-      currentFixtureRow: { rowIndex: 0, input },
-      progress: { completedRows: 1, totalRows: 39, completedCalls: 1, totalCalls: 39 },
-      resultRows: [{ rowIndex: 1, input: replayInput, model: 'jev-latest', selectedClass: 'C.Kupp' }],
-    })) })
+      currentFixtureRow: { rowIndex: Math.max(0, count - 1), input },
+      progress: { completedRows: count, totalRows: 39, completedCalls: count, totalCalls: 39 },
+      resultRows: Array.from({ length: count }, (_, rowIndex) => ({
+        rowIndex,
+        input: { ...input, play_id: Number(input.play_id) + rowIndex },
+        model: 'jev-latest',
+        selectedClass: rowIndex === 0 ? 'K.Walker' : 'C.Kupp',
+        probabilities: { 'K.Walker': 0.6, 'C.Kupp': 0.4 },
+      })),
+    })
+    let reads = 0
+    const api = makeApi({
+      start: vi.fn(async () => running(0)),
+      read: vi.fn(async () => {
+        reads += 1
+        if (reads === 1) return running(1)
+        if (reads === 2) return running(2)
+        return running(3)
+      }),
+    })
     await startSampleRun(api)
-    await screen.findByText('1 / 39 rows')
-    const inspector = screen.getByRole('region', { name: /current row inspector/i })
-    expect(within(inspector).getByText('#1')).toBeInTheDocument()
-    expect(within(inspector).getByText(String(input.play_id))).toBeInTheDocument()
-    const results = screen.getByRole('table', { name: /incremental analysis results/i })
-    expect(await within(results).findByText('C.Kupp')).toBeInTheDocument()
-    expect(within(results).getByText('#2')).toBeInTheDocument()
+    const rail = await screen.findByRole('complementary', { name: /processed rows/i })
+    await waitFor(() => expect(within(rail).getByRole('button', { name: /row 2 of 39/i })).toBeInTheDocument())
+    await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '1'))
+    fireEvent.click(within(rail).getByRole('button', { name: /row 1 of 39/i }))
+    await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '0'))
+    expect(within(rail).queryByText(String(input.play_id))).not.toBeInTheDocument()
+    await waitFor(() => expect(within(rail).getByRole('button', { name: /row 3 of 39/i })).toBeInTheDocument())
+    expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '0')
+    fireEvent.change(screen.getByRole('slider', { name: /chart playhead/i }), { target: { value: '2' } })
+    fireEvent.pointerUp(screen.getByRole('slider', { name: /chart playhead/i }))
+    await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '2'))
+    expect(screen.getByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
   })
 
   it('loads upload and public URL datasets into the same draft → chart path', async () => {
@@ -184,6 +209,45 @@ describe('Jev playground flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
     expect(await screen.findByRole('heading', { name: 'remote.csv' })).toBeInTheDocument()
     expect(api.createFromUrl).toHaveBeenCalledWith({ url: 'https://example.com/data.csv' })
+  })
+
+  it('uses the same chart and row-rail shell for a BYOD run', async () => {
+    const byod = snapshot({
+      analysisId: 'analysis-upload-1',
+      fixtureId: uploaded.datasetId,
+      datasetId: uploaded.datasetId,
+      sourceType: 'upload',
+      status: 'running',
+      classes: ['gold', 'silver'],
+      columns: ['message', 'tier'],
+      progress: { completedRows: 1, totalRows: 2, completedCalls: 1, totalCalls: 2 },
+      resultRows: [{ rowIndex: 0, input: { message: 'hello', tier: 'gold' }, model: 'jev-latest', selectedClass: 'gold', confidence: 0.9 }],
+    })
+    const api = makeApi({
+      draft: vi.fn(async () => ({
+        ...draft,
+        datasetId: uploaded.datasetId,
+        fixtureId: uploaded.datasetId,
+        sourceType: 'upload' as const,
+        metadata: { ...draft.metadata, displayName: 'tickets.csv', rowCount: 2, classes: ['gold', 'silver'], columns: ['message'] },
+      })),
+      start: vi.fn(async () => byod),
+      read: vi.fn(async () => byod),
+    })
+    render(<App api={api} />)
+    const file = new File(['message,tier\nhello,gold\n'], 'tickets.csv', { type: 'text/csv' })
+    fireEvent.change(screen.getByLabelText(/upload csv/i), { target: { files: [file] } })
+    expect(await screen.findByRole('heading', { name: 'tickets.csv' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    await screen.findByDisplayValue(draft.query)
+    fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: 'Classify the ticket tier.' } })
+    fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
+    expect(await screen.findByText('1 / 2 rows')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /row 1 of 2/i })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /current row inspector/i })).not.toBeInTheDocument()
+    expect(document.querySelector('[data-class="gold"]')).toHaveAttribute('data-count', '1')
   })
 
   it('fails closed on upload when CSV storage is not configured and does not fake a run', async () => {
@@ -208,8 +272,9 @@ describe('Jev playground flow', () => {
       expect(api.share).toHaveBeenCalledWith(analysisId)
       expect(screen.getByText(`Run ${analysisId} · no provider credentials are exposed to the browser`)).toBeInTheDocument()
       expect(screen.getByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
-      expect(screen.getByRole('slider', { name: /analysis replay position/i })).toBeInTheDocument()
+      expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
       expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: /processed rows/i })).toBeInTheDocument()
       expect(screen.queryByLabelText(/^Analysis task$/i)).not.toBeInTheDocument()
     } finally {
       window.history.pushState({}, '', '/')
