@@ -43,7 +43,7 @@ export type {
 } from '../shared/forecastRecords'
 export { InMemoryForecastStore } from '../persistence/forecastStore'
 
-export type ForecastMode = 'live' | 'mock' | 'replay'
+export type ForecastMode = 'live' | 'mock' | 'replay' | 'stale'
 export type ForecastStore = ForecastRecordStore
 
 export interface ForecastJob {
@@ -278,6 +278,25 @@ export class ForecastWorker {
     const currentTime = this.now()
     const requestedAt = nowIso(currentTime)
     const mode = this.modeFor(job)
+    if (mode === 'stale') {
+      const staleState = { ...job.state, sourceStatus: 'STALE' as const }
+      const record: ForecastRecord = {
+        idempotencyKey: job.idempotencyKey,
+        gameId: job.gameId,
+        providerEventId: job.providerEventId,
+        ...(job.providerPlayId ? { providerPlayId: job.providerPlayId } : {}),
+        stateHash: job.stateHash,
+        rawNormalizedState: recordState(staleState),
+        model: JEV_MODEL,
+        status: 'error',
+        source: 'stale',
+        requestedAt,
+        completedAt: requestedAt,
+        latencyMs: 0,
+        error: { code: 'STALE_SOURCE', retryable: true },
+      }
+      return { record: await this.persistRecord(record), cacheHit: false }
+    }
     if (mode !== 'live') {
       const limited = this.limitNonLiveRecord(job, currentTime, mode)
       if (limited) return { record: await this.persistRecord(limited), cacheHit: false }
@@ -355,7 +374,11 @@ export class ForecastWorker {
   }
 
   private modeFor(job: NormalizedForecastJob): ForecastMode {
-    return this.mode === 'live' && job.sourceStatus === 'REPLAY' ? 'replay' : this.mode
+    if (this.mode === 'live') {
+      if (job.sourceStatus === 'REPLAY') return 'replay'
+      if (job.sourceStatus !== 'LIVE') return 'stale'
+    }
+    return this.mode
   }
 
   private resolveProvider(mode: ForecastMode): JevProvider {
@@ -367,6 +390,7 @@ export class ForecastWorker {
       if (this.mode === 'live') return this.mockProvider
       throw new ReplayMissError()
     }
+    if (mode === 'stale') throw new Error('STALE_SOURCE must not resolve a provider')
     return this.provider ?? new TypeSafeJevProvider()
   }
 

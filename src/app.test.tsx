@@ -38,7 +38,7 @@ describe('gamecast forecast rendering', () => {
         },
       },
     })
-    await worker.forecast({ gameId: fixture.game.id, providerEventId: 'live-event', state: fixture.game })
+    await worker.forecast({ gameId: fixture.game.id, providerEventId: 'live-event', sourceStatus: 'LIVE', state: fixture.game })
     const source = createBrowserForecastSource({
       readPath: createBrowserForecastReadPath(store),
       gameId: fixture.game.id,

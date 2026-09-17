@@ -145,6 +145,18 @@ describe('bounded ESPN → forecast → persistence → browser read orchestrati
     expect(result.forecast.record.source).not.toBe('live')
   })
 
+  it('does not invoke a live provider for a STALE snapshot', async () => {
+    const calls: string[] = []
+    const staleSource: ForecastCycleSource = {
+      poll: async () => ({ ...snapshot, status: 'STALE', state: { ...snapshot.state, sourceStatus: 'STALE' } }),
+      getCachedSnapshot: () => snapshot,
+    }
+    const result = await runForecastCycle({ source: staleSource, provider: provider(calls), now: () => 1_000 })
+
+    expect(calls).toHaveLength(0)
+    expect(result.forecast.record).toEqual(expect.objectContaining({ source: 'stale', status: 'error', error: { code: 'STALE_SOURCE', retryable: true } }))
+  })
+
   it('exposes one bounded handler invocation and leaves cadence to the scheduler', async () => {
     let polls = 0
     const store = new InMemoryForecastStore()

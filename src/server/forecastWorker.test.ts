@@ -38,6 +38,7 @@ const job: ForecastJob = {
   gameId: 'game-1',
   providerEventId: 'event-1',
   providerPlayId: 'play-1',
+  sourceStatus: 'LIVE',
   state,
 }
 
@@ -295,6 +296,15 @@ describe('cadence and finite live limits', () => {
 })
 
 describe('provider errors and explicit deterministic fallback modes', () => {
+  it('does not invoke any provider for a STALE snapshot and records explicit stale state', async () => {
+    const calls: string[] = []
+    const worker = new ForecastWorker({ provider: successProvider({ keys: calls }), now: () => 0 })
+    const result = await worker.forecast({ ...job, sourceStatus: 'STALE' })
+
+    expect(calls).toHaveLength(0)
+    expect(result.record).toEqual(expect.objectContaining({ status: 'error', source: 'stale', error: { code: 'STALE_SOURCE', retryable: true } }))
+  })
+
   it('records timeout and provider status without persisting provider error text or secrets', async () => {
     const timeoutWorker = new ForecastWorker({
       provider: { forecast: async () => { throw new APITimeoutError(2_000) } },

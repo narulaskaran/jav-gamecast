@@ -1,47 +1,82 @@
 # Jev Gamecast
 
-Replay-first React + TypeScript + Vite vertical slice for the Jev Gamecast systems demo.
+Jev Gamecast is a replay-first React + TypeScript + Vite product. Replay is the safe default: a checked-in synthetic fixture renders without network access, credentials, Convex, ESPN, or a paid Jev call. Live mode is explicit and fail-closed.
 
-The app is intentionally offline: it renders a checked-in synthetic fixture through separate `GameStateSource` and `ForecastSource` adapters. It does not call ESPN, Jev, Convex, MPP, or any betting/fantasy service.
-
-## Run locally
+## Local replay
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the local Vite URL, then use `PLAY REPLAY`, step buttons, event pins, or the range slider to move through the eight stored checkpoints.
+Open the Vite URL and use `PLAY REPLAY`, the event pins, or the range slider. With no `VITE_GAMECAST_MODE=live`, the browser only uses the static fixture.
 
-## Checks
+## Verification
 
 ```bash
 npm test
+npm run test:convex
+npm run typecheck
+npm run typecheck:server
+npm run typecheck:convex
 npm run build
+npm run audit
 ```
 
-The output is Vercel-compatible as a static Vite build. Forecast values are fictional and experimental, not calibrated sportsbook odds.
+`test:convex` uses the official `convex-test` mock runtime. It exercises the real checked-in Convex schema/functions for immutable idempotent writes, claims, durable budget reservations, access-control rejection, and the read-only action. It is not evidence of a deployed Convex environment or a Convex-backed browser end-to-end run. All tests use deterministic inputs and never make a paid Jev request.
 
-## Stage 3 server forecast worker
+## Runtime layout
 
-`src/server/jev.ts` is a server-only TypeSafe boundary for Node 20+ using `@typesafe-ai/sdk`. It sends one typed `Choice` question to `POST https://api.typesafe.ai/v1/systemone` with model `jev-latest`; the SDK reads `TYPESAFE_API_KEY` only in the server runtime. `src/server/forecastWorker.ts` normalizes state, hashes it into an idempotency key, returns exact cached records for duplicate jobs, and produces persistence-ready success/error/limit records without provider bodies or credentials.
+- `convex/schema.ts` defines the durable `forecastRecords`, `forecastClaims`, `forecastBudgets`, and `forecastBudgetReservations` tables and indexes.
+- `convex/forecasts.ts` defines featured-game-only public queries. Writes, claims, and budget reservations are internal mutations reachable only through server-authorized actions requiring `CONVEX_WRITE_SECRET`; inputs are validated at that boundary.
+- `convex/runtime.ts` defines a read-only operator health action; it never calls a provider.
+- `src/server/convexStore.ts` is the server-only `ConvexHttpClient` adapter implementing the shared `ForecastRecordStore` boundary.
+- `api/cron/forecast.ts` is a Vercel-compatible POST entrypoint. It authenticates the cron request, polls ESPN once, invokes the server-only Jev provider, and persists through Convex. It never starts a long-lived loop. Convex claims and budgets protect against overlapping workers and process restarts; the local `running` flag is only an optimization.
+- `api/gamecast.ts` is the public, browser-safe read route. It exposes only the featured game, strips Convex system fields, applies CORS/read-rate controls, and returns `503` rather than inventing live data when provisioning is missing or the durable read fails.
+- `src/browser/forecastHttp.ts` and `src/browser/forecastRead.ts` consume the public read response. They do not import ESPN, TypeSafe, Convex server code, or credentials. `VITE_GAMECAST_MODE=live` opts into this source; failed live reads retain the replay points instead of silently labeling them live.
+- `vercel.json` schedules the bounded cron route every two minutes. This is compatible with the 90-second worker cadence and leaves scheduler ownership outside application code.
 
-Live mode is fail-closed when the key or provider is unavailable. The worker applies a default 90-second cadence, finite request/rate/spend ceilings, and explicit timeout/429/529 retry configuration. `mock` and `replay` modes are deterministic and opt-in; tests inject fake clients/providers and never make a paid or credentialed Jev call. The Vite build fails if server-only SDK, endpoint, or credential markers enter a browser chunk.
+## Convex provisioning (operator step)
 
-## Stage 2 feed boundary
+A real Convex deployment and its URL are required for live operation. This repository does not claim that an external deployment has been provisioned.
 
-`src/server/espn.ts` is a replaceable, server-side-only ESPN adapter. It reads the current publicly observed scoreboard, summary, and core play-by-play endpoints from ESPN's undocumented upstream, then normalizes provider data into the shared `GameState` contract. The adapter does not start a polling loop or call Jev; its caller controls cadence and can inject a `featuredEventId` for the one selected game.
+1. Install the dependencies and authenticate with Convex using the official CLI:
 
-The adapter sends `jev-gamecast/0.1 (+project URL)`, applies a bounded timeout and retry budget, and never calls ESPN from the React bundle. It rejects duplicate and out-of-order play updates, marks old or failed cached data `STALE`, and uses the deterministic fixture source as `REPLAY` fallback when configured. ESPN is undocumented and fields such as possession, down/distance, clock, and play timestamps may be absent; missing values remain empty or null rather than being invented.
+   ```bash
+   npx convex dev
+   ```
 
-Production use still requires an external server/worker runtime, provider-rights review, and deployment-runtime testing. The checked-in app remains offline and continues to render the replay fixture.
+   Choose or create the project when prompted. This creates/updates the deployment configuration and regenerates `convex/_generated/` from the checked-in schema/functions. Keep generated output in the deployment branch and re-run `npm run typecheck:convex`.
 
-## Stage 3/4 integration boundary
+2. Set the server environment variables in the Convex/Vercel operator environments as appropriate. Set the same high-entropy `CONVEX_WRITE_SECRET` in Convex and the server runtime. Never put `TYPESAFE_API_KEY` or `CONVEX_WRITE_SECRET` in a `VITE_*` variable:
 
-`src/server/orchestrator.ts` exposes a single bounded `runForecastCycle` invocation and `createForecastCycleHandler`. One invocation polls ESPN once, creates one normalized forecast job, runs `ForecastWorker`, and writes one idempotent `ForecastRecord`. It never starts a long-lived loop; an external scheduler owns cadence, process lifetime, retries across invocations, and overlap policy. Live invocations share a process-local boundary by default; deployments must inject the same durable `ForecastRecordStore` across processes/restarts (and may set `budgetScope`, defaulting to `gameId`). Its atomic budget reservation enforces cadence, rolling rate, lifetime request, and spend limits across workers. Reservations are consumed after a provider call, released only when no provider call was made, and remain fail-closed if settlement is unavailable.`
+   ```text
+   CONVEX_URL=https://<deployment>.convex.cloud
+   TYPESAFE_API_KEY=<operator-provisioned-secret>
+   CRON_SECRET=<operator-provisioned-secret>
+   CONVEX_WRITE_SECRET=<operator-provisioned-secret>
+   FEATURED_GAME_ID=<one ESPN NFL event id>
+   LIVE_PUBLIC_ORIGIN=https://<public-site-origin>
+   ```
 
-`src/shared/forecastRecords.ts` defines the server/browser-safe record contract. `src/persistence/convexBoundary.ts` describes the typed Convex query/mutation/schema boundary without importing Convex, including atomic budget reservation/settlement. `src/persistence/forecastStore.ts` provides an atomic in-memory `putIfAbsent`, claim, and budget store for tests and no-config local replay. Claims are deliberately non-reclaimable: `claimLeaseMs` is retained for wire compatibility but expiry never permits another provider invocation while the original claim is unfinalized. Actual Convex files and deployment configuration are intentionally not included because this repository has no Convex package/project binding or credentials.
+3. Deploy the Convex functions with the official command (`npx convex deploy`) and verify the generated API/function metadata in the deployment dashboard. The `npx convex dev`/`deploy` steps require an operator login and are intentionally not run in CI without credentials.
 
-`src/browser/forecastRead.ts` reads cached and replay records through the shared boundary and maps successful records to the existing `ForecastPoint` contract. It does not import `src/server/*`, the TypeSafe SDK, ESPN, or credentials. All readers can therefore consume the same persisted record instead of making provider calls.
+## Vercel deployment and live runbook (operator step)
 
-For local no-config execution, use the explicit `mock` mode, or `replay` mode without supplied records; both use the in-memory store and deterministic local provider (the latter labels the persisted source `replay`). Live mode fails closed and persists a configuration error when `TYPESAFE_API_KEY` is absent; it never silently falls back to mock or replay. No Vercel/Convex deployment is claimed by this repository.
+1. Import the repository into Vercel as a Vite project and configure Node 20+ serverless functions.
+2. Add `CONVEX_URL`, `TYPESAFE_API_KEY`, `CRON_SECRET`, `CONVEX_WRITE_SECRET`, `FEATURED_GAME_ID`, and `LIVE_PUBLIC_ORIGIN` as server-side environment variables. Add `VITE_GAMECAST_MODE=live` and `VITE_FEATURED_GAME_ID=<same featured id>` only when the Convex deployment and cron route have been verified.
+3. Deploy. Vercel reads `vercel.json` and schedules `/api/cron/forecast` every two minutes. The route accepts `POST` only and requires `Authorization: Bearer $CRON_SECRET` (or the equivalent `x-cron-secret` header for a controlled smoke test).
+4. Verify the public path with `GET /api/gamecast?gameId=<featured id>` and inspect the returned `mode`, `status`, and persisted record identity. Verify one cron cycle through the protected route. Never use a browser call to ESPN or TypeSafe as a smoke test.
+5. Keep live mode off until provider rights, TypeSafe spend limits, Convex deployment, and Vercel cron provisioning are approved. If any required live variable is absent, the cron route returns `503` and the browser remains on replay.
+
+The route-level read throttle and cron overlap flag are process-local optimizations only; Vercel can run multiple instances. Durable request, rate, spend, and claim limits must remain enforced by the Convex boundary, not by those process-local flags.
+
+The public route intentionally serves one featured game and at most 128 persisted records. It does not expose provider response bodies, credentials, personal data, betting/trading/voting/fantasy semantics, or future/post-event fields. Forecast probabilities are canonical unit values in storage and are converted to display percentages once in the browser; they are fictional experimental forecasts, not sportsbook odds.
+
+## Safety boundaries
+
+- Server-only modules contain the ESPN adapter, TypeSafe SDK, `TYPESAFE_API_KEY`, and the Convex HTTP client.
+- The Vite build fails if server markers (`@typesafe-ai/sdk`, `TYPESAFE_API_KEY`, TypeSafe endpoint, `convex/browser`, or `CONVEX_URL`) enter a browser chunk.
+- Missing keys, invalid Convex URLs, unauthorized cron requests, unsupported game IDs, provider errors, stale ESPN data, and durable read failures fail closed. They do not silently become live success.
+- Convex records are keyed by `gameId + providerEventId + stateHash` through the worker idempotency key. Forecast documents are immutable; claims are not reclaimed by nominal lease expiry; budget settlement is idempotent.
+- Replay behavior and controls remain deterministic and credential-free.

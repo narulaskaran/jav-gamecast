@@ -1,6 +1,6 @@
 export type ForecastChoice = 'home' | 'away' | 'tie'
 export type ForecastRecordStatus = 'success' | 'error' | 'limited'
-export type ForecastRecordSource = 'live' | 'mock' | 'replay'
+export type ForecastRecordSource = 'live' | 'mock' | 'replay' | 'stale'
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
 export interface ForecastProbabilities {

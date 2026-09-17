@@ -15,7 +15,7 @@ interface AppProps {
 const formatTimestamp = (timestamp: string) => new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(new Date(timestamp))
 const choiceLabel = (choice: 'home' | 'away' | 'tie', game: GameState) => choice === 'home' ? game.homeTeam : choice === 'away' ? game.awayTeam : 'Tie'
 const titleCase = (value: string) => value[0].toUpperCase() + value.slice(1)
-const feedStatuses: readonly FeedStatus[] = ['REPLAY', 'LIVE', 'STALE']
+const feedStatuses: readonly FeedStatus[] = ['REPLAY', 'LIVE', 'STALE', 'ERROR', 'LIMITED', 'MOCK']
 
 const StatusPill = ({ label, active = false }: { label: FeedStatus; active?: boolean }) => <span className={`status-pill status-${label.toLowerCase()} ${active ? 'is-current' : ''}`} aria-current={active ? 'true' : undefined}><span className="status-dot" />{label}</span>
 
@@ -26,7 +26,7 @@ export const App = ({ forecastSource = defaultForecastSource, gameStateSource = 
   const point = points[pointIndex]
   const snapshot = gameStateSource.getSnapshotAt(pointIndex)
   const game = snapshot.state
-  const status = snapshot.status
+  const status = 'feedStatus' in forecastSource && forecastSource.feedStatus ? forecastSource.feedStatus : snapshot.status
   const awayCode = teamCode(game.awayTeam)
   const homeCode = teamCode(game.homeTeam)
   const updateAge = pointIndex === 0 ? 'opening point' : `${Math.round(point.elapsedSeconds / 60)} min into replay`
@@ -54,7 +54,7 @@ export const App = ({ forecastSource = defaultForecastSource, gameStateSource = 
       <header className="site-header">
         <a className="brand" href="/" aria-label="Jev Gamecast home"><span className="brand-mark">J</span><span>JEV / GAMECAST</span></a>
         <p className="positioning">Jev forecasts this football game</p>
-        <span className="stage-label">STAGE 01 <span aria-hidden="true">·</span> REPLAY</span>
+        <span className="stage-label">STAGE 01 <span aria-hidden="true">·</span> {status}</span>
       </header>
 
       <section className="intro" aria-labelledby="page-title">
@@ -66,7 +66,7 @@ export const App = ({ forecastSource = defaultForecastSource, gameStateSource = 
       </section>
 
       <section className="game-card" aria-label="Featured game">
-        <div className="game-card-top"><div className="game-ident"><span className="live-dot" /> FEATURED REPLAY <span className="muted-divider">/</span> SYNTHETIC FIXTURE</div><div className="status-pills">{feedStatuses.map((label) => <StatusPill key={label} label={label} active={label === status} />)}</div></div>
+        <div className="game-card-top"><div className="game-ident"><span className="live-dot" /> FEATURED {status} <span className="muted-divider">/</span> {status === 'LIVE' ? 'ESPN FEED' : 'SYNTHETIC FIXTURE'}</div><div className="status-pills">{feedStatuses.map((label) => <StatusPill key={label} label={label} active={label === status} />)}</div></div>
         <div className="matchup">
           <div className="team team-away"><span className="team-code">{awayCode}</span><div><span className="team-label">AWAY</span><strong>{game.awayTeam}</strong></div></div>
           <div className="scoreboard"><div className="score"><b>{game.awayScore}</b><span>—</span><b>{game.homeScore}</b></div><div className="score-status">{game.status === 'final' ? 'FINAL' : `${game.quarter} · ${game.clock}`}</div></div>
@@ -96,7 +96,7 @@ export const App = ({ forecastSource = defaultForecastSource, gameStateSource = 
         <div className="probabilities"><span className="eyebrow">Distribution</span><div><span><i className="home-swatch" /> {homeCode} <b>{point.homeProbability}%</b></span><span><i className="away-swatch" /> {awayCode} <b>{point.awayProbability}%</b></span><span><i className="tie-swatch" /> TIE <b>{point.tieProbability}%</b></span></div></div>
       </section>
 
-      <footer className="disclosure"><span><b>JEV FORECAST / EXPERIMENTAL</b> · Synthetic sanitized fixture · No live feed or inference call</span><span>State: <strong>{status}</strong> · Updated {formatTimestamp(point.timestamp)} UTC</span></footer>
+      <footer className="disclosure"><span><b>JEV FORECAST / EXPERIMENTAL</b> · {status === 'LIVE' ? 'Live ESPN snapshot and forecast' : 'Synthetic sanitized fixture · No live inference call'}</span><span>State: <strong>{status}</strong> · Updated {formatTimestamp(point.timestamp)} UTC</span></footer>
     </main>
   )
 }

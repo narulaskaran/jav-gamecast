@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
-const SERVER_ONLY_MARKERS = ['@typesafe-ai/sdk', 'TYPESAFE_API_KEY', 'https://api.typesafe.ai'] as const
+const SERVER_ONLY_MARKERS = ['@typesafe-ai/sdk', 'TYPESAFE_API_KEY', 'https://api.typesafe.ai', 'convex/browser', 'CONVEX_URL'] as const
 
 const browserServerBoundaryGuard = (): Plugin => ({
   name: 'browser-server-boundary-guard',

@@ -21,7 +21,7 @@ export const forecastRecordSchema = {
   rawNormalizedState: 'json',
   model: 'string',
   status: 'success | error | limited',
-  source: 'live | mock | replay',
+  source: 'live | mock | replay | stale',
   requestedAt: 'ISO timestamp',
   completedAt: 'ISO timestamp',
   latencyMs: 'number',

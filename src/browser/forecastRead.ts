@@ -1,7 +1,9 @@
-import type { ForecastPoint, ForecastSource } from '../types'
+import type { FeedStatus, ForecastPoint, ForecastSource } from '../types'
 import type { ForecastRecord, ForecastRecordReadBoundary } from '../shared/forecastRecords'
 
 export interface BrowserForecastReadPath {
+  readonly mode?: 'live'
+  readonly getStatus?: () => FeedStatus
   getCachedForecast(idempotencyKey: string): Promise<ForecastRecord | undefined>
   getReplayForecasts(gameId: string): Promise<readonly ForecastRecord[]>
 }
@@ -68,24 +70,35 @@ export const forecastRecordsToPoints = (records: readonly ForecastRecord[]): rea
 }
 
 export interface BrowserForecastSource extends ForecastSource {
+  readonly mode?: 'live'
+  readonly feedStatus?: FeedStatus
   refresh(): Promise<readonly ForecastPoint[]>
 }
 
 export interface BrowserForecastSourceOptions {
-  readPath: Pick<BrowserForecastReadPath, 'getReplayForecasts'>
+  readPath: Pick<BrowserForecastReadPath, 'getReplayForecasts' | 'mode' | 'getStatus'>
   gameId: string
   fallback: readonly ForecastPoint[]
 }
 
 export const createBrowserForecastSource = ({ readPath, gameId, fallback }: BrowserForecastSourceOptions): BrowserForecastSource => {
   let points = fallback
+  let feedStatus: FeedStatus = 'REPLAY'
 
   return {
+    ...(readPath.mode === 'live' ? { mode: 'live' as const } : {}),
+    get feedStatus() { return feedStatus },
     getPoints: () => points,
     async refresh() {
-      const nextPoints = forecastRecordsToPoints(await readPath.getReplayForecasts(gameId))
-      if (nextPoints.length > 0) points = nextPoints
-      return points
+      try {
+        const nextPoints = forecastRecordsToPoints(await readPath.getReplayForecasts(gameId))
+        if (nextPoints.length > 0) points = nextPoints
+        feedStatus = readPath.getStatus?.() ?? (readPath.mode === 'live' ? 'LIVE' : 'REPLAY')
+        return points
+      } catch (error) {
+        if (readPath.mode === 'live') feedStatus = 'STALE'
+        throw error
+      }
     },
   }
 }

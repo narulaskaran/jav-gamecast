@@ -1,6 +1,6 @@
 export type ForecastChoice = 'home' | 'away' | 'tie'
 export type GameStatus = 'quarter' | 'halftime' | 'final'
-export type FeedStatus = 'REPLAY' | 'LIVE' | 'STALE'
+export type FeedStatus = 'REPLAY' | 'LIVE' | 'STALE' | 'ERROR' | 'LIMITED' | 'MOCK'
 
 export interface GameState {
   id: string
