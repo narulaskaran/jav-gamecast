@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const browserEntryFiles = ['src/main.tsx', 'src/App.tsx', 'src/sources.ts', 'src/fixture.ts']
+const browserEntryFiles = ['src/main.tsx', 'src/App.tsx', 'src/sources.ts', 'src/fixture.ts', 'src/browser/forecastRead.ts']
 const browserSource = browserEntryFiles.map((file) => readFileSync(file, 'utf8')).join('\n')
 
 describe('browser/server boundary', () => {

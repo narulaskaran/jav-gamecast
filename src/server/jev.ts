@@ -112,6 +112,13 @@ const serverEnv = (name: string): string | undefined => {
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
+export class TypeSafeConfigurationError extends Error {
+  constructor(message = 'TYPESAFE_API_KEY is required for live Jev forecasts') {
+    super(message)
+    this.name = 'TypeSafeConfigurationError'
+  }
+}
+
 export interface TypeSafeSdkConfigOptions {
   apiKey?: string
   baseURL?: string
@@ -162,6 +169,9 @@ export interface TypeSafeJevProviderOptions extends TypeSafeSdkConfigOptions {
   client?: TypeSafeClientBoundary
 }
 
+export const hasTypeSafeApiKey = (options: TypeSafeSdkConfigOptions = {}): boolean =>
+  Boolean((options.apiKey ?? serverEnv('TYPESAFE_API_KEY'))?.trim())
+
 const sdkBoundary = (client: TypeSafeClient): TypeSafeClientBoundary => ({
   systemOne: (request, options) => client.systemOne(request, options),
 })
@@ -177,6 +187,9 @@ export class TypeSafeJevProvider implements JevProvider {
   }
 
   async forecast(request: JevProviderRequest): Promise<JevProviderResult> {
+    if (!this.client && !this.initializedClient && !hasTypeSafeApiKey(this.sdkOptions)) {
+      throw new TypeSafeConfigurationError()
+    }
     const client = this.client ?? this.initializedClient ?? (this.initializedClient = sdkBoundary(new TypeSafeClient(createTypeSafeSdkConfig(this.sdkOptions))))
     const response = await client.systemOne(buildJevRequest(request.state), {
       headers: { 'Idempotency-Key': request.idempotencyKey },

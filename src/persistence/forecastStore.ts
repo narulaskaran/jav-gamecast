@@ -1,0 +1,40 @@
+import type { ForecastRecord, ForecastRecordStore } from '../shared/forecastRecords'
+import type { ForecastFunctionBoundary } from './convexBoundary'
+
+/** Local deterministic persistence for replay, tests, and no-config development. */
+export class InMemoryForecastStore implements ForecastRecordStore, ForecastFunctionBoundary {
+  private readonly records = new Map<string, ForecastRecord>()
+
+  get(idempotencyKey: string): ForecastRecord | undefined {
+    return this.records.get(idempotencyKey)
+  }
+
+  put(record: ForecastRecord): void {
+    this.records.set(record.idempotencyKey, record)
+  }
+
+  putIfAbsent(record: ForecastRecord): ForecastRecord {
+    const existing = this.records.get(record.idempotencyKey)
+    if (existing) return existing
+    this.records.set(record.idempotencyKey, record)
+    return record
+  }
+
+  putForecastIfAbsent(record: ForecastRecord): ForecastRecord {
+    return this.putIfAbsent(record)
+  }
+
+  getForecastByIdempotencyKey(idempotencyKey: string): ForecastRecord | undefined {
+    return this.get(idempotencyKey)
+  }
+
+  listForecastsByGame(gameId: string): readonly ForecastRecord[] {
+    return [...this.records.values()]
+      .filter((record) => record.gameId === gameId)
+      .sort((left, right) => left.requestedAt.localeCompare(right.requestedAt) || left.idempotencyKey.localeCompare(right.idempotencyKey))
+  }
+
+  size(): number {
+    return this.records.size
+  }
+}

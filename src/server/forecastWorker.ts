@@ -6,19 +6,30 @@ import {
 } from '@typesafe-ai/sdk'
 import {
   JEV_MODEL,
+  TypeSafeConfigurationError,
   TypeSafeJevProvider,
   type ChoiceAnswer,
   type JevProvider,
   type JevProviderResult,
   sha256Hex,
 } from './jev'
-import type { JsonValue, TypeSafeState } from './jev'
+import type { TypeSafeState } from './jev'
+import type {
+  ForecastErrorMetadata,
+  ForecastRecord,
+  ForecastRecordSource,
+  ForecastRecordStatus,
+  ForecastRecordStore,
+  JsonValue,
+} from '../shared/forecastRecords'
+import { InMemoryForecastStore } from '../persistence/forecastStore'
 
 export type { JevProvider } from './jev'
+export type { ForecastErrorMetadata, ForecastRecord, ForecastRecordSource, ForecastRecordStatus, ForecastRecordStore } from '../shared/forecastRecords'
+export { InMemoryForecastStore } from '../persistence/forecastStore'
 
 export type ForecastMode = 'live' | 'mock' | 'replay'
-export type ForecastRecordStatus = 'success' | 'error' | 'limited'
-export type ForecastRecordSource = 'live' | 'mock' | 'replay'
+export type ForecastStore = ForecastRecordStore
 
 export interface ForecastJob {
   gameId: string
@@ -31,52 +42,6 @@ export interface NormalizedForecastJob extends Omit<ForecastJob, 'state'> {
   state: TypeSafeState
   stateHash: string
   idempotencyKey: string
-}
-
-export interface ForecastErrorMetadata {
-  code: string
-  retryable: boolean
-  providerStatus?: number
-}
-
-export interface ForecastRecord {
-  idempotencyKey: string
-  gameId: string
-  providerEventId: string
-  providerPlayId?: string
-  stateHash: string
-  rawNormalizedState: TypeSafeState
-  model: string
-  status: ForecastRecordStatus
-  source: ForecastRecordSource
-  requestedAt: string
-  completedAt: string
-  latencyMs: number
-  choice?: ChoiceAnswer['choice']
-  probabilities?: ChoiceAnswer['probabilities']
-  confidence?: number
-  error?: ForecastErrorMetadata
-}
-
-export interface ForecastStore {
-  get(idempotencyKey: string): ForecastRecord | undefined
-  put(record: ForecastRecord): void
-}
-
-export class InMemoryForecastStore implements ForecastStore {
-  private readonly records = new Map<string, ForecastRecord>()
-
-  get(idempotencyKey: string): ForecastRecord | undefined {
-    return this.records.get(idempotencyKey)
-  }
-
-  put(record: ForecastRecord): void {
-    this.records.set(record.idempotencyKey, record)
-  }
-
-  size(): number {
-    return this.records.size
-  }
 }
 
 export interface ForecastLimits {
@@ -161,7 +126,7 @@ const errorMetadata = (error: unknown): ForecastErrorMetadata => {
     return { code: `PROVIDER_${error.status}`, providerStatus: error.status, retryable: error.status >= 500 }
   }
   if (error instanceof APIConnectionError) return { code: 'CONNECTION', retryable: true }
-  if (error instanceof TypeSafeError) return { code: 'CONFIGURATION', retryable: false }
+  if (error instanceof TypeSafeError || error instanceof TypeSafeConfigurationError) return { code: 'CONFIGURATION', retryable: false }
   if (error instanceof Error && error.message.includes('Choice')) return { code: 'MALFORMED_RESPONSE', retryable: false }
   return { code: 'PROVIDER_ERROR', retryable: false }
 }
@@ -272,7 +237,7 @@ export class ForecastWorker {
 
   async forecast(input: ForecastJob): Promise<ForecastResult> {
     const job = normalizeForecastJob(input)
-    const cached = this.store.get(job.idempotencyKey)
+    const cached = await this.store.get(job.idempotencyKey)
     if (cached) return { record: cached, cacheHit: true }
 
     const pending = this.inFlight.get(job.idempotencyKey)
@@ -294,7 +259,7 @@ export class ForecastWorker {
 
     const currentTime = this.now()
     const limited = this.limitRecord(job, currentTime)
-    if (limited) return { record: limited, cacheHit: false }
+    if (limited) return { record: await this.persistRecord(limited), cacheHit: false }
 
     const requestedAt = nowIso(currentTime)
     this.lastAttemptAt = currentTime
@@ -323,8 +288,8 @@ export class ForecastWorker {
         latencyMs: Math.max(0, completedAtMs - startedAt),
         ...answerRecordFields(result.answer),
       }
-      this.store.put(record)
-      return { record, cacheHit: false }
+      const persisted = await this.persistRecord(record)
+      return { record: persisted, cacheHit: persisted !== record }
     } catch (error) {
       const completedAtMs = this.now()
       const record: ForecastRecord = {
@@ -342,10 +307,10 @@ export class ForecastWorker {
           latencyMs: Math.max(0, completedAtMs - startedAt),
           error: errorMetadata(error),
       }
-      this.store.put(record)
+      const persisted = await this.persistRecord(record)
       return {
-        record,
-        cacheHit: false,
+        record: persisted,
+        cacheHit: persisted !== record,
       }
     }
   }
@@ -357,6 +322,12 @@ export class ForecastWorker {
       return this.replayProvider
     }
     return this.provider ?? new TypeSafeJevProvider()
+  }
+
+  private async persistRecord(record: ForecastRecord): Promise<ForecastRecord> {
+    if (this.store.putIfAbsent) return await this.store.putIfAbsent(record)
+    await this.store.put(record)
+    return record
   }
 
   private limitRecord(job: NormalizedForecastJob, currentTime: number): ForecastRecord | undefined {

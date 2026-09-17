@@ -35,3 +35,13 @@ Live mode is fail-closed when the key or provider is unavailable. The worker app
 The adapter sends `jev-gamecast/0.1 (+project URL)`, applies a bounded timeout and retry budget, and never calls ESPN from the React bundle. It rejects duplicate and out-of-order play updates, marks old or failed cached data `STALE`, and uses the deterministic fixture source as `REPLAY` fallback when configured. ESPN is undocumented and fields such as possession, down/distance, clock, and play timestamps may be absent; missing values remain empty or null rather than being invented.
 
 Production use still requires an external server/worker runtime, provider-rights review, and deployment-runtime testing. The checked-in app remains offline and continues to render the replay fixture.
+
+## Stage 3/4 integration boundary
+
+`src/server/orchestrator.ts` exposes a single bounded `runForecastCycle` invocation and `createForecastCycleHandler`. One invocation polls ESPN once, creates one normalized forecast job, runs `ForecastWorker`, and writes one idempotent `ForecastRecord`. It never starts a long-lived loop; an external scheduler owns cadence, process lifetime, retries across invocations, and overlap policy.
+
+`src/shared/forecastRecords.ts` defines the server/browser-safe record contract. `src/persistence/convexBoundary.ts` describes the typed Convex query/mutation/schema boundary without importing Convex. `src/persistence/forecastStore.ts` provides an atomic in-memory `putIfAbsent` store for tests and no-config local replay. Actual Convex files and deployment configuration are intentionally not included because this repository has no Convex package/project binding or credentials.
+
+`src/browser/forecastRead.ts` reads cached and replay records through the shared boundary and maps successful records to the existing `ForecastPoint` contract. It does not import `src/server/*`, the TypeSafe SDK, ESPN, or credentials. All readers can therefore consume the same persisted record instead of making provider calls.
+
+For local no-config execution, use the explicit `mock` mode, or `replay` mode without supplied records; both use the in-memory store and deterministic local provider (the latter labels the persisted source `replay`). Live mode fails closed and persists a configuration error when `TYPESAFE_API_KEY` is absent; it never silently falls back to mock or replay. No Vercel/Convex deployment is claimed by this repository.
