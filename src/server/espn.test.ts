@@ -147,7 +147,7 @@ describe('normalizeEspnGameState', () => {
 })
 
 describe('EspnGameStateSource', () => {
-  it('uses the documented endpoints, descriptive user agent, bounded retry, and live status', async () => {
+  it('uses the configured endpoints, descriptive user agent, bounded retry, and live status', async () => {
     const { fetch, calls } = fetchSequence([
       response({}, 503),
       response(scoreboard()),
@@ -167,6 +167,63 @@ describe('EspnGameStateSource', () => {
       ESPN_ENDPOINTS.plays('401999001'),
     ])
     expect(new Headers(calls[0].init?.headers).get('user-agent')).toBe('jev-gamecast/0.1 (+project URL)')
+  })
+
+  it('keeps the configured featured event identity when multiple scoreboard events are live', async () => {
+    const firstEvent = scoreboard().events[0]
+    const featuredScoreboard = {
+      events: [
+        firstEvent,
+        {
+          ...firstEvent,
+          id: '401999002',
+          name: 'River Owls at Mountain Bears',
+          competitions: [{
+            ...firstEvent.competitions[0],
+            id: '401999002',
+            competitors: [
+              { id: '30', homeAway: 'home', score: '7', team: { id: '30', abbreviation: 'BEA', displayName: 'Mountain Bears' } },
+              { id: '40', homeAway: 'away', score: '3', team: { id: '40', abbreviation: 'OWL', displayName: 'River Owls' } },
+            ],
+          }],
+        },
+      ],
+    }
+    const featuredSummary = {
+      ...summary(),
+      header: {
+        ...summary().header,
+        id: '401999002',
+        competitions: [{
+          ...summary().header.competitions[0],
+          competitors: [
+            { id: '30', homeAway: 'home', score: '7', team: { id: '30', abbreviation: 'BEA', displayName: 'Mountain Bears' } },
+            { id: '40', homeAway: 'away', score: '3', team: { id: '40', abbreviation: 'OWL', displayName: 'River Owls' } },
+          ],
+        }],
+      },
+      plays: [{ ...summary().plays[0], id: '9102', sequenceNumber: 8, text: 'River Owls punt', date: '2026-09-17T03:40:00Z' }],
+    }
+    const featuredPlays = {
+      items: [{ ...corePlays.items[0], id: '9102', sequenceNumber: 8, text: 'River Owls punt', date: '2026-09-17T03:40:00Z' }],
+    }
+    const { fetch } = fetchSequence([
+      response(featuredScoreboard), response(featuredSummary), response(featuredPlays),
+    ])
+    const source = new EspnGameStateSource({
+      ...adapterOptions(fetch),
+      featuredEventId: '401999002',
+    })
+
+    const snapshot = await source.poll()
+
+    expect(snapshot.state).toEqual(expect.objectContaining({
+      eventId: '401999002',
+      id: '401999002',
+      homeTeam: 'Mountain Bears',
+      awayTeam: 'River Owls',
+      playId: '9102',
+    }))
   })
 
   it('ignores duplicate and out-of-order play updates', async () => {
@@ -198,6 +255,39 @@ describe('EspnGameStateSource', () => {
       timestamp: first.state.timestamp,
       sourceStatus: 'STALE',
     }))
+  })
+
+  it('does not replace a newer cache when an older payload is also beyond the stale threshold', async () => {
+    const freshPlays = {
+      items: [{ ...corePlays.items[0], id: '9003', sequenceNumber: 23, date: '2026-09-17T03:40:55Z', text: 'Fresh play' }],
+    }
+    const oldPlays = {
+      items: [{ ...corePlays.items[0], id: '9001', sequenceNumber: 21, date: '2026-09-17T03:39:00Z', text: 'Old play' }],
+    }
+    const { fetch } = fetchSequence([
+      response(scoreboard()), response(summary()), response(freshPlays),
+      response(scoreboard()), response(summary()), response(oldPlays),
+    ])
+    const source = new EspnGameStateSource({
+      ...adapterOptions(fetch),
+      staleAfterMs: 30_000,
+      now: () => Date.parse('2026-09-17T03:41:00Z'),
+    })
+
+    const fresh = await source.poll()
+    const old = await source.poll()
+
+    expect(fresh.status).toBe('LIVE')
+    expect(old).toEqual({
+      state: expect.objectContaining({
+        eventId: fresh.state.eventId,
+        playId: fresh.state.playId,
+        timestamp: fresh.state.timestamp,
+        sourceStatus: 'STALE',
+      }),
+      status: 'STALE',
+    })
+    expect(source.getCachedSnapshot()).toEqual(fresh)
   })
 
   it('returns cached state as stale after failures and deterministic replay when uncached', async () => {
@@ -246,6 +336,20 @@ describe('EspnGameStateSource', () => {
 
     expect(snapshot.status).toBe('REPLAY')
     expect(timeoutFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects non-finite, fractional, and out-of-range retry policy configuration', () => {
+    const invalidOptions = [
+      ['timeoutMs', { timeoutMs: Infinity }],
+      ['maxRetries', { maxRetries: Infinity }],
+      ['maxRetries', { maxRetries: 1.5 }],
+      ['backoffMs', { backoffMs: Number.NaN }],
+      ['backoffMs', { backoffMs: -1 }],
+    ] as const
+
+    for (const [name, options] of invalidOptions) {
+      expect(() => new EspnGameStateSource(options)).toThrow(name)
+    }
   })
 
   it('marks an old but valid feed stale without inventing a current timestamp', async () => {

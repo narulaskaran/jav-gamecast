@@ -14,6 +14,13 @@ export const DEFAULT_ESPN_OPTIONS = {
   userAgent: 'jev-gamecast/0.1 (+project URL)',
 } as const
 
+export const ESPN_CONFIG_LIMITS = {
+  timeoutMs: { min: 1, max: 60_000 },
+  maxRetries: { min: 0, max: 5 },
+  backoffMs: { min: 0, max: 30_000 },
+  staleAfterMs: { min: 1, max: 86_400_000 },
+} as const
+
 export type EspnFetch = (input: string, init?: RequestInit) => Promise<Response>
 export type Sleep = (milliseconds: number) => Promise<void>
 
@@ -21,6 +28,7 @@ export interface EspnPayloads {
   scoreboard: unknown
   summary: unknown
   plays: unknown
+  preferredEventId?: string
 }
 
 export interface EspnGameStateSourceOptions {
@@ -156,7 +164,7 @@ const latestTimestamp = (
 }
 
 export const normalizeEspnGameState = (payloads: EspnPayloads): GameState => {
-  const event = eventFromScoreboard(payloads.scoreboard)
+  const event = eventFromScoreboard(payloads.scoreboard, payloads.preferredEventId)
   const eventId = stringValue(event.id)
   if (!eventId) throw new Error('ESPN event has no stable event ID')
   const competition = competitionFrom(event, payloads.summary)
@@ -207,6 +215,21 @@ export const normalizeEspnGameState = (payloads: EspnPayloads): GameState => {
 const defaultFetch: EspnFetch = (input, init) => globalThis.fetch(input, init)
 const defaultSleep: Sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
+const boundedOption = (
+  name: string,
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+  integer = false,
+): number => {
+  const candidate = value ?? fallback
+  if (!Number.isFinite(candidate) || (integer && !Number.isInteger(candidate)) || candidate < min || candidate > max) {
+    throw new RangeError(`${name} must be a finite number between ${min} and ${max}`)
+  }
+  return candidate
+}
+
 const retryableStatus = (status: number): boolean => status === 408 || status === 425 || status === 429 || status >= 500
 const stateVersion = (state: GameState): number => state.sequenceNumber ?? Date.parse(state.timestamp)
 const sameState = (left: GameState, right: GameState): boolean =>
@@ -232,10 +255,35 @@ export class EspnGameStateSource implements LiveGameStateSource {
     this.fetch = options.fetch ?? defaultFetch
     this.now = options.now ?? Date.now
     this.sleep = options.sleep ?? defaultSleep
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_ESPN_OPTIONS.timeoutMs
-    this.maxRetries = options.maxRetries ?? DEFAULT_ESPN_OPTIONS.maxRetries
-    this.backoffMs = options.backoffMs ?? DEFAULT_ESPN_OPTIONS.backoffMs
-    this.staleAfterMs = options.staleAfterMs ?? DEFAULT_ESPN_OPTIONS.staleAfterMs
+    this.timeoutMs = boundedOption(
+      'timeoutMs',
+      options.timeoutMs,
+      DEFAULT_ESPN_OPTIONS.timeoutMs,
+      ESPN_CONFIG_LIMITS.timeoutMs.min,
+      ESPN_CONFIG_LIMITS.timeoutMs.max,
+    )
+    this.maxRetries = boundedOption(
+      'maxRetries',
+      options.maxRetries,
+      DEFAULT_ESPN_OPTIONS.maxRetries,
+      ESPN_CONFIG_LIMITS.maxRetries.min,
+      ESPN_CONFIG_LIMITS.maxRetries.max,
+      true,
+    )
+    this.backoffMs = boundedOption(
+      'backoffMs',
+      options.backoffMs,
+      DEFAULT_ESPN_OPTIONS.backoffMs,
+      ESPN_CONFIG_LIMITS.backoffMs.min,
+      ESPN_CONFIG_LIMITS.backoffMs.max,
+    )
+    this.staleAfterMs = boundedOption(
+      'staleAfterMs',
+      options.staleAfterMs,
+      DEFAULT_ESPN_OPTIONS.staleAfterMs,
+      ESPN_CONFIG_LIMITS.staleAfterMs.min,
+      ESPN_CONFIG_LIMITS.staleAfterMs.max,
+    )
     this.userAgent = options.userAgent ?? DEFAULT_ESPN_OPTIONS.userAgent
     this.featuredEventId = options.featuredEventId
     this.replay = options.replay
@@ -251,7 +299,7 @@ export class EspnGameStateSource implements LiveGameStateSource {
         this.requestJson(ESPN_ENDPOINTS.summary(eventId)),
         this.requestJson(ESPN_ENDPOINTS.plays(eventId)),
       ])
-      return this.accept(normalizeEspnGameState({ scoreboard, summary, plays }))
+      return this.accept(normalizeEspnGameState({ scoreboard, summary, plays, preferredEventId: eventId }))
     } catch {
       return this.failureSnapshot()
     }
@@ -296,13 +344,6 @@ export class EspnGameStateSource implements LiveGameStateSource {
   }
 
   private accept(state: GameState): GameStateSnapshot {
-    const age = this.now() - Date.parse(state.feedTimestamp ?? state.timestamp)
-    if (age > this.staleAfterMs) {
-      const snapshot = { state: withStatus(state, 'STALE'), status: 'STALE' as const }
-      this.cached = snapshot
-      return snapshot
-    }
-
     const previous = this.cached
     if (previous && previous.state.eventId === state.eventId) {
       const currentVersion = stateVersion(previous.state)
@@ -310,6 +351,18 @@ export class EspnGameStateSource implements LiveGameStateSource {
       if (incomingVersion < currentVersion) {
         return { state: withStatus(previous.state, 'STALE'), status: 'STALE' }
       }
+    }
+
+    const age = this.now() - Date.parse(state.feedTimestamp ?? state.timestamp)
+    if (age > this.staleAfterMs) {
+      const snapshot = { state: withStatus(state, 'STALE'), status: 'STALE' as const }
+      this.cached = snapshot
+      return snapshot
+    }
+
+    if (previous && previous.state.eventId === state.eventId) {
+      const currentVersion = stateVersion(previous.state)
+      const incomingVersion = stateVersion(state)
       if (incomingVersion === currentVersion || sameState(previous.state, state)) {
         if (previous.status === 'STALE') {
           const snapshot = { state: withStatus(state, 'LIVE'), status: 'LIVE' as const }
