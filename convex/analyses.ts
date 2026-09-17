@@ -10,6 +10,8 @@ const MAX_QUERY_LENGTH = 20_000
 const analysisArgs = {
   analysisId: v.string(),
   fixtureId: v.string(),
+  datasetId: v.optional(v.string()),
+  sourceType: v.optional(v.union(v.literal('fixture'), v.literal('upload'), v.literal('public_url'))),
   query: v.string(),
   status: v.union(v.literal('queued'), v.literal('running'), v.literal('complete'), v.literal('error')),
   createdAt: v.string(),
@@ -20,6 +22,8 @@ const analysisArgs = {
     completedCalls: v.number(),
     totalCalls: v.number(),
   }),
+  classes: v.optional(v.array(v.string())),
+  columns: v.optional(v.array(v.string())),
   currentFixtureRow: v.optional(v.any()),
   error: v.optional(v.object({ code: v.string(), retryable: v.boolean() })),
   resultRows: v.array(v.any()),
@@ -30,11 +34,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 type DurableSnapshot = {
   analysisId: string
   fixtureId: string
+  datasetId?: string
+  sourceType?: 'fixture' | 'upload' | 'public_url'
   query: string
   status: 'queued' | 'running' | 'complete' | 'error'
   createdAt: string
   updatedAt: string
   progress: { completedRows: number; totalRows: number; completedCalls: number; totalCalls: number }
+  classes?: string[]
+  columns?: string[]
   currentFixtureRow?: unknown
   error?: { code: string; retryable: boolean }
   resultRows: unknown[]
@@ -78,21 +86,29 @@ const validateSnapshot: (snapshot: unknown) => asserts snapshot is DurableSnapsh
 const snapshotDocument = (snapshot: {
   analysisId: string
   fixtureId: string
+  datasetId?: string
+  sourceType?: 'fixture' | 'upload' | 'public_url'
   query: string
   status: 'queued' | 'running' | 'complete' | 'error'
   createdAt: string
   updatedAt: string
   progress: { completedRows: number; totalRows: number; completedCalls: number; totalCalls: number }
+  classes?: string[]
+  columns?: string[]
   currentFixtureRow?: unknown
   error?: { code: string; retryable: boolean }
 }) => ({
   analysisId: snapshot.analysisId,
   fixtureId: snapshot.fixtureId,
+  ...(snapshot.datasetId === undefined ? {} : { datasetId: snapshot.datasetId }),
+  ...(snapshot.sourceType === undefined ? {} : { sourceType: snapshot.sourceType }),
   query: snapshot.query,
   status: snapshot.status,
   createdAt: snapshot.createdAt,
   updatedAt: snapshot.updatedAt,
   progress: snapshot.progress,
+  ...(snapshot.classes === undefined ? {} : { classes: snapshot.classes }),
+  ...(snapshot.columns === undefined ? {} : { columns: snapshot.columns }),
   ...(snapshot.currentFixtureRow === undefined ? {} : { currentFixtureRow: snapshot.currentFixtureRow }),
   ...(snapshot.error === undefined ? {} : { error: snapshot.error }),
 })
@@ -100,11 +116,15 @@ const snapshotDocument = (snapshot: {
 const publicSnapshot = (document: Record<string, unknown>, rows: unknown[]) => ({
   analysisId: document.analysisId,
   fixtureId: document.fixtureId,
+  datasetId: document.datasetId ?? document.fixtureId,
+  sourceType: document.sourceType ?? 'fixture',
   query: document.query,
   status: document.status,
   createdAt: document.createdAt,
   updatedAt: document.updatedAt,
   progress: document.progress,
+  classes: document.classes ?? [],
+  columns: document.columns ?? [],
   ...(document.currentFixtureRow === undefined ? {} : { currentFixtureRow: document.currentFixtureRow }),
   ...(document.error === undefined ? {} : { error: document.error }),
   resultRows: rows,
@@ -207,5 +227,21 @@ export const authorizedReleaseAnalysis = action({
   handler: async (ctx: any, { authToken, ...args }: { authToken: string; analysisId: string; ownerToken: string }): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.analyses.releaseAnalysisInternal, args)
+  },
+})
+
+export const listPublicAnalyses = query({
+  args: {},
+  handler: async (ctx) => {
+    const documents = await ctx.db.query('analyses').take(48)
+    return documents.map((document) => ({
+      analysisId: document.analysisId,
+      datasetId: document.datasetId ?? document.fixtureId,
+      title: document.query.slice(0, 80),
+      status: document.status,
+      completedRows: document.progress.completedRows,
+      totalRows: document.progress.totalRows,
+      createdAt: document.createdAt,
+    }))
   },
 })

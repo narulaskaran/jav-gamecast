@@ -1,3 +1,4 @@
+import { DatasetError } from '../dataset/csvTypes'
 import { AnalysisError, type AnalysisService } from './analysis'
 import type { AnalysisSnapshot } from '../shared/analysis'
 
@@ -36,6 +37,10 @@ const applyHeaders = (response: AnalysisApiResponse): void => {
 }
 
 const errorResponse = (response: AnalysisApiResponse, error: unknown): void => {
+  if (error instanceof DatasetError) {
+    response.status(error.statusCode).json({ error: error.code })
+    return
+  }
   const statusCode = error instanceof AnalysisError ? error.statusCode : 500
   const code = error instanceof AnalysisError ? error.code : 'ANALYSIS_UNAVAILABLE'
   response.status(statusCode).json({ error: code })
@@ -56,7 +61,11 @@ export const createAnalysisDraftHandler = (service: AnalysisService): AnalysisAp
     return
   }
   try {
-    const result = await service.draft({ fixtureId: body.fixtureId as string, task: body.task as string })
+    const result = await service.draft({
+      fixtureId: typeof body.fixtureId === 'string' ? body.fixtureId : undefined,
+      datasetId: typeof body.datasetId === 'string' ? body.datasetId : undefined,
+      task: body.task as string,
+    })
     response.status(200).json(result)
   } catch (error) {
     errorResponse(response, error)
@@ -76,7 +85,13 @@ export const createAnalysisRunHandler = (service: AnalysisService, options: { sc
     return
   }
   try {
-    const snapshot = await service.start({ fixtureId: body.fixtureId as string, query: body.query as string, analysisId: body.analysisId as string | undefined })
+    const snapshot = await service.start({
+      fixtureId: typeof body.fixtureId === 'string' ? body.fixtureId : undefined,
+      datasetId: typeof body.datasetId === 'string' ? body.datasetId : undefined,
+      query: body.query as string,
+      analysisId: body.analysisId as string | undefined,
+      classes: Array.isArray(body.classes) ? body.classes as string[] : undefined,
+    })
     const execution = service.run(snapshot.analysisId)
     if (options.schedule) {
       try {

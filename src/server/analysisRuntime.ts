@@ -1,7 +1,10 @@
 import { AnalysisError, AnalysisService, type AnalysisStorage } from './analysis'
-import { ConvexAnalysisStore } from './analysisStore'
+import { ConvexAnalysisStore, ConvexDatasetStore } from './analysisStore'
 import { OpenRouterDraftProvider, TypeSafeClassifierProvider } from './analysisProviders'
-import { readPublicRuntimeConfig } from './liveConfig'
+import { isConvexWriteConfigured, readConvexRuntimeConfig } from './liveConfig'
+import { DatasetIntakeService, unconfiguredIntake } from './datasetIntake'
+import { analysisSourceFromDatasetStore, type DatasetStorage } from './datasetStore'
+import { createCsvBlobStore } from './uploadthing'
 
 class UnconfiguredAnalysisStore implements AnalysisStorage {
   private unavailable(): never {
@@ -15,19 +18,43 @@ class UnconfiguredAnalysisStore implements AnalysisStorage {
   release(): never { return this.unavailable() }
 }
 
-const publicConfig = readPublicRuntimeConfig()
-const convexWriteSecret = process.env.CONVEX_WRITE_SECRET?.trim()
-const storage: AnalysisStorage = publicConfig && convexWriteSecret
-  ? new ConvexAnalysisStore(publicConfig.convexUrl, convexWriteSecret)
+class UnconfiguredDatasetStore implements DatasetStorage {
+  private unavailable(): never {
+    throw new AnalysisError('ANALYSIS_STORAGE_NOT_CONFIGURED', 'Analysis storage is not configured', 503, true)
+  }
+
+  get(): never { return this.unavailable() }
+  put(): never { return this.unavailable() }
+  getRows(): never { return this.unavailable() }
+  listPublic(): never { return this.unavailable() }
+}
+
+const convex = readConvexRuntimeConfig()
+const convexConfigured = isConvexWriteConfigured()
+const storage: AnalysisStorage = convexConfigured && convex
+  ? new ConvexAnalysisStore(convex.convexUrl, convex.writeSecret)
   : new UnconfiguredAnalysisStore()
+const datasetStore: DatasetStorage = convexConfigured && convex
+  ? new ConvexDatasetStore(convex.convexUrl, convex.writeSecret)
+  : new UnconfiguredDatasetStore()
+
+export const datasetIntake = convexConfigured
+  ? new DatasetIntakeService({
+    datasets: datasetStore,
+    blobs: createCsvBlobStore(),
+    convexConfigured: true,
+  })
+  : unconfiguredIntake()
 
 /**
  * Production runtime: Convex is mandatory for reads, writes, claims, and
  * incremental snapshots. Missing deployment configuration fails closed rather
  * than falling back to a process-local store that would lose serverless state.
+ * UploadThing is required for BYOD CSV blobs; the sample fixture does not need it.
  */
 export const analysisService = new AnalysisService({
   store: storage,
   draftProvider: new OpenRouterDraftProvider(),
   classifier: new TypeSafeClassifierProvider(),
+  datasets: analysisSourceFromDatasetStore(datasetStore),
 })

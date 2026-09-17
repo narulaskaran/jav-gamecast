@@ -2,14 +2,14 @@
 
 Bring a dataset. Ask a question. See Jev classify every row.
 
-This repository used to be Jev Gamecast. The active product is a fixture-first analysis workbench, not a live ESPN gamecast. New agents should read `CURSOR.md` and `PLAN.md` first; the current API contract is `docs/analysis-api.md`.
+This repository used to be Jev Gamecast. The active product is a Jev playground: upload a CSV, paste a public CSV URL, or try the sample dataset, then watch a live class-distribution chart. It is not a live ESPN gamecast or a production analytics product. New agents should read `CURSOR.md` and `PLAN.md` first; the current API contract is `docs/analysis-api.md`.
 
 ```bash
 npm install
 npm run dev
 ```
 
-The checked-in football fixture is the sample dataset. Visiting or sharing a page never starts a paid Jev run. Browser code does not call Jev, OpenRouter, ESPN, or privileged Convex writes. Live provider calls are server-only and fail-closed without keys.
+The checked-in football fixture is the sample dataset on-ramp only. Visiting or sharing a page never starts a paid Jev run. Browser code does not call Jev, OpenRouter, ESPN, UploadThing credentials, or privileged Convex writes. Live provider calls are server-only and fail-closed without keys. CSV upload and public URL intake also fail closed without UploadThing + Convex.
 
 The sections below retain historical Gamecast, Convex, and Vercel operator notes that still apply to leftover forecast routes.
 
@@ -53,7 +53,7 @@ Regenerate from verified local source assets with `node scripts/generate-footbal
 - `api/cron/forecast.ts` is a Vercel-compatible POST entrypoint. It authenticates the cron request, polls ESPN once, invokes the server-only Jev provider, and persists through Convex. It never starts a long-lived loop. Convex claims and budgets protect against overlapping workers and process restarts; the local `running` flag is only an optimization.
 - `api/gamecast.ts` is the public, browser-safe read route. It exposes only the featured game, strips Convex system fields, applies CORS/read-rate controls, and returns `503` rather than inventing live data when provisioning is missing or the durable read fails.
 - `src/browser/forecastHttp.ts` and `src/browser/forecastRead.ts` consume the public read response. They do not import ESPN, TypeSafe, Convex server code, or credentials. `VITE_GAMECAST_MODE=live` opts into this source; failed live reads retain the replay points instead of silently labeling them live.
-- `api/analysis/draft`, `api/analysis/run`, `api/analysis/[analysisId]`, and `api/share/[analysisId]` implement the fixture-first Jev Data Analysis contract documented in `docs/analysis-api.md`. Drafting uses server-only OpenRouter; only a run can invoke server-only Jev. `src/server/analysisStore.ts` provides the server-only `ConvexAnalysisStore`, which persists bounded snapshots, claims, and public share readbacks in Convex. The production runtime fails closed with `ANALYSIS_STORAGE_NOT_CONFIGURED` until both a valid `CONVEX_URL` and `CONVEX_WRITE_SECRET` are provisioned; `InMemoryAnalysisStore` is reserved for deterministic local tests.
+- `api/analysis/draft`, `api/analysis/run`, `api/analysis/[analysisId]`, `api/share/[analysisId]`, `api/datasets/*`, and `api/browse` implement the Jev playground contract documented in `docs/analysis-api.md`. Drafting uses server-only OpenRouter; only a run can invoke server-only Jev. BYOD CSV blobs go through server-only UploadThing after validation. `src/server/analysisStore.ts` provides the server-only Convex adapters for analyses and datasets. The production runtime fails closed with `ANALYSIS_STORAGE_NOT_CONFIGURED` until both a valid `CONVEX_URL` and `CONVEX_WRITE_SECRET` are provisioned; upload/URL intake also fails closed without `UPLOADTHING_TOKEN`. `InMemoryAnalysisStore` / `InMemoryDatasetStore` are reserved for deterministic local tests.
 - `vercel.json` schedules the bounded cron route every two minutes. This is compatible with the 90-second worker cadence and leaves scheduler ownership outside application code.
 
 ## Convex provisioning (operator step)

@@ -18,6 +18,17 @@ const required = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
   return value || undefined
 }
 
+export const readConvexRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): { convexUrl: string; writeSecret?: string } | undefined => {
+  const convexUrl = required(env, 'CONVEX_URL')
+  if (!convexUrl || !/^https:\/\/[^\s]+\.convex\.cloud$/i.test(convexUrl)) return undefined
+  return { convexUrl, writeSecret: required(env, 'CONVEX_WRITE_SECRET') }
+}
+
+export const isConvexWriteConfigured = (env: NodeJS.ProcessEnv = process.env): boolean => {
+  const config = readConvexRuntimeConfig(env)
+  return Boolean(config?.convexUrl && config.writeSecret)
+}
+
 export const readPublicRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): PublicRuntimeConfig | undefined => {
   const convexUrl = required(env, 'CONVEX_URL')
   const featuredGameId = required(env, 'FEATURED_GAME_ID')

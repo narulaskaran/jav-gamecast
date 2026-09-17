@@ -9,6 +9,7 @@
  */
 
 import type * as analyses from "../analyses.js";
+import type * as datasets from "../datasets.js";
 import type * as forecasts from "../forecasts.js";
 import type * as runtime from "../runtime.js";
 
@@ -20,6 +21,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   analyses: typeof analyses;
+  datasets: typeof datasets;
   forecasts: typeof forecasts;
   runtime: typeof runtime;
 }>;

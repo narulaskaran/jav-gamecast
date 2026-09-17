@@ -1,0 +1,121 @@
+import { DatasetError, PUBLIC_DATA_WARNING } from '../dataset/csvTypes'
+import { validateCsvBytes, validateCsvText } from '../dataset/validateDataset'
+import type { DatasetIntakeStatus, DatasetPreview } from '../shared/dataset'
+import { AnalysisError } from './analysis'
+import { fetchPublicCsv, type DatasetFetchOptions } from './datasetFetch'
+import { analysisSourceFromDatasetStore, hashBytes, toDatasetPreview, toDatasetRecord, type DatasetStorage } from './datasetStore'
+import { UnconfiguredBlobStore, type CsvBlobStore } from './uploadthing'
+
+export interface DatasetIntakeServiceOptions {
+  datasets: DatasetStorage
+  blobs: CsvBlobStore
+  convexConfigured: boolean
+  fetch?: DatasetFetchOptions['fetch']
+  lookup?: DatasetFetchOptions['lookup']
+  now?: () => number
+}
+
+const displayNameFrom = (filenameOrUrl: string | undefined, fallback: string): string => {
+  if (!filenameOrUrl?.trim()) return fallback
+  try {
+    const url = new URL(filenameOrUrl)
+    const parts = url.pathname.split('/').filter(Boolean)
+    return decodeURIComponent(parts[parts.length - 1] || fallback).slice(0, 120)
+  } catch {
+    return filenameOrUrl.replace(/\s+/g, ' ').trim().slice(0, 120) || fallback
+  }
+}
+
+const requireIntake = (options: DatasetIntakeServiceOptions): void => {
+  if (!options.convexConfigured) throw new AnalysisError('ANALYSIS_STORAGE_NOT_CONFIGURED', 'Durable storage is not configured on this deployment.', 503, true)
+  if (!options.blobs.isConfigured()) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', 'CSV storage is not configured on this deployment.', 503)
+}
+
+export class DatasetIntakeService {
+  constructor(private readonly options: DatasetIntakeServiceOptions) {}
+
+  status(): DatasetIntakeStatus {
+    return {
+      convex: this.options.convexConfigured,
+      uploadThing: this.options.blobs.isConfigured(),
+      sampleAvailable: true,
+    }
+  }
+
+  analysisSource() {
+    return analysisSourceFromDatasetStore(this.options.datasets)
+  }
+
+  async fromCsvText(input: { csvText: string; filename?: string; displayName?: string }): Promise<DatasetPreview> {
+    requireIntake(this.options)
+    if (typeof input.csvText !== 'string' || !input.csvText.trim()) throw new DatasetError('CSV_EMPTY', 'The CSV has no data rows.')
+    const validated = validateCsvText(input.csvText)
+    const bytes = new TextEncoder().encode(input.csvText)
+    return this.persist({ bytes, validated, sourceType: 'upload', displayName: input.displayName || displayNameFrom(input.filename, 'Uploaded CSV'), filename: input.filename || 'upload.csv' })
+  }
+
+  async fromCsvBytes(input: { bytes: Uint8Array; filename?: string; displayName?: string }): Promise<DatasetPreview> {
+    requireIntake(this.options)
+    const validated = validateCsvBytes(input.bytes)
+    return this.persist({ bytes: input.bytes, validated, sourceType: 'upload', displayName: input.displayName || displayNameFrom(input.filename, 'Uploaded CSV'), filename: input.filename || 'upload.csv' })
+  }
+
+  async fromPublicUrl(input: { url: string; displayName?: string }): Promise<DatasetPreview> {
+    requireIntake(this.options)
+    const fetched = await fetchPublicCsv(input.url, { fetch: this.options.fetch, lookup: this.options.lookup })
+    const validated = validateCsvBytes(fetched.bytes)
+    const sanitizedUrl = fetched.finalUrl
+    return this.persist({
+      bytes: fetched.bytes,
+      validated,
+      sourceType: 'public_url',
+      displayName: input.displayName || displayNameFrom(sanitizedUrl, 'Public CSV'),
+      filename: displayNameFrom(sanitizedUrl, 'dataset.csv'),
+      sourceUrl: sanitizedUrl,
+    })
+  }
+
+  async get(datasetId: string): Promise<DatasetPreview> {
+    if (!this.options.convexConfigured) throw new AnalysisError('ANALYSIS_STORAGE_NOT_CONFIGURED', 'Durable storage is not configured on this deployment.', 503, true)
+    const dataset = await this.options.datasets.get(datasetId)
+    if (!dataset) throw new DatasetError('DATASET_NOT_FOUND', 'That dataset was not found.', 404)
+    return toDatasetPreview(dataset)
+  }
+
+  async listPublic() {
+    if (!this.options.convexConfigured) return []
+    return [...(await this.options.datasets.listPublic?.() ?? [])]
+  }
+
+  private async persist(input: {
+    bytes: Uint8Array
+    validated: ReturnType<typeof validateCsvText>
+    sourceType: 'upload' | 'public_url'
+    displayName: string
+    filename: string
+    sourceUrl?: string
+  }): Promise<DatasetPreview> {
+    const blob = await this.options.blobs.putCsv({ bytes: input.bytes, filename: input.filename, contentType: 'text/csv' })
+    const record = toDatasetRecord({
+      sourceType: input.sourceType,
+      displayName: input.displayName,
+      validated: input.validated,
+      contentHash: hashBytes(input.bytes),
+      blobKey: blob.blobKey,
+      sourceUrl: input.sourceUrl,
+      createdAt: this.options.now?.() ?? Date.now(),
+    })
+    await this.options.datasets.put(record, input.validated.rows)
+    return { ...toDatasetPreview(record), publicDataWarning: PUBLIC_DATA_WARNING }
+  }
+}
+
+export const unconfiguredIntake = (): DatasetIntakeService => new DatasetIntakeService({
+  datasets: {
+    get: () => undefined,
+    put: () => undefined,
+    getRows: () => [],
+  },
+  blobs: new UnconfiguredBlobStore(),
+  convexConfigured: false,
+})

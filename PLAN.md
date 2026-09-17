@@ -4,9 +4,9 @@
 
 > **For Hermes:** Use the Kanban workflow and independent review/QA gates. P0 product decisions below are recorded. Implementation is already in progress on `origin/main`; continue from the current workbench rather than Stage 0 scaffolding.
 
-**Status:** Pivot recorded. A fixture-first analysis workbench is on `origin/main`. Remaining work is pause/cancel, browse/share completeness, BYOD intake (Stage 5), abuse/cost controls, and production/release gates. Stage 0 provider-contract confirmation is still pending before paid live Jev.
+**Status:** Pivot recorded. Fixture-first analysis plus Stage 5 BYOD intake (CSV upload, public HTTPS CSV URL, sample on-ramp, live per-row class chart) is on the working branch. Remaining work is pause/cancel, browse/share completeness, abuse/cost controls, and production/release gates. Stage 0 provider-contract confirmation is still pending before paid live Jev.
 
-**Last updated:** 2026-09-17 23:05:00 UTC
+**Last updated:** 2026-09-17 23:30:00 UTC
 
 **Goal:** Let a user bring a small CSV dataset, describe an analysis in natural language, review/edit the generated Jev classifier query, run a bounded row-by-row Jev analysis, watch results arrive live, and share/replay the completed analysis at a unique URL.
 
@@ -31,7 +31,7 @@ Treat these as landed starting points, not future tasks:
 - Server-only OpenRouter draft adapter and Jev classifier adapter; browser bundles must stay free of credentials and provider SDKs.
 - Convex analysis snapshot persistence plus leftover Gamecast forecast tables/cron. Gamecast ESPN routes are historical; do not extend them as the product.
 
-Gaps versus this plan: no pause/cancel status, no BYOD CSV/UploadThing, no public dataset/analysis browse listing, leftover Gamecast forecast/ESPN operator copy remains in README, and paid live Jev remains fail-closed until operator provisioning and provider-contract confirmation.
+Gaps versus this plan: pause/cancel status is still incomplete, leftover Gamecast forecast/ESPN operator copy remains in README, paid live Jev remains fail-closed until operator provisioning and provider-contract confirmation, and UploadThing/Convex production secrets are operator-provisioned (BYOD fails closed without them).
 
 ---
 
@@ -635,4 +635,4 @@ At minimum test 320×844, 390×844, and 1440×900:
 - [ ] Production QA explicitly passes the exact deployed artifact.
 - [ ] Any live Jev run is separately labeled and backed by real provider evidence.
 
-**Current next gate:** harden the existing fixture-first workbench (pause/cancel, public browse/share completeness, abuse/cost controls, provider-contract confirmation) before Stage 5 BYOD CSV intake. Canonical remote is `origin` (`jev-data-questions`); product/Vercel name remains `jev-data-analysis`. Do not dispatch implementation against the old live-ESPN gamecast plan.
+**Current next gate:** operator-provision UploadThing + Convex for BYOD, then harden pause/cancel, public browse/share completeness, abuse/cost controls, and provider-contract confirmation before Stage 6. Canonical remote is `origin` (`jev-data-questions`); product/Vercel name remains `jev-data-analysis`. Do not dispatch implementation against the old live-ESPN gamecast plan.
