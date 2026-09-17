@@ -5,6 +5,8 @@ import {
   ANALYSIS_MAX_QUERY_LENGTH,
   ANALYSIS_MAX_ROWS,
   ANALYSIS_MAX_TASK_LENGTH,
+  ANALYSIS_RUN_LEASE_MS,
+  ANALYSIS_STALE_AFTER_MS,
   cloneAnalysisSnapshot,
   type AnalysisClassification,
   type AnalysisDraftInput,
@@ -21,7 +23,7 @@ import {
   type FootballModelInput,
 } from '../fixtures/footballTimeline'
 
-export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput } from '../shared/analysis'
+export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis'
 export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, ANALYSIS_MAX_ROWS, ANALYSIS_MAX_TASK_LENGTH } from '../shared/analysis'
 
 export interface AnalysisDraftProvider {
@@ -55,6 +57,7 @@ export class AnalysisError extends Error {
 
 export class InMemoryAnalysisStore implements AnalysisStorage {
   private readonly snapshots = new Map<string, AnalysisSnapshot>()
+  private readonly claims = new Map<string, { ownerToken: string; leaseExpiresAt: number }>()
 
   get(analysisId: string): AnalysisSnapshot | undefined {
     const snapshot = this.snapshots.get(analysisId)
@@ -63,6 +66,24 @@ export class InMemoryAnalysisStore implements AnalysisStorage {
 
   put(snapshot: AnalysisSnapshot): void {
     this.snapshots.set(snapshot.analysisId, cloneAnalysisSnapshot(snapshot))
+  }
+
+  getPublic(analysisId: string): AnalysisSnapshot | undefined {
+    return this.get(analysisId)
+  }
+
+  claim(analysisId: string, ownerToken: string, nowMs: number, leaseMs: number): 'claimed' | 'busy' | 'complete' | 'missing' {
+    const snapshot = this.snapshots.get(analysisId)
+    if (!snapshot) return 'missing'
+    if (snapshot.status === 'complete') return 'complete'
+    const current = this.claims.get(analysisId)
+    if (current && current.leaseExpiresAt > nowMs && current.ownerToken !== ownerToken) return 'busy'
+    this.claims.set(analysisId, { ownerToken, leaseExpiresAt: nowMs + leaseMs })
+    return 'claimed'
+  }
+
+  release(analysisId: string, ownerToken: string): void {
+    if (this.claims.get(analysisId)?.ownerToken === ownerToken) this.claims.delete(analysisId)
   }
 }
 
@@ -154,6 +175,19 @@ export class AnalysisService {
     const existing = await this.options.store.get(analysisId)
     if (existing) {
       if (existing.fixtureId !== input.fixtureId || existing.query !== query) throw new AnalysisError('ANALYSIS_ID_CONFLICT', 'Analysis ID is already used for another analysis', 409)
+      const stale = existing.status === 'running' && this.now() - Date.parse(existing.updatedAt) > ANALYSIS_STALE_AFTER_MS
+      const retryableFailure = existing.status === 'error' && existing.error?.retryable === true
+      if (stale || retryableFailure) {
+        const recovered: AnalysisSnapshot = {
+          ...existing,
+          status: 'queued',
+          currentFixtureRow: undefined,
+          updatedAt: nowIso(this.now),
+          error: undefined,
+        }
+        await this.options.store.put(recovered)
+        return cloneAnalysisSnapshot(recovered)
+      }
       return cloneAnalysisSnapshot(existing)
     }
     this.options.classifier.assertConfigured?.()
@@ -191,17 +225,24 @@ export class AnalysisService {
   }
 
   async share(analysisId: string): Promise<AnalysisSnapshot> {
-    return this.get(analysisId)
+    const snapshot = await (this.options.store.getPublic?.(analysisId) ?? this.options.store.get(analysisId))
+    if (!snapshot) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
+    return cloneAnalysisSnapshot(snapshot)
   }
 
   private async execute(analysisId: string): Promise<AnalysisSnapshot> {
+    const ownerToken = `${analysisId}:${this.idFactory()}`
+    const claimed = await this.options.store.claim?.(analysisId, ownerToken, this.now(), ANALYSIS_RUN_LEASE_MS)
+    if (claimed === 'missing') throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
+    if (claimed === 'complete' || claimed === 'busy') return this.get(analysisId)
     const initial = await this.options.store.get(analysisId)
     if (!initial) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
     if (initial.status === 'complete' || initial.status === 'error') return cloneAnalysisSnapshot(initial)
     const rows = getHalftimeModelInput(footballFixture)
     let snapshot: AnalysisSnapshot = { ...initial, status: 'running', updatedAt: nowIso(this.now), resultRows: [...initial.resultRows] }
     await this.options.store.put(snapshot)
-    for (let rowIndex = snapshot.progress.completedRows; rowIndex < rows.length; rowIndex += 1) {
+    try {
+      for (let rowIndex = snapshot.progress.completedRows; rowIndex < rows.length; rowIndex += 1) {
       const row = rows[rowIndex]
       snapshot = { ...snapshot, currentFixtureRow: { rowIndex, input: row }, updatedAt: nowIso(this.now) }
       await this.options.store.put(snapshot)
@@ -219,15 +260,18 @@ export class AnalysisService {
           error: undefined,
         }
         await this.options.store.put(snapshot)
-      } catch (error) {
+        } catch (error) {
         snapshot = { ...snapshot, status: 'error', currentFixtureRow: undefined, updatedAt: nowIso(this.now), error: safeProviderError(error) }
         await this.options.store.put(snapshot)
-        return cloneAnalysisSnapshot(snapshot)
+          return cloneAnalysisSnapshot(snapshot)
+        }
       }
+      snapshot = { ...snapshot, status: 'complete', currentFixtureRow: undefined, updatedAt: nowIso(this.now), progress: { completedRows: rows.length, totalRows: rows.length, completedCalls: rows.length, totalCalls: rows.length } }
+      await this.options.store.put(snapshot)
+      return cloneAnalysisSnapshot(snapshot)
+    } finally {
+      await this.options.store.release?.(analysisId, ownerToken)
     }
-    snapshot = { ...snapshot, status: 'complete', currentFixtureRow: undefined, updatedAt: nowIso(this.now), progress: { completedRows: rows.length, totalRows: rows.length, completedCalls: rows.length, totalCalls: rows.length } }
-    await this.options.store.put(snapshot)
-    return cloneAnalysisSnapshot(snapshot)
   }
 
   private requireFixture(fixtureId: string): void {

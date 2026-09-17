@@ -3,6 +3,7 @@ import { footballFixture, getHalftimeModelInput, FOOTBALL_FIXTURE_ID, FOOTBALL_F
 import {
   ANALYSIS_MAX_CALLS,
   ANALYSIS_MAX_ROWS,
+  AnalysisError,
   AnalysisService,
   InMemoryAnalysisStore,
   type AnalysisClassifier,
@@ -122,5 +123,60 @@ describe('analysis domain contract', () => {
     expect(ANALYSIS_MAX_CALLS).toBe(5_000)
     expect(ANALYSIS_MAX_ROWS).toBe(5_000)
     expect(FOOTBALL_FIXTURE_SCHEMA).toHaveLength(31)
+  })
+
+  it('requeues retryable provider failures and resumes from the persisted partial result', async () => {
+    let calls = 0
+    const classifier: AnalysisClassifier = {
+      async classify() {
+        calls += 1
+        if (calls === 2) throw new AnalysisError('JEV_TIMEOUT', 'timeout', 504, true)
+        return classification()
+      },
+    }
+    const service = serviceWith(classifier)
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'recoverable-analysis' })
+    const failed = await service.run(started.analysisId)
+    expect(failed).toMatchObject({ status: 'error', progress: { completedRows: 1 }, error: { code: 'JEV_TIMEOUT', retryable: true } })
+    const recovered = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: started.analysisId })
+    expect(recovered).toMatchObject({ status: 'queued', progress: { completedRows: 1 }, resultRows: expect.arrayContaining([expect.objectContaining({ rowIndex: 0 })]) })
+    await expect(service.run(started.analysisId)).resolves.toMatchObject({ status: 'complete', progress: { completedRows: 39 } })
+  })
+
+  it('requeues a stale running snapshot without dropping completed rows', async () => {
+    const store = new InMemoryAnalysisStore()
+    const service = new AnalysisService({
+      store,
+      classifier: makeClassifier([]),
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'stale-analysis',
+      now: () => 1_800_000_000_000,
+    })
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })
+    store.put({ ...started, status: 'running', updatedAt: new Date(1_800_000_000_000 - 16 * 60_000).toISOString(), progress: { ...started.progress, completedRows: 2, completedCalls: 2 }, resultRows: [{ ...classification(), rowIndex: 0, input: getHalftimeModelInput(footballFixture)[0] }, { ...classification(), rowIndex: 1, input: getHalftimeModelInput(footballFixture)[1] }] })
+    await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })).resolves.toMatchObject({ status: 'queued', progress: { completedRows: 2 }, resultRows: expect.any(Array) })
+  })
+
+  it('suppresses duplicate execution across independent service instances with a durable claim', async () => {
+    const store = new InMemoryAnalysisStore()
+    let releaseFirst: (() => void) | undefined
+    let calls = 0
+    const classifier: AnalysisClassifier = {
+      async classify() {
+        calls += 1
+        if (calls === 1) await new Promise<void>((resolve) => { releaseFirst = resolve })
+        return classification()
+      },
+    }
+    const make = () => new AnalysisService({ store, classifier, draftProvider: makeDraftProvider([]), idFactory: () => `owner-${calls}`, now: () => 1_800_000_000_000 })
+    const firstService = make()
+    const secondService = make()
+    const started = await firstService.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'claimed-analysis' })
+    const first = firstService.run(started.analysisId)
+    await vi.waitFor(() => expect(calls).toBe(1))
+    await expect(secondService.run(started.analysisId)).resolves.toMatchObject({ status: 'running' })
+    expect(calls).toBe(1)
+    releaseFirst?.()
+    await expect(first).resolves.toMatchObject({ status: 'complete' })
   })
 })

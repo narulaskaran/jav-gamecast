@@ -22,6 +22,18 @@ const limitsValidator = v.object({
   estimatedCostCentsPerRequest: v.number(),
 })
 
+const analysisProgressValidator = v.object({
+  completedRows: v.number(),
+  totalRows: v.number(),
+  completedCalls: v.number(),
+  totalCalls: v.number(),
+})
+
+const analysisErrorValidator = v.object({
+  code: v.string(),
+  retryable: v.boolean(),
+})
+
 export default defineSchema({
   forecastRecords: defineTable({
     idempotencyKey: v.string(),
@@ -69,4 +81,27 @@ export default defineSchema({
   })
     .index('by_reservation_id', ['reservationId'])
     .index('by_scope', ['budgetScope']),
+  analyses: defineTable({
+    analysisId: v.string(),
+    fixtureId: v.string(),
+    query: v.string(),
+    status: v.union(v.literal('queued'), v.literal('running'), v.literal('complete'), v.literal('error')),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+    progress: analysisProgressValidator,
+    currentFixtureRow: v.optional(v.any()),
+    error: v.optional(analysisErrorValidator),
+    runOwnerToken: v.optional(v.string()),
+    runLeaseExpiresAt: v.optional(v.number()),
+  }).index('by_analysis_id', ['analysisId']),
+  analysisRows: defineTable({
+    analysisId: v.string(),
+    rowIndex: v.number(),
+    input: v.any(),
+    model: v.string(),
+    selectedClass: v.optional(v.string()),
+    probabilities: v.optional(v.any()),
+    confidence: v.optional(v.number()),
+    error: v.optional(analysisErrorValidator),
+  }).index('by_analysis_row', ['analysisId', 'rowIndex']),
 })
