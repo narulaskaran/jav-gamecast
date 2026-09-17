@@ -22,6 +22,12 @@ npm run build
 
 The output is Vercel-compatible as a static Vite build. Forecast values are fictional and experimental, not calibrated sportsbook odds.
 
+## Stage 3 server forecast worker
+
+`src/server/jev.ts` is a server-only TypeSafe boundary for Node 20+ using `@typesafe-ai/sdk`. It sends one typed `Choice` question to `POST https://api.typesafe.ai/v1/systemone` with model `jev-latest`; the SDK reads `TYPESAFE_API_KEY` only in the server runtime. `src/server/forecastWorker.ts` normalizes state, hashes it into an idempotency key, returns exact cached records for duplicate jobs, and produces persistence-ready success/error/limit records without provider bodies or credentials.
+
+Live mode is fail-closed when the key or provider is unavailable. The worker applies a default 90-second cadence, finite request/rate/spend ceilings, and explicit timeout/429/529 retry configuration. `mock` and `replay` modes are deterministic and opt-in; tests inject fake clients/providers and never make a paid or credentialed Jev call. The Vite build fails if server-only SDK, endpoint, or credential markers enter a browser chunk.
+
 ## Stage 2 feed boundary
 
 `src/server/espn.ts` is a replaceable, server-side-only ESPN adapter. It reads the current publicly observed scoreboard, summary, and core play-by-play endpoints from ESPN's undocumented upstream, then normalizes provider data into the shared `GameState` contract. The adapter does not start a polling loop or call Jev; its caller controls cadence and can inject a `featuredEventId` for the one selected game.
