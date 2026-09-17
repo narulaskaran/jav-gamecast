@@ -1,7 +1,43 @@
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { classColor } from '../runView/classColor'
+import { areRailPropsEqual } from '../runView/chartProps'
 import { RAIL_ITEM_SIZE, railWindow } from '../runView/railWindow'
 import type { AnalysisResultRow } from '../shared/analysis'
+
+const RailItem = memo(function RailItem({
+  index,
+  label,
+  selectedClass,
+  selected,
+  color,
+  onSelect,
+}: {
+  index: number
+  label: string
+  selectedClass?: string
+  selected: boolean
+  color: string
+  onSelect: (index: number) => void
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className={`rail-item${selected ? ' is-selected' : ''}`}
+        aria-current={selected ? 'true' : undefined}
+        aria-label={selectedClass ? `${label} ${selectedClass}` : label}
+        onClick={() => onSelect(index)}
+      >
+        <span className="rail-index">{label}</span>
+        {selectedClass ? (
+          <span className="rail-chip" style={{ '--chip-color': color } as CSSProperties}>
+            {selectedClass}
+          </span>
+        ) : null}
+      </button>
+    </li>
+  )
+})
 
 export const RowRail = memo(function RowRail({
   rows,
@@ -64,29 +100,20 @@ export const RowRail = memo(function RowRail({
         {window.virtualized ? <li className="rail-spacer" style={{ height: window.padStart }} aria-hidden="true" /> : null}
         {visible.map((row, offset) => {
           const index = window.start + offset
-          const selected = index === playheadIndex
-          const label = `Row ${row.rowIndex + 1} of ${totalRows}`
           return (
-            <li key={row.rowIndex}>
-              <button
-                type="button"
-                className={`rail-item${selected ? ' is-selected' : ''}`}
-                aria-current={selected ? 'true' : undefined}
-                aria-label={row.selectedClass ? `${label} ${row.selectedClass}` : label}
-                onClick={() => onSelect(index)}
-              >
-                <span className="rail-index">{label}</span>
-                {row.selectedClass ? (
-                  <span className="rail-chip" style={{ '--chip-color': classColor(row.selectedClass, classes) } as CSSProperties}>
-                    {row.selectedClass}
-                  </span>
-                ) : null}
-              </button>
-            </li>
+            <RailItem
+              key={row.rowIndex}
+              index={index}
+              label={`Row ${row.rowIndex + 1} of ${totalRows}`}
+              selectedClass={row.selectedClass}
+              selected={index === playheadIndex}
+              color={row.selectedClass ? classColor(row.selectedClass, classes) : ''}
+              onSelect={onSelect}
+            />
           )
         })}
         {window.virtualized ? <li className="rail-spacer" style={{ height: window.padEnd }} aria-hidden="true" /> : null}
       </ul>
     </aside>
   )
-})
+}, areRailPropsEqual)

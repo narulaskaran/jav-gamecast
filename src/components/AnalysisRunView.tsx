@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useDeferredValue, useRef } from 'react'
 import { ResultsChart } from './ResultsChart'
 import { ResultsTable } from './ResultsTable'
 import { RowRail } from './RowRail'
@@ -19,24 +19,37 @@ const statusCopy: Record<AnalysisStatus, string> = {
   error: 'The run stopped with a stable error code; partial rows remain readable.',
 }
 
-const StatusBadge = ({ status }: { status: AnalysisStatus }) => (
-  <span className={`analysis-status status-${status}`} role="status">
-    <span className="status-dot" aria-hidden="true" />
-    {statusLabels[status]}
-  </span>
-)
+const StatusBadge = memo(function StatusBadge({ status }: { status: AnalysisStatus }) {
+  return (
+    <span className={`analysis-status status-${status}`} role="status">
+      <span className="status-dot" aria-hidden="true" />
+      {statusLabels[status]}
+    </span>
+  )
+})
 
-const Progress = ({ snapshot }: { snapshot: AnalysisSnapshot }) => {
-  const { completedRows, totalRows, completedCalls, totalCalls } = snapshot.progress
+const Progress = memo(function Progress({
+  completedRows,
+  totalRows,
+  completedCalls,
+  totalCalls,
+  status,
+}: {
+  completedRows: number
+  totalRows: number
+  completedCalls: number
+  totalCalls: number
+  status: AnalysisStatus
+}) {
   const ratio = totalRows ? Math.min(100, Math.round((completedRows / totalRows) * 100)) : 0
   return (
     <div className="progress-block" aria-label="Analysis progress">
       <div className="progress-line"><span>{completedRows} / {totalRows} rows</span><b>{ratio}%</b></div>
       <div className="progress-track"><span style={{ width: `${ratio}%` }} /></div>
-      <p>{completedCalls} / {totalCalls} bounded Jev calls · {statusCopy[snapshot.status]}</p>
+      <p>{completedCalls} / {totalCalls} bounded Jev calls · {statusCopy[status]}</p>
     </div>
   )
-}
+})
 
 export const AnalysisRunView = memo(function AnalysisRunView({
   snapshot,
@@ -52,15 +65,15 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   const rows = snapshot.resultRows
   const columns = snapshot.columns ?? []
   const { index, motion, seek } = useRunPlayhead(rows.length, snapshot.analysisId)
+  const seekRef = useRef(seek)
+  seekRef.current = seek
   const handleSeek = useCallback((next: number, phase: 'scrub' | 'release' = 'release') => {
-    seek(next, phase)
-  }, [seek])
-  const handleRailSelect = useCallback((next: number) => {
-    seek(next, 'release')
-  }, [seek])
+    seekRef.current(next, phase)
+  }, [])
+  const deferredRows = useDeferredValue(rows)
 
   return (
-    <section className="analysis-card" aria-labelledby="analysis-heading">
+    <section className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
       <div className="analysis-head">
         <div>
           <p className="eyebrow">03 · Readback</p>
@@ -72,7 +85,13 @@ export const AnalysisRunView = memo(function AnalysisRunView({
         </div>
       </div>
       <p className="run-id">Run {snapshot.analysisId} · no provider credentials are exposed to the browser</p>
-      <Progress snapshot={snapshot} />
+      <Progress
+        completedRows={snapshot.progress.completedRows}
+        totalRows={snapshot.progress.totalRows}
+        completedCalls={snapshot.progress.completedCalls}
+        totalCalls={snapshot.progress.totalCalls}
+        status={snapshot.status}
+      />
       {snapshot.error ? (
         <div className="error-banner compact" role="alert">
           <b>{snapshot.error.code}</b>
@@ -95,10 +114,10 @@ export const AnalysisRunView = memo(function AnalysisRunView({
           totalRows={snapshot.progress.totalRows}
           playheadIndex={index}
           classes={snapshot.classes}
-          onSelect={handleRailSelect}
+          onSelect={handleSeek}
         />
       </div>
-      <ResultsTable rows={rows} columns={columns} />
+      <ResultsTable rows={deferredRows} columns={columns} />
       <div className="share-footer">
         <span>{shareMessage || 'Public URL reads the same bounded snapshot without calling a provider.'}</span>
         {shareUrl ? <a href={shareUrl} target="_blank" rel="noreferrer">Open public snapshot ↗</a> : null}

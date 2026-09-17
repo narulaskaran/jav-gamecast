@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AnalysisRunView } from './components/AnalysisRunView'
 import { DatasetIntake } from './components/DatasetIntake'
 import { DatasetPreviewCard } from './components/DatasetPreview'
@@ -204,11 +204,11 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     setTask(DEFAULT_TASK)
   }
 
-  const copyShareUrl = async () => {
+  const copyShareUrl = useCallback(async () => {
     if (!shareUrl) return
     try { await navigator.clipboard?.writeText(shareUrl); setShareMessage('Share URL copied')
     } catch { setShareMessage('Share URL ready') }
-  }
+  }, [shareUrl])
 
   const showLanding = !isShareView && !dataset
 
@@ -252,7 +252,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
               snapshot={snapshot}
               shareUrl={shareUrl}
               shareMessage={shareMessage}
-              onCopyShare={() => void copyShareUrl()}
+              onCopyShare={copyShareUrl}
             />
           )}
         </div>

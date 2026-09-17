@@ -124,7 +124,7 @@ describe('Jev playground flow', () => {
     expect(within(rail).getByRole('button', { name: /row 3 of 39/i })).toBeInTheDocument()
     expect(within(rail).queryByText(String(input.play_id))).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: /current row inspector/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
+    expect(await screen.findByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
   })
 
@@ -194,7 +194,7 @@ describe('Jev playground flow', () => {
     fireEvent.change(screen.getByRole('slider', { name: /chart playhead/i }), { target: { value: '2' } })
     fireEvent.pointerUp(screen.getByRole('slider', { name: /chart playhead/i }))
     await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '2'))
-    expect(screen.getByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
+    expect(await screen.findByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
   })
 
   it('loads upload and public URL datasets into the same draft → chart path', async () => {
@@ -271,7 +271,7 @@ describe('Jev playground flow', () => {
       expect(await screen.findByText('Jev analysis run')).toBeInTheDocument()
       expect(api.share).toHaveBeenCalledWith(analysisId)
       expect(screen.getByText(`Run ${analysisId} · no provider credentials are exposed to the browser`)).toBeInTheDocument()
-      expect(screen.getByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
+      expect(await screen.findByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
       expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
       expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
       expect(screen.getByRole('complementary', { name: /processed rows/i })).toBeInTheDocument()

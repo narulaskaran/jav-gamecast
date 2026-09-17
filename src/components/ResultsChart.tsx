@@ -1,15 +1,40 @@
 import { memo, useCallback, useMemo, useRef, type CSSProperties, type PointerEvent, type SyntheticEvent } from 'react'
 import { classDistribution, distributionAt } from '../dataset/classDistribution'
 import { classColor } from '../runView/classColor'
+import { areChartPropsEqual, barWidth } from '../runView/chartProps'
 import { clampPlayhead, type PlayheadMotion } from '../runView/playhead'
 import type { AnalysisResultRow } from '../shared/analysis'
 
 const EMPTY_CLASSES: readonly string[] = []
 
-const barWidth = (count: number, max: number): string => {
-  if (count <= 0 || max <= 0) return '0%'
-  return `${Math.max(4, (count / max) * 100)}%`
-}
+const ClassBar = memo(function ClassBar({
+  name,
+  count,
+  scale,
+  color,
+}: {
+  name: string
+  count: number
+  scale: number
+  color: string
+}) {
+  return (
+    <div className="distribution-row" data-class={name} data-count={count}>
+      <div className="distribution-label">
+        <span>{name}</span>
+        <b>{count}</b>
+      </div>
+      <div className="distribution-track">
+        <span
+          style={{
+            '--bar-width': barWidth(count, scale),
+            '--bar-color': color,
+          } as CSSProperties}
+        />
+      </div>
+    </div>
+  )
+})
 
 export const ResultsChart = memo(function ResultsChart({
   rows,
@@ -33,8 +58,8 @@ export const ResultsChart = memo(function ResultsChart({
     () => (completedCount === 0 ? classDistribution([], classes) : distributionAt(rows, prefixCount, classes)),
     [classes, completedCount, prefixCount, rows],
   )
-  const max = Math.max(...values.map((item) => item.count), 1)
   const classified = values.reduce((sum, item) => sum + item.count, 0)
+  const scale = Math.max(totalRows, classified, 1)
   const waiting = classified === 0
   const latestLabel = completedCount === 0 ? 'Waiting' : `Through row ${prefixCount}`
 
@@ -61,8 +86,7 @@ export const ResultsChart = memo(function ResultsChart({
   const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
     if (completedCount === 0 || !event.currentTarget.hasPointerCapture(event.pointerId)) return
     event.currentTarget.releasePointerCapture(event.pointerId)
-    const next = indexFromClientX(event.clientX)
-    onSeek(next, 'release')
+    onSeek(indexFromClientX(event.clientX), 'release')
   }
 
   const handleRange = (event: SyntheticEvent<HTMLInputElement>) => {
@@ -105,20 +129,13 @@ export const ResultsChart = memo(function ResultsChart({
           {values.length > 0 ? (
             <div className="distribution-chart" data-waiting={waiting ? 'true' : 'false'}>
               {values.map(({ name, count }) => (
-                <div className="distribution-row" key={name} data-class={name} data-count={count}>
-                  <div className="distribution-label">
-                    <span>{name}</span>
-                    <b>{count}</b>
-                  </div>
-                  <div className="distribution-track">
-                    <span
-                      style={{
-                        '--bar-width': barWidth(count, max),
-                        '--bar-color': classColor(name, classes),
-                      } as CSSProperties}
-                    />
-                  </div>
-                </div>
+                <ClassBar
+                  key={name}
+                  name={name}
+                  count={count}
+                  scale={scale}
+                  color={classColor(name, classes)}
+                />
               ))}
             </div>
           ) : null}
@@ -145,4 +162,4 @@ export const ResultsChart = memo(function ResultsChart({
       </div>
     </section>
   )
-})
+}, areChartPropsEqual)

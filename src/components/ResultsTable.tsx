@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { sameStringList } from '../runView/chartProps'
 import { cell, percent } from '../runView/format'
 import type { AnalysisResultRow } from '../shared/analysis'
 
@@ -47,4 +48,9 @@ export const ResultsTable = memo(function ResultsTable({
       )}
     </section>
   )
-})
+}, (prev, next) => (
+  prev.rows.length === next.rows.length
+  && sameStringList(prev.columns, next.columns)
+  && prev.rows[prev.rows.length - 1]?.rowIndex === next.rows[next.rows.length - 1]?.rowIndex
+  && prev.rows[prev.rows.length - 1]?.selectedClass === next.rows[next.rows.length - 1]?.selectedClass
+))
