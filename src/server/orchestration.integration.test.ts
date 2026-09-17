@@ -189,6 +189,35 @@ describe('bounded ESPN → forecast → persistence → browser read orchestrati
     expect(results.slice(1).every((result) => result.forecast.cacheHit)).toBe(true)
   })
 
+  it('enforces the durable budget across fresh orchestrator workers and different keys', async () => {
+    const calls: string[] = []
+    let now = 0
+    let pollCount = 0
+    const store = new InMemoryForecastStore()
+    const limits = { cadenceMs: 0, rateWindowMs: 1_000, maxRequestsPerWindow: 10, maxRequests: 1, maxSpendCents: 1, estimatedCostCentsPerRequest: 1 }
+    const cycleSource: ForecastCycleSource = {
+      poll: async () => {
+        pollCount += 1
+        return pollCount === 1 ? snapshot : { ...snapshot, state: { ...snapshot.state, playId: 'play-2', sequenceNumber: 23 } }
+      },
+      getCachedSnapshot: () => snapshot,
+    }
+    const first = await runForecastCycle({ source: cycleSource, store, provider: provider(calls), now: () => now, limits })
+    now = 2_000
+    const second = await runForecastCycle({
+      source: cycleSource,
+      store,
+      provider: provider(calls),
+      now: () => now,
+      limits: { cadenceMs: 0, rateWindowMs: 1_000, maxRequestsPerWindow: 10, maxRequests: 100, maxSpendCents: 100, estimatedCostCentsPerRequest: 1 },
+    })
+
+    expect(first.forecast.record.status).toBe('success')
+    expect(second.forecast.record.status).toBe('limited')
+    expect(second.forecast.record.error?.code).toBe('REQUEST_LIMIT')
+    expect(calls).toHaveLength(1)
+  })
+
   it('keeps stale feed status visible while returning persisted error and limited fallback records', async () => {
     const staleSource: ForecastCycleSource = {
       poll: async () => ({ ...snapshot, status: 'STALE', state: { ...snapshot.state, sourceStatus: 'STALE' } }),

@@ -1,4 +1,12 @@
-import type { ForecastClaimResult, ForecastRecord, ForecastRecordReadBoundary, MaybePromise } from '../shared/forecastRecords'
+import type {
+  ForecastBudgetReservationRequest,
+  ForecastBudgetReservationResult,
+  ForecastBudgetSettlementRequest,
+  ForecastClaimResult,
+  ForecastRecord,
+  ForecastRecordReadBoundary,
+  MaybePromise,
+} from '../shared/forecastRecords'
 
 /**
  * Typed shape for the future Convex document and query/mutation boundary.
@@ -23,6 +31,20 @@ export const forecastRecordSchema = {
   error: 'optional error metadata',
 } as const
 
+/**
+ * Durable budget documents are keyed by budgetScope. Reservations remain active
+ * until explicitly settled; they have no time-based expiry.
+ */
+export const forecastBudgetSchema = {
+  budgetScope: 'string',
+  reservationId: 'string',
+  ownerToken: 'string',
+  reservedAtMs: 'number',
+  estimatedCostCents: 'number',
+  limits: 'durable budget limits',
+  outcome: 'pending | consumed | released',
+} as const
+
 export type ForecastRecordDocument = ForecastRecord
 
 export interface ForecastQueryFunctions extends ForecastRecordReadBoundary {
@@ -34,6 +56,8 @@ export interface ForecastMutationFunctions {
   putForecastIfAbsent(record: ForecastRecord): MaybePromise<ForecastRecord>
   claimForecast(idempotencyKey: string, ownerToken: string, nowMs: number, leaseMs: number): MaybePromise<ForecastClaimResult>
   releaseForecastClaim(idempotencyKey: string, ownerToken: string): MaybePromise<void>
+  reserveForecastBudget(request: ForecastBudgetReservationRequest): MaybePromise<ForecastBudgetReservationResult>
+  settleForecastBudget(request: ForecastBudgetSettlementRequest): MaybePromise<void>
 }
 
 export type ForecastFunctionBoundary = ForecastQueryFunctions & ForecastMutationFunctions

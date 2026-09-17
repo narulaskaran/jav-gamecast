@@ -7,9 +7,11 @@ import {
   InMemoryForecastStore,
   ReplayForecastProvider,
   type ForecastJob,
+  type ForecastLimits,
   type ForecastMode,
   type ForecastResult,
   type ForecastStore,
+  type JevProvider,
 } from './forecastWorker'
 import { EspnGameStateSource, type EspnGameStateSourceOptions } from './espn'
 
@@ -26,6 +28,9 @@ export interface ForecastCycleOptions {
   now?: () => number
   espn?: Omit<EspnGameStateSourceOptions, 'now' | 'replay'>
   replayRecords?: readonly ForecastRecord[]
+  limits?: Partial<ForecastLimits>
+  budgetScope?: string
+  provider?: JevProvider
 }
 
 export interface ForecastCycleResult {
@@ -43,6 +48,11 @@ const replaySource: ForecastCycleSource = {
   },
 }
 
+// Keep live cycle invocations in one process on the same boundary even when a
+// caller omits `store`. Deployments should replace this with their durable store
+// so the same ownership and budget state survives process restart.
+const defaultLiveForecastStore = new InMemoryForecastStore()
+
 const sourceFor = (options: ForecastCycleOptions, mode: ForecastMode): ForecastCycleSource => {
   if (options.source) return options.source
   if (mode !== 'live') return replaySource
@@ -55,11 +65,14 @@ const sourceFor = (options: ForecastCycleOptions, mode: ForecastMode): ForecastC
 
 const workerFor = (options: ForecastCycleOptions, mode: ForecastMode): ForecastWorker => {
   if (options.worker) return options.worker
-  const store = options.store ?? new InMemoryForecastStore()
+  const store = options.store ?? (mode === 'live' ? defaultLiveForecastStore : new InMemoryForecastStore())
   return new ForecastWorker({
     mode,
     store,
     ...(options.now ? { now: options.now } : {}),
+    ...(options.limits ? { limits: options.limits } : {}),
+    ...(options.budgetScope ? { budgetScope: options.budgetScope } : {}),
+    ...(options.provider ? { provider: options.provider } : {}),
     ...(mode === 'mock' ? { mockProvider: new DeterministicMockForecastProvider() } : {}),
     ...(mode === 'replay' ? {
       replayProvider: options.replayRecords

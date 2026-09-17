@@ -38,8 +38,46 @@ export interface ForecastRecord {
 
 export type MaybePromise<T> = T | Promise<T>
 
+export type ForecastLimitCode = 'CADENCE_LIMIT' | 'RATE_LIMIT' | 'REQUEST_LIMIT' | 'SPEND_LIMIT'
+
+export interface ForecastBudgetLimits {
+  cadenceMs: number
+  rateWindowMs: number
+  maxRequestsPerWindow: number
+  maxRequests: number
+  maxSpendCents: number
+  estimatedCostCentsPerRequest: number
+}
+
+export interface ForecastBudgetReservationRequest extends ForecastBudgetLimits {
+  budgetScope: string
+  reservationId: string
+  ownerToken: string
+  nowMs: number
+}
+
+export interface ForecastBudgetReservation {
+  budgetScope: string
+  reservationId: string
+  ownerToken: string
+  reservedAtMs: number
+  estimatedCostCents: number
+}
+
+export type ForecastBudgetReservationResult =
+  | { status: 'reserved'; reservation: ForecastBudgetReservation }
+  | { status: 'limited'; code: ForecastLimitCode }
+
+export interface ForecastBudgetSettlementRequest {
+  budgetScope: string
+  reservationId: string
+  ownerToken: string
+  outcome: 'consumed' | 'released'
+}
+
 export interface ForecastClaim {
   ownerToken: string
+  /** Informational compatibility field; stores must not reclaim an unfinalized claim by time. */
   leaseExpiresAt: number
 }
 
@@ -60,4 +98,8 @@ export interface ForecastRecordStore {
   /** Atomically claim a key before any provider invocation. */
   claimForecast(idempotencyKey: string, ownerToken: string, nowMs: number, leaseMs: number): MaybePromise<ForecastClaimResult>
   releaseForecastClaim(idempotencyKey: string, ownerToken: string): MaybePromise<void>
+  /** Atomically reserve the durable live request/rate/spend budget before provider invocation. */
+  reserveForecastBudget(request: ForecastBudgetReservationRequest): MaybePromise<ForecastBudgetReservationResult>
+  /** Consume a provider reservation, or release it only when no provider call was made. */
+  settleForecastBudget(request: ForecastBudgetSettlementRequest): MaybePromise<void>
 }

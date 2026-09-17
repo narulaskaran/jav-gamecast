@@ -146,14 +146,82 @@ describe('forecast identity and persistence boundary', () => {
     const providerStarted = new Promise<void>((resolve) => { started = resolve })
     const firstPromise = workerA.forecast(job)
     await providerStarted
-    const secondPromise = workerB.forecast(job)
-    await Promise.resolve()
-    release?.()
-    const [first, second] = await Promise.all([firstPromise, secondPromise])
-
+    await expect(workerB.forecast(job)).rejects.toThrow(/already claimed/i)
     expect(calls.keys).toHaveLength(1)
-    expect(second.cacheHit).toBe(true)
-    expect(second.record).toBe(first.record)
+    release?.()
+    const first = await firstPromise
+
+    expect(first.record.status).toBe('success')
+  })
+
+  it('enforces a rolling request window across distinct workers and keys', async () => {
+    const calls = { keys: [] as string[] }
+    let now = 0
+    const store = new InMemoryForecastStore()
+    const limits = { cadenceMs: 0, rateWindowMs: 10_000, maxRequestsPerWindow: 1, maxRequests: 100, maxSpendCents: 100, estimatedCostCentsPerRequest: 1 }
+    const workerA = new ForecastWorker({ provider: successProvider(calls), store, now: () => now, limits })
+    const workerB = new ForecastWorker({ provider: successProvider(calls), store, now: () => now, limits })
+
+    await workerA.forecast(job)
+    now = 1_000
+    const limited = await workerB.forecast({ ...job, providerPlayId: 'play-2', state: { ...state, playId: 'play-2' } })
+
+    expect(limited.record.status).toBe('limited')
+    expect(limited.record.error?.code).toBe('RATE_LIMIT')
+    expect(calls.keys).toHaveLength(1)
+  })
+
+  it('keeps a lifetime request and spend budget across fresh workers after the window expires', async () => {
+    const calls = { keys: [] as string[] }
+    let now = 0
+    const store = new InMemoryForecastStore()
+    const limits = { cadenceMs: 0, rateWindowMs: 1_000, maxRequestsPerWindow: 10, maxRequests: 1, maxSpendCents: 1, estimatedCostCentsPerRequest: 1 }
+    const workerA = new ForecastWorker({ provider: successProvider(calls), store, now: () => now, limits })
+
+    await workerA.forecast(job)
+    now = 2_000
+    const workerB = new ForecastWorker({
+      provider: successProvider(calls),
+      store,
+      now: () => now,
+      limits: { cadenceMs: 0, rateWindowMs: 1_000, maxRequestsPerWindow: 10, maxRequests: 100, maxSpendCents: 100, estimatedCostCentsPerRequest: 1 },
+    })
+    const limited = await workerB.forecast({ ...job, providerPlayId: 'play-2', state: { ...state, playId: 'play-2' } })
+
+    expect(limited.record.status).toBe('limited')
+    expect(limited.record.error?.code).toBe('REQUEST_LIMIT')
+    expect(calls.keys).toHaveLength(1)
+  })
+
+  it('fails closed when a claim is old and another worker still owns the in-flight request', async () => {
+    const calls = { keys: [] as string[] }
+    let release: (() => void) | undefined
+    let started!: () => void
+    const provider: JevProvider = {
+      forecast: async ({ idempotencyKey }) => {
+        calls.keys.push(idempotencyKey)
+        started()
+        await new Promise<void>((resolve) => { release = resolve })
+        return {
+          model: 'jev-latest',
+          answer: { type: 'choice', choice: 'home', probabilities: { home: 0.6, away: 0.3, tie: 0.1 }, confidence: 0.6 },
+        }
+      },
+    }
+    let clockA = 0
+    let clockB = 10_000_000
+    const store = new InMemoryForecastStore()
+    const workerA = new ForecastWorker({ provider, store, now: () => clockA, limits: { claimLeaseMs: 1_000, cadenceMs: 0 } })
+    const workerB = new ForecastWorker({ provider, store, now: () => clockB, limits: { claimLeaseMs: 1_000, cadenceMs: 0 } })
+    const providerStarted = new Promise<void>((resolve) => { started = resolve })
+    const firstPromise = workerA.forecast(job)
+    await providerStarted
+    clockA = 20_000_000
+
+    await expect(workerB.forecast(job)).rejects.toThrow(/already claimed/i)
+    expect(calls.keys).toHaveLength(1)
+    release?.()
+    await firstPromise
   })
 })
 

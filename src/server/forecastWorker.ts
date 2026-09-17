@@ -21,12 +21,25 @@ import type {
   ForecastRecordSource,
   ForecastRecordStatus,
   ForecastRecordStore,
+  ForecastBudgetLimits,
+  ForecastBudgetReservation,
   JsonValue,
 } from '../shared/forecastRecords'
 import { InMemoryForecastStore } from '../persistence/forecastStore'
 
 export type { JevProvider } from './jev'
-export type { ForecastErrorMetadata, ForecastRecord, ForecastRecordSource, ForecastRecordStatus, ForecastRecordStore } from '../shared/forecastRecords'
+export type {
+  ForecastBudgetLimits,
+  ForecastBudgetReservation,
+  ForecastBudgetReservationRequest,
+  ForecastBudgetReservationResult,
+  ForecastBudgetSettlementRequest,
+  ForecastErrorMetadata,
+  ForecastRecord,
+  ForecastRecordSource,
+  ForecastRecordStatus,
+  ForecastRecordStore,
+} from '../shared/forecastRecords'
 export { InMemoryForecastStore } from '../persistence/forecastStore'
 
 export type ForecastMode = 'live' | 'mock' | 'replay'
@@ -45,12 +58,7 @@ export interface NormalizedForecastJob extends Omit<ForecastJob, 'state'> {
   idempotencyKey: string
 }
 
-export interface ForecastLimits {
-  cadenceMs: number
-  rateWindowMs: number
-  maxRequestsPerWindow: number
-  maxRequests: number
-  maxSpendCents: number
+export interface ForecastLimits extends ForecastBudgetLimits {
   estimatedCostCentsPerRequest: number
   claimLeaseMs: number
 }
@@ -131,6 +139,13 @@ export class ReplayMissError extends Error {
   }
 }
 
+export class BusyForecastClaimError extends Error {
+  constructor() {
+    super('Forecast key is already claimed by another worker')
+    this.name = 'BusyForecastClaimError'
+  }
+}
+
 export class ReplayForecastProvider implements JevProvider {
   private readonly records: ReadonlyMap<string, ForecastRecord>
 
@@ -176,6 +191,8 @@ export interface ForecastWorkerOptions {
   store?: ForecastStore
   now?: () => number
   limits?: Partial<ForecastLimits>
+  /** Defaults to the normalized job gameId; all workers must share this scope/store. */
+  budgetScope?: string
 }
 
 export interface ForecastResult {
@@ -191,10 +208,8 @@ export class ForecastWorker {
   private readonly store: ForecastStore
   private readonly now: () => number
   private readonly limits: ForecastLimits
+  private readonly budgetScope?: string
   private lastAttemptAt?: number
-  private liveRequests = 0
-  private spentCents = 0
-  private readonly liveRequestTimes: number[] = []
   private readonly inFlight = new Map<string, Promise<ForecastResult>>()
   private readonly claimOwnerToken = randomUUID()
 
@@ -205,6 +220,7 @@ export class ForecastWorker {
     this.replayProvider = options.replayProvider
     this.store = options.store ?? new InMemoryForecastStore()
     this.now = options.now ?? Date.now
+    this.budgetScope = options.budgetScope?.trim() || undefined
     const candidate = { ...DEFAULT_FORECAST_LIMITS, ...options.limits }
     this.limits = {
       cadenceMs: bounded('cadenceMs', candidate.cadenceMs, 0, 86_400_000),
@@ -228,41 +244,60 @@ export class ForecastWorker {
       return { record: result.record, cacheHit: true }
     }
 
-    const claim = await this.store.claimForecast(job.idempotencyKey, this.claimOwnerToken, this.now(), this.limits.claimLeaseMs)
-    if (claim.status === 'existing') return { record: claim.record, cacheHit: true }
-    if (claim.status === 'busy') {
-      const record = await this.waitForClaimedRecord(job.idempotencyKey)
-      if (record) return { record, cacheHit: true }
-      throw new Error('Forecast key is already claimed by another worker')
-    }
-
-    const execution = this.executeForecast(job)
+    // Register before the first asynchronous claim boundary so same-process
+    // duplicate callers still coalesce while cross-worker callers fail closed.
+    const execution = this.runClaimedForecast(job)
     this.inFlight.set(job.idempotencyKey, execution)
     try {
       return await execution
     } finally {
-      await this.store.releaseForecastClaim(job.idempotencyKey, this.claimOwnerToken)
       if (this.inFlight.get(job.idempotencyKey) === execution) this.inFlight.delete(job.idempotencyKey)
     }
   }
 
+  private async runClaimedForecast(job: NormalizedForecastJob): Promise<ForecastResult> {
+    const claim = await this.store.claimForecast(job.idempotencyKey, this.claimOwnerToken, this.now(), this.limits.claimLeaseMs)
+    if (claim.status === 'existing') return { record: claim.record, cacheHit: true }
+    if (claim.status === 'busy') throw new BusyForecastClaimError()
+
+    try {
+      return await this.executeForecast(job)
+    } finally {
+      await this.store.releaseForecastClaim(job.idempotencyKey, this.claimOwnerToken)
+    }
+  }
+
   private async executeForecast(job: NormalizedForecastJob): Promise<ForecastResult> {
-
     const currentTime = this.now()
-    const limited = this.limitRecord(job, currentTime)
-    if (limited) return { record: await this.persistRecord(limited), cacheHit: false }
-
     const requestedAt = nowIso(currentTime)
-    this.lastAttemptAt = currentTime
-    if (this.mode === 'live') {
-      this.liveRequests += 1
-      this.spentCents += this.limits.estimatedCostCentsPerRequest
-      this.liveRequestTimes.push(currentTime)
+    if (this.mode !== 'live') {
+      const limited = this.limitNonLiveRecord(job, currentTime)
+      if (limited) return { record: await this.persistRecord(limited), cacheHit: false }
+      this.lastAttemptAt = currentTime
+    }
+    const reservation = this.mode === 'live' ? await this.reserveBudget(job, currentTime) : undefined
+    if (reservation && reservation.status === 'limited') {
+      return { record: await this.persistRecord(this.limitedRecord(job, currentTime, reservation.code)), cacheHit: false }
+    }
+    const budgetReservation = reservation?.status === 'reserved' ? reservation.reservation : undefined
+    let providerInvoked = false
+    let budgetSettled = false
+    const settleBudget = async (outcome: 'consumed' | 'released'): Promise<void> => {
+      if (!budgetReservation || budgetSettled) return
+      budgetSettled = true
+      await this.store.settleForecastBudget({
+        budgetScope: budgetReservation.budgetScope,
+        reservationId: budgetReservation.reservationId,
+        ownerToken: budgetReservation.ownerToken,
+        outcome,
+      })
     }
     const startedAt = currentTime
     try {
       const provider = this.resolveProvider()
+      providerInvoked = true
       const result = await provider.forecast(asProviderRequest(job))
+      await settleBudget('consumed')
       const completedAtMs = this.now()
       const record: ForecastRecord = {
         idempotencyKey: job.idempotencyKey,
@@ -282,6 +317,11 @@ export class ForecastWorker {
       const persisted = await this.persistRecord(record)
       return { record: persisted, cacheHit: persisted !== record }
     } catch (error) {
+      try {
+        await settleBudget(providerInvoked ? 'consumed' : 'released')
+      } catch {
+        // Keep an unsettled reservation fail-closed if the durable boundary is unavailable.
+      }
       const completedAtMs = this.now()
       const record: ForecastRecord = {
           idempotencyKey: job.idempotencyKey,
@@ -319,28 +359,25 @@ export class ForecastWorker {
     return await this.store.putIfAbsent(record)
   }
 
-  private async waitForClaimedRecord(idempotencyKey: string): Promise<ForecastRecord | undefined> {
-    const deadline = Date.now() + this.limits.claimLeaseMs + 1_000
-    while (Date.now() < deadline) {
-      const record = await this.store.get(idempotencyKey)
-      if (record) return record
-      await new Promise<void>((resolve) => setTimeout(resolve, 25))
-    }
-    return undefined
+  private async reserveBudget(job: NormalizedForecastJob, currentTime: number) {
+    return await this.store.reserveForecastBudget({
+      budgetScope: this.budgetScope ?? job.gameId,
+      reservationId: randomUUID(),
+      ownerToken: this.claimOwnerToken,
+      nowMs: currentTime,
+      cadenceMs: this.limits.cadenceMs,
+      rateWindowMs: this.limits.rateWindowMs,
+      maxRequestsPerWindow: this.limits.maxRequestsPerWindow,
+      maxRequests: this.limits.maxRequests,
+      maxSpendCents: this.limits.maxSpendCents,
+      estimatedCostCentsPerRequest: this.limits.estimatedCostCentsPerRequest,
+    })
   }
 
-  private limitRecord(job: NormalizedForecastJob, currentTime: number): ForecastRecord | undefined {
+  private limitNonLiveRecord(job: NormalizedForecastJob, currentTime: number): ForecastRecord | undefined {
     if (this.lastAttemptAt !== undefined && currentTime - this.lastAttemptAt < this.limits.cadenceMs) {
       return this.limitedRecord(job, currentTime, 'CADENCE_LIMIT')
     }
-    if (this.mode !== 'live') return undefined
-
-    while (this.liveRequestTimes[0] !== undefined && currentTime - this.liveRequestTimes[0] >= this.limits.rateWindowMs) {
-      this.liveRequestTimes.shift()
-    }
-    if (this.liveRequests >= this.limits.maxRequests) return this.limitedRecord(job, currentTime, 'REQUEST_LIMIT')
-    if (this.liveRequestTimes.length >= this.limits.maxRequestsPerWindow) return this.limitedRecord(job, currentTime, 'RATE_LIMIT')
-    if (this.spentCents + this.limits.estimatedCostCentsPerRequest > this.limits.maxSpendCents) return this.limitedRecord(job, currentTime, 'SPEND_LIMIT')
     return undefined
   }
 
