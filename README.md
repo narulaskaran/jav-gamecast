@@ -25,6 +25,14 @@ npm run audit
 
 `test:convex` uses the official `convex-test` mock runtime. It exercises the real checked-in Convex schema/functions for immutable idempotent writes, claims, durable budget reservations, access-control rejection, and the read-only action. It is not evidence of a deployed Convex environment or a Convex-backed browser end-to-end run. All tests use deterministic inputs and never make a paid Jev request.
 
+## Pinned football analysis fixture
+
+`src/fixtures/footballTimeline.ts` exports the deterministic Seahawks Super Bowl fixture used by Jev Data Analysis. It is generated from the hash-pinned nflverse `play_by_play_2025` release (with the checked-in CSV.gz fallback), filtered to 71 Seattle run/pass/sack rows in `play_id` order and split into 39 H1 input rows and 32 H2 evaluation rows. `games.csv` is used only for identity and integrity assertions.
+
+The halftime contract exposes H1-only model inputs and evaluates the highest H2 Seattle scrimmage-yard contributor using stable player IDs. H2 rows, final scores, full-game totals, postgame data, and result metadata never enter the model input. The fixture is a demo contract test, not evidence of model quality or generalization, and its label is an MVP proxy rather than an official award. Attribution and CC BY 4.0 source links are stored in the fixture manifest.
+
+Regenerate from verified local source assets with `node scripts/generate-football-fixture.mjs --pbp <play_by_play_2025.csv.gz> --games <games.csv> --out src/fixtures/data/seahawks-super-bowl-2026.json`, or validate the checked-in representation with `npm run fixture:validate`.
+
 ## Runtime layout
 
 - `convex/schema.ts` defines the durable `forecastRecords`, `forecastClaims`, `forecastBudgets`, and `forecastBudgetReservations` tables and indexes.

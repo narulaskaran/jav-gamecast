@@ -12,7 +12,8 @@
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "typecheck:convex": "tsc -p convex/tsconfig.json --noEmit",
     "audit": "npm audit --audit-level=high",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "fixture:validate": "node scripts/generate-football-fixture.mjs --validate"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0",
