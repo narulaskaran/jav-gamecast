@@ -6,9 +6,9 @@ import { fixture, parseFixture } from './fixture'
 import { InMemoryForecastStore } from './persistence/forecastStore'
 import { ForecastWorker } from './server/forecastWorker'
 import type { ForecastRecord } from './shared/forecastRecords'
-import type { GameStateSource } from './types'
+import type { FeedStatus, GameStateSource } from './types'
 
-const makeSource = (game: typeof fixture.game, status: 'REPLAY' | 'LIVE' | 'STALE'): GameStateSource => ({
+const makeSource = (game: typeof fixture.game, status: FeedStatus): GameStateSource => ({
   getSnapshotAt(index) {
     const point = fixture.points[index]
     return {
@@ -95,19 +95,21 @@ describe('gamecast forecast rendering', () => {
   it('renders chart series, event markers, metadata, and replay state', () => {
     render(<App />)
 
-    expect(screen.getByText('Jev forecasts this football game')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: /Jev forecasts this football game/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: /current forecast/i })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /historical forecast.*Harbor Hawks.*Cedar Foxes/i })).toBeInTheDocument()
     expect(screen.getAllByText('Harbor Hawks').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Cedar Foxes').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('REPLAY').length).toBeGreaterThan(0)
-    expect(screen.getByText('LIVE')).toBeInTheDocument()
-    expect(screen.getByText('STALE')).toBeInTheDocument()
+    expect(document.querySelectorAll('.status-pill')).toHaveLength(1)
+    expect(document.querySelector('.status-pill.is-current')).toHaveTextContent('REPLAY')
+    expect(screen.queryByText('LIVE')).not.toBeInTheDocument()
+    expect(screen.queryByText('STALE')).not.toBeInTheDocument()
     expect(screen.getByText('Punt pins the opener')).toBeInTheDocument()
     expect(screen.getByText(/synthetic fixture/i)).toBeInTheDocument()
     expect(screen.getAllByText('HH').length).toBeGreaterThan(0)
     expect(screen.getAllByText('CF').length).toBeGreaterThan(0)
-    expect(screen.getByText('Home')).toBeInTheDocument()
-    expect(screen.getByText('Away')).toBeInTheDocument()
+    expect(screen.getByText('Home', { selector: '.team-label' })).toBeInTheDocument()
+    expect(screen.getByText('Away', { selector: '.team-label' })).toBeInTheDocument()
     expect(screen.getByTestId('forecast-line-homeProbability')).toHaveAttribute('d', expect.stringContaining('M'))
     expect(screen.getByTestId('forecast-line-awayProbability')).toHaveAttribute('d', expect.stringContaining('M'))
     expect(document.querySelector('[data-series-key="awayProbability"].future-line')).toHaveAttribute('d', expect.stringContaining('L'))
@@ -169,10 +171,43 @@ describe('gamecast forecast rendering', () => {
     expect(screen.getAllByText('South Comets', { selector: 'strong' }).length).toBeGreaterThan(0)
     expect(screen.getAllByText('NS').length).toBeGreaterThan(0)
     expect(screen.getAllByText('SC').length).toBeGreaterThan(0)
-    expect(screen.getByText('STALE', { selector: '.status-pill.is-current' })).toBeInTheDocument()
+    expect(document.querySelector('.status-pill.is-current')).toHaveTextContent('STALE')
     expect(screen.getByText('North Stars', { selector: '.legend-long' })).toBeInTheDocument()
     expect(screen.getByText('South Comets', { selector: '.legend-long' })).toBeInTheDocument()
     expect(document.querySelector('.probabilities')?.textContent).toContain('NS 40%')
     expect(document.querySelector('.probabilities')?.textContent).toContain('SC 48%')
+  })
+
+  it('keeps the product hierarchy to one forecast readout and one replay timeline', () => {
+    render(<App />)
+
+    expect(document.querySelector('.intro h1')).toHaveTextContent(/Jev forecasts.*this football game\./)
+    expect(document.querySelector('.game-card')).toBeInTheDocument()
+    expect(document.querySelector('.forecast-panel')).toBeInTheDocument()
+    expect(document.querySelector('.forecast-readout')).toBeInTheDocument()
+    expect(document.querySelector('.event-rail')).toBeInTheDocument()
+    expect(document.querySelectorAll('.status-pill')).toHaveLength(1)
+    expect(document.querySelector('.forecast-panel')?.querySelectorAll('h2')).toHaveLength(1)
+  })
+
+  it('distinguishes non-replay feed states with the same single indicator', () => {
+    const source = makeSource(fixture.game, 'ERROR')
+    render(<App forecastSource={{ getPoints: () => fixture.points, feedStatus: 'ERROR' }} gameStateSource={source} />)
+
+    const indicator = document.querySelector('.status-pill.is-current')
+    expect(indicator).toHaveAttribute('data-status', 'ERROR')
+    expect(indicator).toHaveAccessibleName('Live feed unavailable status')
+    expect(document.querySelectorAll('.status-pill')).toHaveLength(1)
+  })
+
+  it('keeps the replay timeline keyboard reachable on a narrow layout', () => {
+    render(<App />)
+
+    const slider = screen.getByRole('slider', { name: /replay position/i })
+    slider.focus()
+    expect(document.activeElement).toBe(slider)
+    fireEvent.change(slider, { target: { value: '6' } })
+    expect(slider).toHaveValue('6')
+    expect(screen.getByRole('button', { name: /jump to final whistle/i })).toBeVisible()
   })
 })

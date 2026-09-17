@@ -20,9 +20,9 @@ const pathFor = (points: readonly ForecastPoint[], key: ProbabilityKey, endIndex
   points.slice(0, endIndex + 1).map((point, index) => `${index === 0 ? 'M' : 'L'} ${xFor(index, points.length).toFixed(1)} ${yFor(point[key]).toFixed(1)}`).join(' ')
 
 const seriesFor = (game: GameState) => [
-  { key: 'homeProbability', label: game.homeTeam, short: 'Home', color: '#f05d4f' },
-  { key: 'awayProbability', label: game.awayTeam, short: 'Away', color: '#2f70c0' },
-  { key: 'tieProbability', label: 'Tie', short: 'Tie', color: '#8b7cf6' },
+  { key: 'homeProbability', label: game.homeTeam, short: 'Home', color: '#e66d56' },
+  { key: 'awayProbability', label: game.awayTeam, short: 'Away', color: '#3d7a72' },
+  { key: 'tieProbability', label: 'Tie', short: 'Tie', color: '#9a8cbd' },
 ] as const
 
 export const ForecastChart = ({ points, currentIndex, game }: ForecastChartProps) => {
@@ -31,28 +31,14 @@ export const ForecastChart = ({ points, currentIndex, game }: ForecastChartProps
   const series = seriesFor(game)
   return (
     <div className="chart-shell">
-      <div className="chart-heading">
-        <div>
-          <p className="eyebrow">Forecast history</p>
-          <h2>What Jev saw as the game moved</h2>
-        </div>
-        <div className="chart-range" aria-label="Chart range">0–100<span>%</span></div>
-      </div>
       <div className="chart-wrap">
         <svg className="forecast-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={`Historical forecast chart for ${game.homeTeam}, ${game.awayTeam}, and tie probabilities`}>
-          <defs>
-            <linearGradient id="chartGlow" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0" stopColor="#f05d4f" stopOpacity=".13" />
-              <stop offset="1" stopColor="#f05d4f" stopOpacity="0" />
-            </linearGradient>
-          </defs>
           {[0, 25, 50, 75, 100].map((value) => (
             <g key={value}>
               <line className="grid-line" x1={PADDING.left} x2={WIDTH - PADDING.right} y1={yFor(value)} y2={yFor(value)} />
               <text className="axis-label" x={PADDING.left - 12} y={yFor(value) + 4} textAnchor="end">{value}</text>
             </g>
           ))}
-          <path d={`${pathFor(points, 'homeProbability')} L ${xFor(points.length - 1, points.length)} ${HEIGHT - PADDING.bottom} L ${PADDING.left} ${HEIGHT - PADDING.bottom} Z`} fill="url(#chartGlow)" className="chart-area" />
           {series.map(({ key, color, label }) => (
             <g key={key}>
               <path data-series={label} data-series-key={key} d={pathFor(points, key)} fill="none" stroke={color} strokeWidth="2" strokeDasharray="4 5" opacity=".18" className="future-line" />
@@ -66,7 +52,7 @@ export const ForecastChart = ({ points, currentIndex, game }: ForecastChartProps
               <g key={point.id} className={active ? 'chart-point is-active' : 'chart-point'}>
                 {isEvent && <line className="event-marker" data-timestamp={point.timestamp} x1={xFor(index, points.length)} x2={xFor(index, points.length)} y1={PADDING.top} y2={HEIGHT - PADDING.bottom} />}
                 {series.map(({ key, color, label }) => (
-                  <circle key={key} cx={xFor(index, points.length)} cy={yFor(point[key])} r={index === safeIndex ? 4.5 : 2.5} fill={color} stroke="#fbfaf7" strokeWidth="2">
+                  <circle key={key} cx={xFor(index, points.length)} cy={yFor(point[key])} r={index === safeIndex ? 4.5 : 2.5} fill={color} stroke="#f7f5ef" strokeWidth="2">
                     <title>{`${point.timestamp}: ${label} ${point[key]}%`}</title>
                   </circle>
                 ))}
