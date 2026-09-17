@@ -1,6 +1,17 @@
-# Jev Gamecast
+# Jev Data Analysis
 
-Jev Gamecast is a replay-first React + TypeScript + Vite product. Replay is the safe default: a checked-in synthetic fixture renders without network access, credentials, Convex, ESPN, or a paid Jev call. Live mode is explicit and fail-closed.
+Bring a dataset. Ask a question. See Jev classify every row.
+
+This repository used to be Jev Gamecast. The active product is a fixture-first analysis workbench, not a live ESPN gamecast. New agents should read `CURSOR.md` and `PLAN.md` first; the current API contract is `docs/analysis-api.md`.
+
+```bash
+npm install
+npm run dev
+```
+
+The checked-in football fixture is the sample dataset. Visiting or sharing a page never starts a paid Jev run. Browser code does not call Jev, OpenRouter, ESPN, or privileged Convex writes. Live provider calls are server-only and fail-closed without keys.
+
+The sections below retain historical Gamecast, Convex, and Vercel operator notes that still apply to leftover forecast routes.
 
 ## Local replay
 

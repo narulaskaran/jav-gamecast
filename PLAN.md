@@ -1,484 +1,638 @@
-# Jev Gamecast — Scope Plan
+# Jev Dataset Analysis — MVP Implementation Plan
 
-**Status:** Scoping; no application code yet
-**Last updated:** 2026-09-17 01:13:40 UTC
+> **For agents:** The active product is **Jev Data Analysis**, not a live football gamecast. Read this file and `CURSOR.md` before writing code. `docs/analysis-api.md` is the current fixture-first API contract. Do not revive ESPN live-feed gamecast as the product, and do not restart the MVP from a blank repo.
 
-## Product idea
+> **For Hermes:** Use the Kanban workflow and independent review/QA gates. P0 product decisions below are recorded. Implementation is already in progress on `origin/main`; continue from the current workbench rather than Stage 0 scaffolding.
 
-A public, live gamecast that feeds one selected NFL game’s changing state to Jev and displays Jev’s forecast as an animated probability chart. The experience should feel like a live market chart, while clearly presenting itself as a model forecast rather than betting advice or an odds product.
+**Status:** Pivot recorded. A fixture-first analysis workbench is on `origin/main`. Remaining work is pause/cancel, browse/share completeness, BYOD intake (Stage 5), abuse/cost controls, and production/release gates. Stage 0 provider-contract confirmation is still pending before paid live Jev.
 
-The demo proves:
+**Last updated:** 2026-09-17 23:05:00 UTC
 
-```text
-live external state → typed Jev judgment → probability history → visible real-time animation
-```
+**Goal:** Let a user bring a small CSV dataset, describe an analysis in natural language, review/edit the generated Jev classifier query, run a bounded row-by-row Jev analysis, watch results arrive live, and share/replay the completed analysis at a unique URL.
 
-## Locked MVP scope
+**Architecture:** The browser validates and previews CSV input, but never calls Jev, OpenRouter, UploadThing server credentials, or privileged Convex mutations directly. UploadThing stores the original CSV blob; Convex stores dataset/analysis metadata, immutable normalized row references, run progress, and incremental predictions for realtime display and replay. A server-only OpenRouter adapter turns the user’s natural-language task into a structured, editable Jev query. A bounded server worker processes rows in small leased chunks, persists each result atomically, and schedules the next chunk so a large run does not depend on one long-lived Vercel request.
 
-- American football/NFL only.
-- One featured live game at a time.
-- One shared Jev prediction stream per game.
-- No visitor voting.
-- No user-triggered arbitrary Jev calls.
-- No MPP/payment integration for the first version.
-- No fantasy-roster recommendations in the first version.
-- No live trading, betting, wagering, or external side effects.
-- No API key in browser code.
-- Synthetic/replay mode must work when no live game is available.
+**Tech stack:** Existing React + TypeScript + Vite frontend; Vercel server/API routes; Convex cloud for durable metadata, realtime queries, leases, and progress; UploadThing for CSV blobs; OpenRouter for normal-LLM query drafting; server-only TypeSafe/Jev classifier adapter; local CSS and dependency-light visualizations; Vitest and browser QA.
 
-## Forecast contract
+### Project identity
 
-Use one TypeSafe `Choice` judgment over the current game state:
+- Product name: **Jev Data Analysis**.
+- Intended Vercel project: `jev-data-analysis`.
+- Canonical git remote: `origin` (`jev-data-questions`).
+- Historical local directory names such as `jev-gamecast` are leftover from the previous product and do not change the active product.
 
-> Who is most likely to win this game from the current state?
+### Already on `origin/main` (do not rebuild)
 
-Options:
+Treat these as landed starting points, not future tasks:
 
-- home team;
-- away team;
-- tie.
+- Fixture-first analysis UI in `src/App.tsx`: sample football dataset, query draft/edit, explicit run, progress, current-row inspector, results, and share/replay readback.
+- Server analysis API: `POST /api/analysis/draft`, `POST /api/analysis/run`, `GET /api/analysis/<id>`, `GET /api/share/<id>` (`docs/analysis-api.md`).
+- Checked-in Seahawks Super Bowl fixture with H1 model inputs and H2 evaluation labels (`src/fixtures/footballTimeline.ts`).
+- Server-only OpenRouter draft adapter and Jev classifier adapter; browser bundles must stay free of credentials and provider SDKs.
+- Convex analysis snapshot persistence plus leftover Gamecast forecast tables/cron. Gamecast ESPN routes are historical; do not extend them as the product.
 
-Include the tie option so the distribution represents all possible final outcomes. The UI may emphasize the two team lines while still exposing the tie probability.
+Gaps versus this plan: no pause/cancel status, no BYOD CSV/UploadThing, no public dataset/analysis browse listing, leftover Gamecast forecast/ESPN operator copy remains in README, and paid live Jev remains fail-closed until operator provisioning and provider-contract confirmation.
 
-The state should be structured and include only information available at the forecast timestamp:
+---
 
-- game/event ID;
-- teams and home/away designation;
-- score;
-- quarter and clock;
-- possession;
-- down and distance;
-- field position;
-- timeouts;
-- recent play/event summary;
-- game status and feed timestamp;
-- optional pregame context, if sourced and frozen consistently.
+## 1. Product pivot and explicit boundary
 
-Do not include future scores, final outcomes, or post-event fields in the request state.
+The active product is no longer a live football gamecast. The old ESPN/game-state/gamecast surface is historical implementation material only. Preserve useful server-only Jev, persistence, idempotency, and fail-closed patterns where they apply. The first MVP intentionally uses one sanitized football time-series fixture as a sample dataset, but must not carry ESPN-specific concepts, live-feed labels, routes, or product copy into the general BYOD experience.
 
-## Feed and serving architecture
+### Product promise
+
+> Bring a dataset. Ask a question. See Jev classify every row.
+
+The product should feel like a clear analysis workbench, not an AI-agent control panel. The primary flow is:
 
 ```text
-ESPN public read-only feed
-  ↓
-server-side poller
-  ↓
-normalize and validate game state
-  ↓
-dedupe by game ID + event/play ID
-  ↓
-ignore unchanged or insignificant states
-  ↓
-one Jev request per accepted state
-  ↓
-append forecast result
-  ↓
-broadcast cached result to all browsers
+landing page
+  → choose the checked-in football time-series sample
+  → preview the sample rows and schema
+  → describe task in natural language
+  → server drafts structured Jev classifier query through OpenRouter
+  → user reviews/edits query
+  → explicit Run Jev confirmation
+  → bounded row-by-row execution
+  → realtime result visualization + current-row inspector
+  → durable replay/share page
 ```
 
-Initial ESPN source: the public site scoreboard and game summary/play-by-play endpoints described by `pseudo-r/Public-ESPN-API`. This is an undocumented upstream, so treat it as replaceable:
+### MVP scope
 
-- keep all ESPN access server-side;
-- add timeout, retry, and backoff;
-- cache the most recent valid state;
-- detect stale or out-of-order events;
-- provide replay fallback;
-- do not assume the endpoint is stable or accepted from every deployment origin.
+- The first MVP release uses one checked-in, sanitized football time-series fixture. It is deterministic and requires no upload, URL fetch, ESPN call, or external dataset rights.
+- The fixture contains sequential rows representing game-state checkpoints/events and is shaped exactly like a future user dataset.
+- CSV upload and direct public HTTPS CSV intake remain the next BYOD expansion stage; their full requirements stay in this plan but are not prerequisites for the first working demo.
+- One analysis task per run.
+- User explicitly starts each Jev run; opening or sharing a page never starts a paid run.
+- One Jev classifier decision per accepted row unless the final contract requires a different batching model.
+- Natural-language task drafting through a normal OpenRouter LLM; generated query is reviewable and manually editable before execution.
+- Live progress through Convex realtime updates, with a current-row panel and an incremental chart/table.
+- Every analysis has a stable shareable URL and a replayable immutable result history.
+- Landing page entry points in the first slice: try the sample dataset and browse the sample analysis. Add upload/provide-a-dataset entry points when BYOD intake is implemented.
+- Convex stores sample-dataset metadata, progress, and results in the first slice. UploadThing is deferred until user-supplied CSVs are enabled. Do not add Neon or Redis for MVP.
+- Each project has one public dataset listing and one public analysis listing in MVP; future private/unlisted modes are out of scope until identity/access control exists.
 
-## Jev call budget
+### Explicit non-goals
 
-Only the server-side game worker may call Jev. Every accepted event must have a stable idempotency key such as `game_id + play_id + state_hash`.
+- No live ESPN or other external sports-feed ingestion in the first MVP; football appears only as a sanitized fixture domain.
+- No arbitrary browser-to-Jev calls.
+- No automatic Jev execution from page load, social preview generation, or public browsing.
+- No unbounded dataset size, row count, concurrency, retry loop, or spend.
+- No authenticated Google Drive/S3/database connectors in MVP.
+- No SQL editor, Python notebook, arbitrary code execution, or user-defined model tools.
+- No claim that Jev outputs are calibrated, causal, accurate, or suitable for high-stakes decisions.
+- No private dataset contents in logs, analytics, URLs, OpenGraph metadata, or error reports.
+- No secrets, provider tokens, cookies, or connection strings in Git or browser bundles.
 
-Initial controls:
+---
 
-- one featured game;
-- one forecast call per new meaningful play/state change;
-- no repeated call for an unchanged state;
-- bounded polling interval;
-- daily/monthly spend ceiling;
-- request and response logging without credentials or private data;
-- a visible “replay mode” fallback when the live budget or feed is unavailable.
+## 2. P0 decisions required before implementation
 
-Meaningful update candidates:
+These questions materially change the data model, abuse controls, and UI. Record the answers in this file before dispatching implementation tasks.
 
-- score change;
-- turnover;
-- possession change;
-- fourth-down attempt or conversion;
-- red-zone entry/exit;
-- end of drive;
-- quarter transition;
-- substantial clock milestone;
-- other material play-by-play state changes.
+1. **Visibility and identity — DECIDED:** Anonymous creation with every dataset and analysis public by default. The MVP must show a clear public-data warning before any future upload and must never expose secrets, credentials, or private provider responses. Deletion/abuse controls remain a launch risk because there is no owner account.
+2. **Execution cap — DECIDED:** Maximum 5,000 accepted rows and 5,000 Jev calls per analysis. This is a hard server-side ceiling, not a promise that every user may run 5,000 calls without additional global throttling or budget approval. The run confirmation must show the maximum call count; concurrency, retry policy, and global quota remain enforced server-side.
+3. **Jev classifier contract — DECIDED:** Each row produces a selected class, per-class probabilities, and confidence when Jev provides it; no free-form explanation by default. The implementation must generalize the existing typed `Choice` adapter from hard-coded football outcomes to dynamic user-defined classes, subject to the confirmed Jev API contract.
+4. **CSV URLs — DECIDED:** Accept public HTTPS URLs that directly return CSV. No cookies, authorization headers, authenticated/private links, or arbitrary URL fetches.
+5. **Result visualization — DECIDED:** Live results table plus class-distribution bar chart, current-row inspector, and replay scrubber.
 
-Start conservatively. Measure the event rate before increasing update frequency.
+### Working defaults pending provider-contract confirmation
 
-## Frontend experience
+- Every dataset and analysis is public by default. The landing page warns that the sample, future uploaded content, and derived results will be publicly browseable. Do not imply deletion or privacy guarantees that the anonymous model cannot provide.
+- No authentication in the first vertical slice. Before production launch, add abuse controls sufficient for public-by-default paid execution, including rate limits, global quotas, a kill switch, and a decision on whether anonymous users may consume Jev budget.
+- Public CSV URLs only; no cookies, authorization headers, or arbitrary URL fetches.
+- 5 MB maximum file size, 5,000-row maximum execution, an explicit column cap such as 100 columns, and bounded row/field lengths. Byte size alone is never the Jev cost limit.
+- Sequential or concurrency-2 Jev calls, bounded retries, no speculative duplicate calls, and visible Cancel/Pause controls. A 5,000-call run must require explicit confirmation and remain subject to a global daily/project budget.
+- Recommended results are classified labels plus provider-returned probabilities/confidence when available; explanations are not requested unless the confirmed Jev contract requires them.
+- OpenRouter drafts a typed query object, not executable code. The user edits the serialized query in a text area, and server validation rejects malformed or unsafe edits.
+- Convex realtime queries are the “stream”; do not hold an SSE connection open for the full run.
 
-The primary view should show:
+---
 
-- selected game and live status;
-- score, quarter, clock, possession, and last play;
-- animated home/away forecast lines;
-- tie probability;
-- event markers on the chart;
-- latest forecast and change from the prior point;
-- Jev latency and feed age;
-- “forecast flipped” callouts;
-- explicit `LIVE`, `REPLAY`, and `STALE` states.
+## 3. User-visible experience
 
-Example callout:
+### Landing page and sample dataset
 
-```text
-FORECAST FLIP
-Away 68% → 24%
-After: red-zone interception
-Jev latency: 182 ms
-```
+The first screen should communicate one action:
+
+> Bring a dataset. Ask a question. See Jev work through it.
+
+Primary actions in the first release:
+
+- Try the sample football dataset.
+- Browse the sample dataset.
+- Browse the sample analysis/replay.
+
+Future BYOD actions, enabled only after the sample vertical slice passes review:
+
+- Upload CSV.
+- Use a public CSV link.
+- Browse public user datasets and analyses.
+
+Keep the page sparse and editorial. Do not reuse the rejected Gamecast dashboard hierarchy or decorative AI-agent chrome. Show a short privacy/cost disclosure before upload and a stronger run-cost confirmation immediately before Jev execution.
+
+### Dataset source roadmap
+
+First release:
+
+1. Load exactly one checked-in fixture through a typed `FixtureDatasetSource`.
+2. Display its schema, row count, representative rows, timestamps, and event labels before task drafting.
+3. Keep fixture rows immutable and deterministic; no network or user data is needed to reproduce the demo.
+
+BYOD expansion:
+
+1. File picker accepts `.csv`; drag/drop is optional but must not be the only path.
+2. URL form accepts only `https://` and clearly explains that the URL must be public and directly return CSV data.
+3. Client reads at most the configured byte limit, detects encoding/delimiter/header shape, previews the first bounded rows, and reports actionable validation errors.
+4. Client validation is advisory only. The server downloads/reads the source again, applies the same and stricter checks, hashes the source, and stores immutable dataset metadata.
+5. Preview must make it obvious which row is the header, how many rows/columns were accepted, and what was truncated or rejected.
+6. CSV content is treated as untrusted data. Escape formula-like values in any spreadsheet-style export and never execute cell contents.
+
+### Task and query drafting
+
+1. User enters a natural-language question or task, for example: “Classify support tickets as urgent or routine using the message and customer tier.”
+2. Browser submits the task plus dataset schema/sample—not the entire dataset—to a server-only OpenRouter route.
+3. OpenRouter returns strict structured output containing:
+   - task summary;
+   - target label/decision;
+   - allowed classes or classifier options;
+   - row fields to use;
+   - null/missing-value policy;
+   - serialized Jev classifier query;
+   - warnings when the request is ambiguous or unsuitable.
+4. The browser displays the generated query in an editable text box and preserves both generated and edited versions.
+5. Server validates the final edited query against the confirmed Jev contract immediately before run. The query is data, not code; no tools or arbitrary instructions are executed.
+6. User must explicitly click `Run Jev`. Confirmation shows dataset name, accepted row count, query text/hash, maximum Jev calls, concurrency, and the fact that results may contain sensitive data supplied by the user.
+
+### Live analysis view
+
+The analysis page has a stable URL before, during, and after execution. It contains:
+
+- analysis title and explicit `RUNNING`, `PAUSED`, `COMPLETE`, `CANCELLED`, or `ERROR` state;
+- progress count and bounded estimate, never fabricated completion;
+- live class-distribution chart and result table;
+- current row inspector showing only the row currently being processed;
+- current prediction, confidence/probabilities, latency, attempt, and error state when available;
+- recent result list and latest update timestamp;
+- pause/cancel control with durable state transition;
+- a `Replay` action after at least one persisted result exists;
+- public-data disclosure and deletion-request controls separate from execution.
 
 The UI must distinguish:
 
-- live feed time;
-- Jev request time;
-- chart update time;
-- replay time.
-
-## Forecast disclosure
-
-Until historical validation is complete, label the output:
-
-> Jev’s live forecast distribution — experimental, not betting odds.
-
-Do not claim calibrated win probability, predictive edge, or superiority to sportsbooks without a backtest. Preserve the raw Jev distribution and the exact input state for later evaluation.
-
-Future validation should compare Jev against:
-
-- a score/time baseline;
-- a conventional historical win-probability model;
-- market-implied probabilities where a lawful, reliable source is available.
-
-## Social launch mechanics
-
-The site itself remains passive: visitors watch the same forecast stream. Engagement comes from the live event and shareable moments.
-
-Tweetable moments:
-
-- forecast flips after major plays;
-- highest-confidence forecast;
-- biggest crowd-independent swing;
-- Jev prediction versus the final result;
-- replay of a famous game’s changing forecast.
-
-Example launch copy:
-
-> I connected Jev to a live football feed.
->
-> After every meaningful play, it gets the current game state and updates its forecast in real time.
->
-> No generated commentary. Just a typed prediction, probabilities, and a live chart.
->
-> [demo]
-
-## Delivery stages
-
-### Stage 0 — Contract and feed probe
-
-- Confirm Jev request/response shape with one harmless synthetic game state.
-- Confirm Choice output fields and probability semantics.
-- Probe ESPN scoreboard and summary/play-by-play access from the intended server environment.
-- Record feed fields, event IDs, timestamps, and failure behavior.
-- Estimate event frequency and Jev usage before building the live loop.
-
-**Gate:** exact schemas and cost controls are known; no secrets committed.
-
-### Stage 1 — Replay-first vertical slice
-
-- Create a small sanitized historical/replay fixture.
-- Build the normalized state and forecast-result schemas.
-- Implement the animated chart against prerecorded Jev-shaped results or a tightly bounded test adapter.
-- Make live/replay/stale status visible.
-
-**Gate:** a visitor can open the page and see a complete animated game without a live feed or Jev call.
-
-### Stage 2 — Live feed ingestion
-
-- Add server-side ESPN polling.
-- Normalize scoreboard and play-by-play updates.
-- Deduplicate, reject stale/out-of-order events, and persist the latest valid state.
-- Add retries and replay fallback.
-
-**Gate:** feed failures do not crash the page or produce false forecast updates.
-
-### Stage 3 — Jev forecast worker
-
-- Add one server-side Jev call for each accepted meaningful state.
-- Cache by idempotency key.
-- Persist raw state, forecast, model, latency, and timestamps.
-- Enforce hard request-rate and spend limits.
-
-**Gate:** one event creates at most one Jev call and all browsers receive the same cached result.
-
-### Stage 4 — Public demo and QA
-
-- Deploy with server-side secrets.
-- Test live, replay, stale-feed, Jev-error, timeout, and no-game states.
-- Verify mobile layout and chart readability.
-- Verify no credentials or private request state reach browser payloads.
-- Capture a replayable forecast-flip clip.
-
-**Gate:** a fresh browser can load the demo, see a forecast history, and understand its experimental status without explanation.
-
-### Stage 5 — Launch
-
-- Choose one live game or replay with clear forecast movement.
-- Publish the demo link with a short screen recording.
-- Tweet the system behavior, not unsupported accuracy claims.
-- Save the exact launch run and forecast data for later review.
-
-## Open questions
-
-- Exact Jev API endpoint, authentication method, and current pricing.
-- Whether Jev accepts the full structured game state size within the desired latency budget.
-- Which ESPN endpoint combination is reliable from the production host.
-- Whether play-by-play updates contain stable IDs and sufficient current-state fields.
-- Hosting/runtime choice for the long-lived polling worker and client broadcast channel.
-- Historical data source and licensing for replay mode.
-- Whether the initial chart should show tie as a third series or as a secondary metric.
-
-## Non-goals and risks
-
-- This is not a betting product.
-- This is not financial or gambling advice.
-- The demo must not execute wagers or trades.
-- ESPN’s undocumented API may change or block requests.
-- Jev output probabilities may not be calibrated for sports forecasting.
-- A fast, visually impressive line can create false confidence; disclosures must remain visible.
-- Do not use private game data, user-uploaded personal information, or credentials in the public demo.
-
-## Validated feed findings (2026-09-17 01:29:14 UTC)
-
-Read-only tests confirm ESPN access is User-Agent dependent in the current environment:
-
-- default `curl`: HTTP 200, JSON;
-- `curl/8.5.0`: HTTP 200, JSON;
-- `Python-urllib/3.13`: HTTP 200, JSON;
-- `Mozilla/5.0`: HTTP 403, HTML;
-- `Origin` header changes did not affect the result for the tested User-Agents.
-
-The browser path also returned the scoreboard JSON, but browser success is not evidence that a production server runtime will succeed. Use a server-side request with an honest descriptive User-Agent such as `jev-gamecast/0.1 (+project URL)`; do not impersonate a search crawler or browser.
-
-Validated endpoints and fields:
-
-- site scoreboard: `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard`;
-- dated scoreboard: same endpoint with `?dates=YYYYMMDD`;
-- site summary: `/apis/site/v2/sports/football/nfl/summary?event=<event_id>`;
-- core play-by-play: `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/<event_id>/competitions/<event_id>/plays?limit=300`;
-- stable identifiers: `event.id`, `event.uid`, `play.id`, and `play.sequenceNumber`;
-- useful play fields: scores, period, clock, text, scoring flag, turnover flag, penalty flag, timestamps, and team.
-
-Bounded repeat tests returned HTTP 200 without `Retry-After` or observed rate limiting. This is not an availability guarantee. The guessed site `/plays` endpoint returned HTTP 404; use the core play-by-play endpoint instead.
-
-## Architecture decision update
-
-Proceed with server-side ESPN polling behind a replaceable provider adapter. Do not wait for a webhook vendor for MVP. Poll scoreboard/summary for game state, poll core play-by-play for new event IDs, deduplicate by game plus play identifier/state hash, and trigger at most one Jev forecast per accepted meaningful update.
-
-Keep Convex as the durable event store and browser sync layer. Use one small server worker for ESPN ingestion and Jev calls. Skip Redis until measured load requires distributed locks, high-volume rate limiting, or a separate ephemeral queue.
-
-Provider acceptance still requires production-runtime testing, reconnect/catch-up handling, stale/out-of-order rejection, and public-display/derived-forecast rights review.
-
-## Expanded scoping questions (2026-09-17 01:30:26 UTC)
-
-### P0 — answer before implementation
-
-#### Product and forecast meaning
-
-- Is MVP a visual Jev systems demo or a sports-forecasting product? This determines how much historical accuracy validation and disclosure are required.
-- Do we show `Jev forecast` or `win probability`? Use `Jev forecast` until calibration/backtesting supports the stronger label.
-- Is one featured game enough, or must visitors choose among live games?
-- What counts as a meaningful update: every play, scoring/turnover plays only, drive boundaries, or a fixed maximum cadence?
-- Do we display tie as a third chart series, a small secondary value, or only in the raw result?
-- Should pregame context be included, and can we guarantee it was available before kickoff without future leakage?
-
-#### Jev contract
-
-- Exact current API endpoint, authentication mechanism, model identifier, request limits, and pricing.
-- Does Jev accept structured JSON state of the intended size within the required latency?
-- Can one request contain multiple independent judgments, or should MVP make one `Choice` question per state?
-- How should confidence and probabilities be displayed without implying calibrated betting odds?
-- What timeout, retry, and stale-result behavior should apply when Jev is slow or unavailable?
-
-#### Data and rights
-
-- Is ESPN’s undocumented data permitted for public display and derived forecast visualization under its current terms?
-- Which ESPN fields are present during a live game, not only in completed-game responses?
-- Which source is authoritative when scoreboard, summary, and play-by-play disagree?
-- How are corrections, duplicate plays, postponed games, and out-of-order events handled?
-- Do we need a licensed provider or written permission before public launch?
-
-#### Runtime and cost
-
-- Can the intended Vercel/Convex deployment reach ESPN with a non-browser User-Agent?
-- Where does the long-lived ingestion worker run, and how does it survive sleep/restarts?
-- Are Convex scheduled functions sufficient, or do we need an external worker?
-- What is the hard Jev budget per game and per day?
-- What happens when the budget is exhausted: freeze, replay, fall back to baseline, or disable live mode?
-
-### P1 — answer before public launch
-
-#### Forecast quality
-
-- What historical replay set will validate Jev?
-- What simple baseline will it beat or at least match?
-- Are Jev probabilities calibrated at game-state buckets such as score differential, quarter, and time remaining?
-- How often does Jev flip, and are flips directionally useful or merely noisy?
-- Can we compare Jev against ESPN’s own `winprobability` field without confusing provider output with ground truth?
-
-#### Frontend and social presentation
-
-- What is primary: chart, latest forecast card, last play, or forecast-flip animation?
-- How much history should load initially on mobile?
-- Do we show raw input state and model metadata for technical credibility?
-- What shareable artifact matters most: static card, animated GIF, or replay URL?
-- How do we make live, replay, stale, and unavailable states impossible to confuse?
-
-#### Reliability and operations
-
-- What reconnect/catch-up protocol restores a browser after disconnect?
-- How do we prevent two workers from forecasting the same event?
-- What monitoring detects stale ESPN data, Jev failures, forecast backlog, or runaway spend?
-- How long do raw states and forecasts remain stored?
-- What is the manual kill switch for live mode?
-
-### P2 — defer until after first live demo
-
-- Multi-game support.
-- Fantasy roster/player recommendations.
-- Crowd voting or interactive overrides.
-- Market-odds comparison.
-- Alternate sports.
-- User-submitted games or custom questions.
-- Redis, queues, or higher-scale fanout.
-- Learned calibration layer or model ensemble.
-
-### Recommended decision sequence
-
-1. Confirm Jev API contract and cost.
-2. Test ESPN access from intended production runtime.
-3. Confirm public-display and derived-output rights.
-4. Choose event cadence and per-game budget.
-5. Build replay-first chart with immutable event/forecast schemas.
-6. Add one live worker and one featured game.
-7. Backtest before using `win probability` language.
-
-## Delivery repository (2026-09-17 01:33:26 UTC)
-
-Push completed work to the exact user-provided public repository:
-
-`https://github.com/narulaskaran/jav-gamecast`
-
-The local project directory remains `repos/jev-gamecast/`; the remote repository name is `jav-gamecast` and must not be silently normalized. GitHub read-only metadata confirms the repository is public and its default branch is `main`. No branch refs were advertised during the check, consistent with a newly initialized or empty repository.
-
-The user authorizes direct pushes to `main` for this new repository. Delivery rules:
-
-- keep secrets and Jev credentials out of Git;
-- run local tests and security/PII checks before push;
-- push directly to `main` when acceptance gates in this plan pass;
-- verify remote branch, commit SHA, CI, and deployed demo URL after delivery;
-- never force-push or rewrite `main` without explicit approval.
-
-## Product decisions from scope review (2026-09-17 01:39:22 UTC)
-
-### Product
-
-- Primary goal: demonstrate Jev as a fast structured-decision system, not launch a betting or fantasy product.
-- Positioning: `Jev forecasts this football game`.
-- Site style: clean, minimal, crisp, chart-first.
-- No visitor voting, interactive overrides, or arbitrary user-triggered Jev calls in MVP.
-- Public display of the ESPN-derived visualization is approved by the user for this project; retain provider-rights review as a launch record, not as an implementation blocker unless new evidence conflicts.
-
-### Forecast and cadence
-
-- MVP uses one Jev `Choice` question over the live game state.
-- Forecast request cadence: one request about every 90 seconds while the game is active.
-- A 90-second poll may observe several new plays; coalesce them into the latest valid state and make one forecast request for that update.
-- Do not claim per-play forecasting in MVP. Upgrade to per-play requests only after measuring ESPN rate limits, Jev cost, and end-to-end latency.
-- Keep home team, away team, and tie in the forecast contract unless later validation shows a clearer presentation.
-- Display `Jev forecast` language until historical calibration supports `win probability`.
-
-The TypeSafe introduction documentation confirms that `Choice` returns a selected choice, probabilities, and confidence; multiple typed questions can run independently in parallel against one state. MVP needs only one `Choice` question, with future dimensions added only when they have a clear UI or evaluation purpose.
-
-### Runtime and persistence
-
-- Intended deployment: Vercel serverless functions plus Convex.
-- Convex stores the normalized game state, immutable event identity, forecast time series, and feed-health status.
-- All visitors read the same persisted forecast history through reactive Convex queries.
-- No Redis in MVP.
-- ESPN runtime access, serverless execution limits, and request headers require deployment-environment testing.
-- Budget concern is secondary to ESPN availability/rate limiting for this first run; enforce both with hard ceilings anyway.
-
-### Historical chart
-
-- Historical forecast line must render for every visitor.
-- MVP stores the time series; full backtesting and model-quality claims are deferred.
-- Replay mode remains required so the chart works outside live games and when ESPN or Jev is unavailable.
-
-### Frontend hierarchy
-
-1. Live forecast chart centered on page.
-2. Compact game card above chart showing teams, score, quarter/halftime/final status, and live/replay/stale state.
-3. Small event markers and latest-play context.
-4. Secondary metadata: Jev forecast, update age, latency, and feed age.
-5. Error/fallback state must stay visible without displacing the chart.
-
-## Stage 1 build-agent handoff (2026-09-17 01:43:16 UTC)
-
-This section is self-contained for an agent starting with fresh context.
-
-### Assignment
-
-Build the replay-first frontend vertical slice in `repos/jev-gamecast/`, following this plan. This stage ends at a reviewed local application; do not implement live ingestion or external inference yet.
-
-### Fixed implementation choices
-
-- Stack: React + TypeScript + Vite.
-- Package manager: npm.
-- Styling: local CSS; no UI kit.
-- Chart: SVG or a small dependency-free React chart component; avoid adding a chart library unless needed.
-- Data: checked-in synthetic fixture only. No ESPN requests, Jev credentials, Convex deployment, MPP, betting, fantasy advice, voting, authentication, or user-generated inputs.
-- Deployment shape: Vercel-compatible frontend, with provider interfaces kept separate from rendering.
-- Remote delivery target: `https://github.com/narulaskaran/jav-gamecast`; direct push to `main` is authorized, but never force-push.
-
-### Required result
-
-Create a working app with:
-
-1. small site header containing product name and restrained `Jev forecasts this football game` positioning;
-2. compact game card above chart with away/home teams, score, quarter or halftime/final status;
-3. live-looking historical forecast chart front and center, with home/away/tie series and readable legend;
-4. event markers or labels tied to fixture timestamps;
-5. replay controls that animate through stored fixture points without network access;
-6. explicit `REPLAY`, `LIVE`, and `STALE` visual states, with this fixture initially in `REPLAY`;
-7. responsive mobile layout and accessible labels/keyboard controls;
-8. forecast metadata kept secondary: latest Jev choice, confidence/probabilities, update age, and replay disclosure.
-
-Use clearly fictional/sanitized teams and fixture values. Do not present fixture values as real Jev output or calibrated sportsbook odds.
-
-### Required interfaces for later stages
-
-Keep these boundaries in separate modules so later work can replace fixtures without rewriting UI:
-
-- `GameStateSource`: supplies normalized game state and feed status;
-- `ForecastSource`: supplies immutable forecast points;
-- forecast point schema: stable point ID, game ID, provider event ID, timestamp/elapsed time, home/away/tie probabilities, selected choice, confidence, and optional event label.
-
-### Acceptance checks
-
-From a clean checkout, agent must run and report:
-
-- `npm install`;
-- `npm run build`;
-- `npm test` (tests must cover fixture parsing, chart/forecast rendering, replay progression, and state labels);
-- a secret/PII scan over tracked files;
-- manual browser check at desktop and narrow mobile widths.
-
-Before push, inspect `git diff`, verify no credentials or personal data, then push to `main`. After push, verify remote branch and commit SHA. Report exact commands, outputs, commit SHA, and known limitations. Do not claim live ESPN, Jev, Convex, or production deployment support at this stage.
+- dataset upload/fetch time;
+- query-draft time;
+- Jev request start/end time;
+- persistence time;
+- client observation/realtime update time;
+- replay clock time.
+
+Never imply that rows not yet processed have a prediction. Partial runs remain valid, labeled partial, and replayable.
+
+### Replay and sharing
+
+- Each analysis ID is opaque and non-sequential in public URLs.
+- Replay uses persisted immutable per-row results and never calls Jev.
+- Replay supports play/pause, step, scrub, current-row focus, endpoint-disabled controls, keyboard operation, and reduced-motion behavior.
+- Shared pages show only data permitted by the analysis visibility setting.
+- Add OpenGraph/Twitter metadata using the analysis title and aggregate result summary only; never include raw row text or provider secrets in metadata.
+- Sharing is passive: visiting a URL never reruns or resumes a job.
+
+---
+
+## 4. Data and state contracts
+
+### Dataset metadata
+
+For the first fixture release, store the fixture key and sanitized metadata in Convex. For the later BYOD expansion, store only metadata and a durable UploadThing object reference, not an unbounded duplicate copy of the CSV:
+
+```ts
+Dataset {
+  id: opaque id
+  sourceType: "fixture" | "upload" | "public_url"
+  displayName: string
+  fixtureKey?: string
+  blobKey?: string
+  sourceUrl?: string // sanitized/public URL only; omit credentials/query secrets
+  byteSize: number
+  contentHash: string
+  encoding: string
+  delimiter: string
+  columns: Array<{ name: string; normalizedName: string; inferredType: string }>
+  acceptedRowCount: number
+  previewRows: SanitizedPreviewRow[]
+  validationWarnings: string[]
+  visibility: "published"
+  createdAt: number
+  publishedAt?: number
+}
+```
+
+Do not store raw source URLs containing credentials. Do not expose UploadThing keys or internal blob URLs to the browser unless the SDK requires a short-lived signed URL.
+
+### Analysis metadata
+
+```ts
+Analysis {
+  id: opaque id
+  datasetId: DatasetId
+  title: string
+  naturalLanguageTask: string
+  generatedQuery: JsonValue
+  editedQuery: JsonValue
+  queryHash: string
+  queryWarnings: string[]
+  rowCount: number
+  maxCalls: number
+  callsReserved: number
+  callsCompleted: number
+  rowsCompleted: number
+  status: "draft" | "queued" | "running" | "paused" | "complete" | "cancelled" | "error"
+  visibility: "published"
+  createdAt: number
+  startedAt?: number
+  completedAt?: number
+  lastErrorCode?: string
+}
+```
+
+### Immutable prediction record
+
+```ts
+Prediction {
+  analysisId: AnalysisId
+  rowIndex: number
+  rowHash: string
+  rowPreview?: SanitizedRow // only if visibility policy allows it
+  result: JsonValue
+  selectedClass?: string
+  probabilities?: Record<string, number>
+  confidence?: number
+  latencyMs?: number
+  providerRequestId?: string // opaque provider ID only, no prompt or secret
+  attempt: number
+  idempotencyKey: string // analysisId + rowIndex + queryHash + datasetHash
+  observedAt: number
+  createdAt: number
+}
+```
+
+### State transitions
+
+```text
+draft → queued → running → complete
+                         ↘ paused → running
+                         ↘ cancelled
+                         ↘ error
+```
+
+- `queued` reserves the bounded call budget atomically.
+- A row may transition to `processing` only under a durable lease.
+- A successful prediction is written exactly once by idempotency key.
+- A provider timeout may retry within the bounded attempt policy; it may not create a second successful record.
+- A worker lease expires only after the configured timeout and can be reclaimed safely.
+- `cancelled` is terminal for the current run; already persisted predictions remain replayable.
+- `error` records a stable public error code and keeps completed predictions.
+- Completion requires `rowsCompleted === acceptedRowCount` or an explicit terminal partial/cancelled state.
+
+---
+
+## 5. Server boundaries and abuse controls
+
+### Browser boundary
+
+The browser may call only browser-safe routes/queries for:
+
+- upload initialization/finalization;
+- dataset metadata and sanitized preview;
+- query draft request;
+- analysis creation/start/pause/cancel;
+- public analysis read and realtime prediction subscription.
+
+The browser must never import or bundle:
+
+- `JEV_API_KEY`, `OPENROUTER_KEY`, `UPLOADTHING_TOKEN`, `CONVEX_DEPLOY_KEY`, `CRON_SECRET`, or server-only environment access;
+- TypeSafe/Jev SDK internals;
+- OpenRouter SDK or privileged provider clients;
+- private Convex write functions or admin APIs.
+
+Add a build-time browser-boundary test and a production bundle marker scan.
+
+### Dataset validation and URL safety
+
+Revalidate all inputs on the server:
+
+- byte size and decompressed size limits;
+- maximum row count, column count, cell length, and total parsed memory;
+- UTF-8 and delimiter handling;
+- duplicate/empty header policy;
+- malformed quote/newline behavior;
+- content type plus magic/content sniffing;
+- redirect count and final-host validation;
+- block localhost, loopback, link-local, private, metadata, non-HTTP(S), and unsafe IPv6 destinations;
+- fetch timeout and response streaming limit;
+- no authorization headers from user input;
+- no logging of raw rows or URLs with query credentials.
+
+Treat CSV cells as untrusted prompt data. Delimit row values clearly, cap serialized row size, and ensure row text cannot override the classifier contract or cause tool execution.
+
+### OpenRouter boundary
+
+- Keep `OPENROUTER_KEY` server-side.
+- Use a configured allowlisted model from server environment; do not let the browser select arbitrary provider/model IDs.
+- Require strict JSON/schema validation and reject malformed or extra fields.
+- Bound task length, schema/sample size, timeout, retries, and draft rate.
+- Store prompt version and model ID, but never raw provider authorization headers.
+- A draft failure must not enqueue Jev work.
+
+### Jev boundary
+
+- Keep `JEV_API_KEY` and the Jev client server-side.
+- Use the confirmed classifier query contract from the P0 decision.
+- One user action creates at most the configured row-call budget.
+- Reserve budget durably before work; do not trust process-local counters.
+- Use durable row leases, idempotency keys, bounded concurrency, bounded retries, and a kill switch.
+- Do not auto-retry an unknown provider outcome unless the idempotency contract proves it safe.
+- No provider call occurs in tests, replay, public browsing, or page load.
+- Display provider errors as unavailable/partial rather than inventing a result.
+
+### Privacy and publication
+
+- Warn users not to upload sensitive/personal data until retention and deletion controls are implemented.
+- Every MVP record is public and appears in browse queries only after safe metadata/row-output policy is applied.
+- Raw rows must still be excluded from sitemap, OpenGraph metadata, analytics, and logs; future private/unlisted states require a separate identity/access-control design.
+- Provide delete/cancel semantics or explicitly mark them as a pre-launch limitation; do not claim deletion if the UploadThing blob remains.
+- Use opaque IDs and avoid raw row values in URLs, logs, exceptions, and telemetry.
+
+---
+
+## 6. Proposed repository structure
+
+Keep the new domain separate from historical football code until migration is complete:
+
+```text
+src/
+  fixtures/
+    footballTimeline.ts
+    footballTimeline.test.ts
+  dataset/
+    csvTypes.ts
+    parseCsv.ts
+    validateDataset.ts
+    dataset.test.ts
+  query/
+    queryTypes.ts
+    queryValidation.ts
+    queryDraftClient.ts
+    query.test.ts
+  analysis/
+    analysisTypes.ts
+    analysisState.ts
+    analysis.test.ts
+  browser/
+    datasetClient.ts
+    analysisClient.ts
+    realtimeResults.ts
+  components/
+    LandingPage.tsx
+    DatasetIntake.tsx
+    DatasetPreview.tsx
+    QueryComposer.tsx
+    RunConfirmation.tsx
+    AnalysisProgress.tsx
+    CurrentRowInspector.tsx
+    ResultsChart.tsx
+    ResultsTable.tsx
+    ReplayControls.tsx
+    BrowseCards.tsx
+  App.tsx
+  styles.css
+
+api/
+  datasets/prepare.ts
+  datasets/finalize.ts
+  query/draft.ts
+  analyses/create.ts
+  analyses/[id]/start.ts
+  analyses/[id]/pause.ts
+  analyses/[id]/cancel.ts
+
+convex/
+  schema.ts
+  datasets.ts
+  analyses.ts
+  predictions.ts
+  runner.ts
+  browse.ts
+  _generated/
+
+src/server/
+  openrouter.ts
+  jevClassifier.ts
+  uploadthing.ts
+  datasetFetch.ts
+  analysisRunner.ts
+  analysisBudget.ts
+  analysisLease.ts
+
+src/persistence/
+  analysisStore.ts
+```
+
+Modify existing shared server/browser boundaries only after checking all current imports. Do not rename or delete historical modules in the first slice solely for cleanliness; isolate the new routes and then remove football routes in a separately reviewed cleanup task.
+
+---
+
+## 7. Delivery stages and acceptance gates
+
+### Stage 0 — Product contract, fixture, and provider probes
+
+**Owner:** product + researcher/architect
+
+- Confirm the checked-in football time-series fixture schema and the five P0 product decisions.
+- Inspect the current repository and preserve the approved server-only boundary patterns.
+- Confirm Jev classifier request/response, limits, pricing, idempotency, and safe retry behavior with one harmless fixture row only if credentials are deliberately configured.
+- Confirm OpenRouter structured-output behavior with a mocked contract first; no user data or production secrets in fixtures.
+- Defer UploadThing account/configuration until BYOD intake; verify Convex deployment identity through secure provider settings.
+- Document retention, publication, deletion, and public-display policy.
+
+**Gate:** exact schemas, row/call caps, visibility model, and provider boundaries are known; no secrets committed; no paid probe unless explicitly approved.
+
+### Stage 1 — Hardcoded football time-series vertical slice
+
+**Owner:** coder; independent reviewer; bug-basher
+
+- Create one checked-in, sanitized, immutable football timeline fixture with stable row IDs, timestamps, event labels, and representative state fields.
+- Implement `FixtureDatasetSource` and a preview that renders the fixture schema and rows without network access.
+- Implement Convex metadata/result boundaries against local fakes; do not add UploadThing yet.
+- Add tests for fixture ordering, deterministic hashes, timestamp monotonicity, missing-value policy, immutable rows, and no future-state leakage.
+
+**Gate:** a fresh browser can select the hardcoded football sample, inspect its rows/schema, and proceed to task drafting with no network or provider call.
+
+### Stage 2 — Natural-language query composer
+
+**Owner:** coder; independent contract reviewer
+
+- Add server-only OpenRouter adapter and strict query-draft schema.
+- Build task entry UI, draft loading/error/ambiguity states, editable serialized query, and final-query validation.
+- Persist generated query, edited query, schema version, model ID, and hashes without raw secrets.
+- Add mocked provider tests covering valid output, malformed JSON, refusal/ambiguity, oversized output, prompt-injection-like cells, timeout, and retry limits.
+
+**Gate:** a user can produce and manually edit a valid Jev query; invalid or unsafe query edits cannot reach the run endpoint.
+
+### Stage 3 — Bounded Jev row runner
+
+**Owner:** coder; security/cost reviewer
+
+- Implement Convex analysis schema, durable budget reservation, row leases, idempotency, chunk scheduling, pause/cancel, and terminal states.
+- Implement server-only Jev classifier adapter behind a fake provider for tests.
+- Process rows in bounded chunks, persist each prediction atomically, and expose realtime progress.
+- Add adversarial tests for duplicate starts, concurrent workers, restart/reclaim, slow/hung provider, timeout, unknown outcome, budget exhaustion, cancellation, query changes, and cross-analysis isolation.
+
+**Gate:** one explicit run consumes no more than the reserved budget; each row produces at most one persisted prediction; a worker restart cannot duplicate paid work; no browser bundle contains provider markers.
+
+### Stage 4 — Live analysis UI and replay
+
+**Owner:** coder; visual reviewer; bug-basher
+
+- Build stable analysis route with progress, current-row inspector, results table, class-distribution visualization, error/partial states, and pause/cancel controls.
+- Add Convex realtime subscription and reconnect/catch-up behavior.
+- Add durable replay using stored predictions only; replay must never call Jev.
+- Verify 320px, 390px, desktop, keyboard, reduced-motion, no-overflow, long-label, empty-result, and partial-run behavior.
+
+**Gate:** a fresh browser can watch a mocked analysis update row-by-row, identify the current row, pause/cancel, reload without losing progress, and replay completed predictions offline.
+
+### Stage 5 — BYOD intake expansion and browse/shareability
+
+**Owner:** coder; product/UX reviewer
+
+- Add CSV file upload and public-URL intake without disturbing the working hardcoded fixture path.
+- Add UploadThing blob storage and Convex dataset metadata only after server-side validation passes.
+- Replace the sample-only landing actions with the full BYOD landing page.
+- Add browse public datasets and browse public analyses queries.
+- Add opaque analysis URLs, public-by-default disclosure, safe title/summary metadata, and Twitter/OpenGraph cards without raw rows.
+- Add explicit public-data/retention copy and test that every browseable record has safe metadata and output visibility.
+
+**Gate:** public browse shows only permitted metadata/output; raw rows never enter social metadata or logs; shared analysis URL loads the exact persisted run without starting a new run.
+
+### Stage 6 — Production configuration and deployment
+
+**Owner:** ops; independent release reviewer
+
+- Provision/verify Convex production deployment and official generated bindings.
+- Configure OpenRouter, Jev, Convex, Vercel, and cron/worker environment variables only through encrypted provider settings; configure UploadThing only when the BYOD expansion is enabled.
+- Configure server-only runtime routes and an authenticated bounded continuation mechanism; do not rely on one long-lived Vercel request.
+- Deploy the exact reviewed `origin/main` SHA; read back Vercel deployment ID, canonical URL, Convex deployment identity, build logs, and environment variable names without values.
+- Keep live Jev disabled until the operator deliberately provisions the key and cost limits.
+
+**Gate:** exact deployment SHA and provider identities match; replay works without keys; live execution fails closed when a required key/config is absent; no paid Jev call is used merely as a smoke test.
+
+### Stage 7 — Independent production QA and release
+
+**Owner:** bug-basher; separate from implementer and ops
+
+- Fresh-browser test sample landing, fixture preview, query draft mock, run confirmation, live mocked progress, pause/cancel, reload/reconnect, replay, browse, and share URL.
+- After the BYOD expansion, add upload/link validation and UploadThing readback to this matrix.
+- Verify browser network/bundle contains no Jev/OpenRouter/UploadThing credentials or server endpoints that bypass authorization.
+- Verify production limits, no automatic run on page load, duplicate-run protection, budget exhaustion, row-level failure, provider outage, Convex outage, and stale worker recovery.
+- Separate replay-only evidence from live provider evidence. Never label a mocked run as a live Jev result.
+- Capture exact URL, deployment ID, SHA, Convex identity, test outputs, residual risks, and release status.
+
+**Gate:** explicit PASS against the exact production deployment, or actionable FAIL routed to a bounded repair. No “released” claim without exact readback and fresh production QA.
+
+---
+
+## 8. Test and verification matrix
+
+### Deterministic automated tests
+
+- CSV parser and validator fixtures at byte/row/column/cell limits.
+- Client/server validation parity.
+- URL safety and SSRF rejection.
+- Query-draft schema and final-query validation.
+- OpenRouter adapter mapping with fake provider.
+- Jev adapter mapping with fake provider.
+- Analysis state transitions and terminal states.
+- Durable budget reservation and lease reclaim.
+- Idempotent prediction persistence.
+- Cross-analysis and cross-dataset isolation.
+- Pause/cancel/restart/timeout/unknown-outcome behavior.
+- Convex schema/functions and generated bindings.
+- Browser/server import boundary and production bundle marker scans.
+- Privacy/secret/PII scans and `git diff --check`.
+
+### Browser and visual checks
+
+At minimum test 320×844, 390×844, and 1440×900:
+
+- first-screen promise and intake actions;
+- fixture preview legibility and horizontal containment;
+- query editor readability and explicit run confirmation;
+- live chart/table/current-row hierarchy;
+- pause/cancel focus and keyboard operation;
+- replay endpoint affordances and reduced motion;
+- public-by-default data disclosure;
+- no document horizontal overflow;
+- no blocking console/network errors.
+
+### Provider and production checks
+
+- No real provider call in unit/browser tests.
+- OpenRouter live probe only with deliberate operator approval and a synthetic schema/row.
+- Jev live probe only with deliberate operator approval, a synthetic row, and a recorded budget reservation; never use a production user dataset.
+- UploadThing upload/readback with a harmless fixture.
+- Convex durable read/write across fresh requests and worker restart simulation.
+- Vercel deployment/build readback and exact SHA match.
+- Production smoke test starts in replay/mock mode, not paid live mode.
+
+---
+
+## 9. Operational limits and unresolved risks
+
+### Initial limits to enforce
+
+- CSV source: 5 MB maximum; server-side byte limit is authoritative.
+- Bounded preview: small fixed number of rows and columns.
+- Bounded task/query lengths and OpenRouter draft frequency.
+- Explicit maximum rows/calls per analysis from the P0 decision.
+- Concurrency 2 or lower until measured provider behavior supports more.
+- Maximum retry attempts and per-row timeout.
+- Durable per-analysis and global daily budget reservations.
+- Maximum active analyses per anonymous identity/IP/device fingerprint only if privacy review approves the mechanism.
+- Manual kill switch for all Jev execution.
+
+### Known risks
+
+- A 5 MB CSV can contain many rows; byte size alone is not a sufficient Jev cost limit.
+- Vercel request duration and Convex scheduling semantics must be tested with the current deployment plan.
+- UploadThing retention/deletion semantics must be verified before promising deletion.
+- Public CSV URLs can change between validation and execution; hash and source snapshot identity must be recorded.
+- CSV rows may contain personal or confidential data and prompt-injection text.
+- Jev classifier output may not provide probabilities or may have provider-specific limits; UI must degrade to labels/table without fabricating confidence.
+- OpenRouter output can be malformed or semantically unsuitable; strict schema validation and user review are mandatory.
+- Anonymous public creation can be abused to consume provider budgets; authentication/rate limits or a conservative anonymous quota may be required before enabling paid execution.
+- Realtime progress can lag the worker; UI must display observation age and never claim a row is complete before durable readback.
+
+---
+
+## 10. Release checklist
+
+- [ ] P0 scope questions answered and recorded.
+- [ ] Product/UX review approves the BYOD flow and label budget.
+- [ ] Hardcoded fixture validation and no-future-leakage tests pass.
+- [ ] BYOD expansion: CSV client/server validation and public-URL SSRF/content/size protections pass.
+- [ ] OpenRouter query drafting is server-only and schema-validated.
+- [ ] Final query is editable but cannot execute arbitrary code/tools.
+- [ ] Jev classifier contract is confirmed and adapter tests pass.
+- [ ] Durable budget, idempotency, leases, retries, pause/cancel, and kill switch pass adversarial tests.
+- [ ] Convex realtime progress and replay pass fresh-browser checks.
+- [ ] BYOD expansion: UploadThing object reference and retention behavior are verified.
+- [ ] Public-by-default browse/share behavior and safe output disclosure are verified.
+- [ ] No secrets, raw PII, or provider internals reach Git, bundles, URLs, logs, or social metadata.
+- [ ] Exact reviewed SHA is pushed and read back from `origin/main`.
+- [ ] Exact production deployment ID, URL, Convex identity, build logs, and SHA are read back.
+- [ ] Production QA explicitly passes the exact deployed artifact.
+- [ ] Any live Jev run is separately labeled and backed by real provider evidence.
+
+**Current next gate:** harden the existing fixture-first workbench (pause/cancel, public browse/share completeness, abuse/cost controls, provider-contract confirmation) before Stage 5 BYOD CSV intake. Canonical remote is `origin` (`jev-data-questions`); product/Vercel name remains `jev-data-analysis`. Do not dispatch implementation against the old live-ESPN gamecast plan.
