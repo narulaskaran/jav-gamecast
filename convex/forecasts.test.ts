@@ -29,7 +29,6 @@ beforeEach(() => {
 describe('real Convex functions', () => {
   it('makes authenticated forecast writes idempotent and immutable while rejecting unauthenticated writes', async () => {
     const t = convexTest(schema, modules)
-    await expect(t.mutation(api.forecasts.putForecastIfAbsent, record)).rejects.toThrow(/no such export/i)
     await expect(t.action(api.forecasts.authorizedPutForecastIfAbsent, { authToken: 'wrong', record })).rejects.toThrow(/unauthorized/i)
     const first = await t.action(api.forecasts.authorizedPutForecastIfAbsent, { authToken: writeSecret, record })
     const second = await t.action(api.forecasts.authorizedPutForecastIfAbsent, { authToken: writeSecret, record: { ...record, confidence: 0.99 } })

@@ -5,7 +5,7 @@ import { v } from 'convex/values'
 /** Read-only action used by an operator smoke check; it never invokes a provider. */
 export const latestForecastHealth = action({
   args: { gameId: v.string() },
-  handler: async (ctx, { gameId }) => {
+  handler: async (ctx: any, { gameId }: { gameId: string }): Promise<unknown> => {
     const records = await ctx.runQuery(api.forecasts.listForecastsByGame, { gameId, limit: 128 })
     const latest = records[records.length - 1]
     return {

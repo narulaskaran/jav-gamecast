@@ -179,7 +179,7 @@ export const releaseAnalysisInternal = internalMutation({
 
 export const authorizedGetAnalysis = action({
   args: { authToken: v.string(), analysisId: v.string() },
-  handler: async (ctx, { authToken, analysisId }) => {
+  handler: async (ctx: any, { authToken, analysisId }: { authToken: string; analysisId: string }): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runQuery(internal.analyses.getAnalysisInternal, { analysisId })
   },
@@ -187,7 +187,7 @@ export const authorizedGetAnalysis = action({
 
 export const authorizedPutAnalysisSnapshot = action({
   args: { authToken: v.string(), snapshot: v.any() },
-  handler: async (ctx, { authToken, snapshot }) => {
+  handler: async (ctx: any, { authToken, snapshot }: { authToken: string; snapshot: unknown }): Promise<unknown> => {
     authorizeWrite(authToken)
     validateSnapshot(snapshot)
     return await ctx.runMutation(internal.analyses.putAnalysisSnapshotInternal, { snapshot })
@@ -196,7 +196,7 @@ export const authorizedPutAnalysisSnapshot = action({
 
 export const authorizedClaimAnalysis = action({
   args: { authToken: v.string(), analysisId: v.string(), ownerToken: v.string(), nowMs: v.number(), leaseMs: v.number() },
-  handler: async (ctx, { authToken, ...args }) => {
+  handler: async (ctx: any, { authToken, ...args }: { authToken: string; analysisId: string; ownerToken: string; nowMs: number; leaseMs: number }): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.analyses.claimAnalysisInternal, args)
   },
@@ -204,7 +204,7 @@ export const authorizedClaimAnalysis = action({
 
 export const authorizedReleaseAnalysis = action({
   args: { authToken: v.string(), analysisId: v.string(), ownerToken: v.string() },
-  handler: async (ctx, { authToken, ...args }) => {
+  handler: async (ctx: any, { authToken, ...args }: { authToken: string; analysisId: string; ownerToken: string }): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.analyses.releaseAnalysisInternal, args)
   },

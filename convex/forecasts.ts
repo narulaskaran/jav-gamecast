@@ -231,7 +231,7 @@ export const settleForecastBudgetInternal = internalMutation({
 
 export const authorizedPutForecastIfAbsent = action({
   args: { authToken: v.string(), record: v.object(recordArgs) },
-  handler: async (ctx, { authToken, record }) => {
+  handler: async (ctx: any, { authToken, record }: { authToken: string; record: Record<string, unknown> }): Promise<unknown> => {
     authorizeWrite(authToken)
     validateRecord(record as unknown as Record<string, unknown>)
     return await ctx.runMutation(internal.forecasts.putForecastIfAbsentInternal, record)
@@ -240,7 +240,7 @@ export const authorizedPutForecastIfAbsent = action({
 
 export const authorizedClaimForecast = action({
   args: { authToken: v.string(), idempotencyKey: v.string(), ownerToken: v.string(), nowMs: v.number(), leaseMs: v.number() },
-  handler: async (ctx, { authToken, ...args }) => {
+  handler: async (ctx: any, { authToken, ...args }: { authToken: string; idempotencyKey: string; ownerToken: string; nowMs: number; leaseMs: number }): Promise<{ status: string; record?: unknown; claim?: unknown }> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.forecasts.claimForecastInternal, args)
   },
@@ -248,7 +248,7 @@ export const authorizedClaimForecast = action({
 
 export const authorizedReleaseForecastClaim = action({
   args: { authToken: v.string(), idempotencyKey: v.string(), ownerToken: v.string() },
-  handler: async (ctx, { authToken, ...args }) => {
+  handler: async (ctx: any, { authToken, ...args }: { authToken: string; idempotencyKey: string; ownerToken: string }): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.forecasts.releaseForecastClaimInternal, args)
   },
@@ -256,7 +256,7 @@ export const authorizedReleaseForecastClaim = action({
 
 export const authorizedReserveForecastBudget = action({
   args: { authToken: v.string(), budgetScope: v.string(), reservationId: v.string(), ownerToken: v.string(), nowMs: v.number(), ...limitArgs },
-  handler: async (ctx, { authToken, ...args }) => {
+  handler: async (ctx: any, { authToken, ...args }: any): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.forecasts.reserveForecastBudgetInternal, args)
   },
@@ -264,7 +264,7 @@ export const authorizedReserveForecastBudget = action({
 
 export const authorizedSettleForecastBudget = action({
   args: { authToken: v.string(), budgetScope: v.string(), reservationId: v.string(), ownerToken: v.string(), outcome: v.union(v.literal('consumed'), v.literal('released')) },
-  handler: async (ctx, { authToken, ...args }) => {
+  handler: async (ctx: any, { authToken, ...args }: any): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.forecasts.settleForecastBudgetInternal, args)
   },

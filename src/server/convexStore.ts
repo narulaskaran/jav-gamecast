@@ -63,6 +63,6 @@ export class ConvexForecastStore implements ForecastRecordStore, ForecastRecordR
   }
 
   async listForecastsByGame(gameId: string): Promise<readonly ForecastRecord[]> {
-    return await this.client.query(api.forecasts.listForecastsByGame, { gameId, limit: 128 }) as ForecastRecord[]
+    return await this.client.query(api.forecasts.listForecastsByGame, { gameId, limit: 128 }) as unknown as ForecastRecord[]
   }
 }
