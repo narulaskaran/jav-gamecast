@@ -10,6 +10,7 @@ import {
   type ForecastJob,
   type JevProvider,
 } from './forecastWorker'
+import type { ForecastRecord } from '../shared/forecastRecords'
 
 const state = {
   id: 'game-1',
@@ -222,6 +223,29 @@ describe('forecast identity and persistence boundary', () => {
     expect(calls.keys).toHaveLength(1)
     release?.()
     await firstPromise
+  })
+
+  it('keeps ownership when record persistence fails after a provider call', async () => {
+    const calls: string[] = []
+    class FailingStore extends InMemoryForecastStore {
+      private failures = 2
+
+      override putIfAbsent(record: ForecastRecord): ForecastRecord {
+        if (this.failures > 0) {
+          this.failures -= 1
+          throw new Error('persistence unavailable')
+        }
+        return super.putIfAbsent(record)
+      }
+    }
+    const store = new FailingStore()
+    const provider = successProvider({ keys: calls })
+    const workerA = new ForecastWorker({ provider, store, now: () => 1_000, limits: { cadenceMs: 0 } })
+    const workerB = new ForecastWorker({ provider, store, now: () => 1_000, limits: { cadenceMs: 0 } })
+
+    await expect(workerA.forecast(job)).rejects.toThrow(/persistence unavailable/i)
+    await expect(workerB.forecast(job)).rejects.toThrow(/already claimed/i)
+    expect(calls).toHaveLength(1)
   })
 })
 

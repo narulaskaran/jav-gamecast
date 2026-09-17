@@ -260,10 +260,15 @@ export class ForecastWorker {
     if (claim.status === 'existing') return { record: claim.record, cacheHit: true }
     if (claim.status === 'busy') throw new BusyForecastClaimError()
 
+    let claimFinalized = false
     try {
-      return await this.executeForecast(job)
+      const result = await this.executeForecast(job)
+      claimFinalized = true
+      return result
     } finally {
-      await this.store.releaseForecastClaim(job.idempotencyKey, this.claimOwnerToken)
+      // Never release ownership after a provider call if the record was not
+      // durably finalized. Releasing here would permit a duplicate paid retry.
+      if (claimFinalized) await this.store.releaseForecastClaim(job.idempotencyKey, this.claimOwnerToken)
     }
   }
 
