@@ -12,7 +12,7 @@ import { inferSampleColumns } from './sampleColumns'
 const rows = getHalftimeModelInput().map((row) => asAnalysisRow(row))
 
 export const SAMPLE_DATASET_ID = FOOTBALL_FIXTURE_ID
-export const SAMPLE_DATASET_NAME = 'Sample dataset'
+export const SAMPLE_DATASET_NAME = 'Super Bowl Seahawks demo'
 
 export const getSampleDatasetPreview = (): DatasetPreview => ({
   datasetId: SAMPLE_DATASET_ID,

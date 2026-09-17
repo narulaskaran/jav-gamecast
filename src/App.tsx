@@ -288,14 +288,14 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     <main className="analysis-shell">
       <header className="site-header">
         <a className="brand" href="/" aria-label="Jev playground home"><span className="brand-mark">J</span><span>JEV PLAYGROUND</span></a>
-        <span className="header-tag">{isShareView ? 'PUBLIC SNAPSHOT' : 'Demo · not production analytics'}</span>
+        <span className="header-tag">{isShareView ? 'PUBLIC SNAPSHOT' : 'Demo playground'}</span>
       </header>
       <section className="hero" aria-labelledby="page-title">
         <div>
           <p className="eyebrow">{isShareView ? 'A persisted public readback' : 'Jev playground'}</p>
-          <h1 id="page-title">{isShareView ? <>Inspect a saved run.<br /><em>Every answer.</em></> : <>Run Jev on a CSV.<br /><em>Watch the chart update live.</em></>}</h1>
+          <h1 id="page-title">{isShareView ? <>Inspect a saved run.</> : <>Run Jev on a CSV.</>}</h1>
         </div>
-        <p className="hero-copy">{isShareView ? 'A read-only snapshot of one bounded Jev analysis, including its persisted progress, live chart, and deterministic replay.' : 'Upload CSV or paste a public CSV link; write what to classify; edit the query; run; each row updates the chart. Or try the sample dataset.'}</p>
+        <p className="hero-copy">{isShareView ? 'A read-only snapshot of one bounded Jev analysis, including its persisted progress, live chart, and deterministic replay.' : 'This is an engineer playground for TypeSafe Jev. Try the sample run, or bring your own CSV — the chart updates as each row is classified.'}</p>
       </section>
       <div className="workspace-grid">
         <div className="primary-column">
@@ -354,7 +354,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
           </div>
         </aside>
       </div>
-      <footer className="site-footer"><span>JEV PLAYGROUND</span><span>Demo · not production analytics</span></footer>
+      <footer className="site-footer"><span>JEV PLAYGROUND</span><span>Demo playground</span></footer>
     </main>
   )
 }

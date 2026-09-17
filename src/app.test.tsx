@@ -30,7 +30,7 @@ const draft: AnalysisDraftResult = {
   datasetId: FOOTBALL_FIXTURE_ID,
   sourceType: 'fixture',
   query: 'Classify each row using the visible columns.',
-  metadata: { provider: 'openrouter', model: 'openai/gpt-4o-mini', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2', classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'], columns: ['play_id'], displayName: 'Sample dataset' },
+  metadata: { provider: 'openrouter', model: 'openai/gpt-4o-mini', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2', classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'], columns: ['play_id'], displayName: 'Super Bowl Seahawks demo' },
 }
 
 const uploaded: DatasetPreview = {
@@ -61,7 +61,7 @@ const makeApi = (overrides: Partial<AnalysisApiClient> = {}): AnalysisApiClient 
 
 const startSampleRun = async (api: AnalysisApiClient) => {
   render(<App api={api} />)
-  fireEvent.click(screen.getByRole('button', { name: /try sample dataset/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
   fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
   await screen.findByDisplayValue(draft.query)
   fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: 'Edited query.' } })
@@ -74,12 +74,16 @@ describe('Jev playground flow', () => {
     render(<App api={api} />)
     expect(screen.getByText('Jev playground')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /run jev on a csv/i })).toBeInTheDocument()
-    expect(screen.getByText(/watch the chart update live/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/demo · not production analytics/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/this is an engineer playground for typesafe jev/i)).toBeInTheDocument()
+    expect(screen.getByText(/try the sample run, or bring your own csv/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/demo playground/i).length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: /super bowl seahawks demo/i })).toBeInTheDocument()
+    expect(screen.getByText(/football is the sample, not the product/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /upload \.csv or public https csv url/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/upload csv/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /use public csv url/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /try sample dataset/i })).toBeInTheDocument()
-    expect(screen.queryByText(/super bowl|espn|gamecast|ask a football question/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^try sample$/i })).toBeInTheDocument()
+    expect(screen.queryByText(/espn|gamecast|ask a football question|analyze your business/i)).not.toBeInTheDocument()
     expect(api.draft).not.toHaveBeenCalled()
     expect(api.start).not.toHaveBeenCalled()
     await waitFor(() => expect(api.intakeStatus).toHaveBeenCalled())
@@ -88,7 +92,7 @@ describe('Jev playground flow', () => {
   it('does not fetch on sample task editing, and requires draft then edit then run', async () => {
     const api = makeApi()
     render(<App api={api} />)
-    fireEvent.click(screen.getByRole('button', { name: /try sample dataset/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
     expect(api.draft).not.toHaveBeenCalled()
     expect(api.start).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/^Analysis task$/i), { target: { value: 'Find a first-half signal.' } })
@@ -176,7 +180,7 @@ describe('Jev playground flow', () => {
     expect(await screen.findByRole('heading', { name: 'tickets.csv' })).toBeInTheDocument()
     expect(api.createFromCsv).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /change dataset/i }))
-    fireEvent.change(screen.getByLabelText(/public csv url/i), { target: { value: 'https://example.com/data.csv' } })
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'https://example.com/data.csv' } })
     fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
     expect(await screen.findByRole('heading', { name: 'remote.csv' })).toBeInTheDocument()
     expect(api.createFromUrl).toHaveBeenCalledWith({ url: 'https://example.com/data.csv' })
@@ -190,6 +194,7 @@ describe('Jev playground flow', () => {
     render(<App api={api} />)
     await waitFor(() => expect(screen.getByText(/csv storage is not configured/i)).toBeInTheDocument())
     expect(screen.getByLabelText(/upload csv/i)).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^try sample$/i })).not.toBeDisabled()
     expect(api.start).not.toHaveBeenCalled()
   })
 

@@ -96,7 +96,7 @@ These questions materially change the data model, abuse controls, and UI. Record
 3. **Jev classifier contract — DECIDED:** Each row produces a selected class, per-class probabilities, and confidence when Jev provides it; no free-form explanation by default. The implementation must generalize the existing typed `Choice` adapter from hard-coded football outcomes to dynamic user-defined classes, subject to the confirmed Jev API contract.
 4. **CSV URLs — DECIDED:** Accept public HTTPS URLs that directly return CSV. No cookies, authorization headers, authenticated/private links, or arbitrary URL fetches.
 5. **Result visualization — DECIDED:** Live class-distribution chart ticks on every persisted row prediction for sample and BYOD in the same shell, plus a current-row inspector, replay scrubber, and secondary results table.
-6. **Sample dataset — DECIDED:** Secondary to BYOD upload/URL. Keep the checked-in Seahawks fixture as a thin on-ramp (39 H1 rows, four-class Choice, CC BY 4.0, no PII). Sports is optional, not the product. Do not swap the sample or delay upload/URL/live chart for a perfect CSV. If a later swap happens, use a small public CSV with a clean license, no PII, a clear multi-class Choice question, and ~30–200 rows so the chart visibly moves while streaming.
+6. **Sample dataset — DECIDED:** Seahawks fixture stays as the site demo sample (try-it path). BYOD upload + public HTTPS CSV URL also ships. Two equal first-screen cards: Try sample (Super Bowl Seahawks demo; football is the sample, not the product) and Bring your own. Same live class-distribution chart for both. Do not drop the fixture while adding BYOD.
 
 ### Working defaults pending provider-contract confirmation
 

@@ -11,7 +11,7 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
     <section className="fixture-card dataset-preview" aria-labelledby="dataset-heading">
       <div className="fixture-card-head">
         <div>
-          <p className="eyebrow">{dataset.sourceType === 'fixture' ? 'Sample on-ramp' : dataset.sourceType === 'upload' ? 'Uploaded CSV' : 'Public CSV'}</p>
+          <p className="eyebrow">{dataset.sourceType === 'fixture' ? 'Try sample' : dataset.sourceType === 'upload' ? 'Uploaded CSV' : 'Public CSV'}</p>
           <h2 id="dataset-heading">{dataset.displayName}</h2>
         </div>
         <span className="fixture-badge">{dataset.acceptedRowCount} rows</span>

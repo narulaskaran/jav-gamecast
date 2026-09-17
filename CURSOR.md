@@ -16,7 +16,7 @@ Audience: engineers playing with Jev. This is a technical demo / playground, not
 
 ## Current slice
 
-- Landing: upload CSV and public HTTPS CSV URL are the product path; try the sample dataset is a thin on-ramp only. Same draft → edit query → run flow for every source. The Seahawks fixture stays (39 rows, four-class Choice); do not swap it or delay BYOD for a better sample.
+- Landing: two equal cards — Try sample (Seahawks fixture stays) and Bring your own (CSV upload + public HTTPS CSV URL). Same draft → edit query → run flow and live per-row class chart for every source. Football is the sample, not the product.
 - Live class-distribution chart updates on every persisted row prediction (sample and BYOD share the same chart shell).
 - Server routes under `api/analysis/*`, `api/datasets/*`, `api/share/*`, and `api/browse`. Drafting uses OpenRouter; only run may call Jev.
 - UploadThing stores original CSV blobs; Convex stores dataset metadata, immutable row refs, run progress, and incremental predictions.

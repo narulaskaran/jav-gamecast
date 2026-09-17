@@ -123,7 +123,7 @@ export const fixtureAnalysisDataset = (): ResolvedAnalysisDataset => {
     datasetId: FOOTBALL_FIXTURE_ID,
     fixtureId: FOOTBALL_FIXTURE_ID,
     sourceType: 'fixture',
-    displayName: 'Sample dataset',
+    displayName: 'Super Bowl Seahawks demo',
     columns: [...footballFixtureModelInputFields],
     rows,
     classes: [...ANALYSIS_CLASS_NAMES],

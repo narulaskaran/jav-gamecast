@@ -50,7 +50,7 @@ Request JSON (sample or BYOD):
     "labelHalf":"H2",
     "classes":["K.Walker","C.Kupp","J.Smith-Njigba","Other/Tie"],
     "columns":["play_id"],
-    "displayName":"Sample dataset"
+    "displayName":"Super Bowl Seahawks demo"
   }
 }
 ```
