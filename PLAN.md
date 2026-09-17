@@ -6,7 +6,7 @@
 
 **Status:** Pivot recorded. Fixture-first analysis plus Stage 5 BYOD intake (CSV upload, public HTTPS CSV URL, sample on-ramp, live per-row class chart) is on the working branch. Remaining work is pause/cancel, browse/share completeness, abuse/cost controls, and production/release gates. Stage 0 provider-contract confirmation is still pending before paid live Jev.
 
-**Last updated:** 2026-09-17 23:30:00 UTC
+**Last updated:** 2026-09-17 23:35:00 UTC
 
 **Goal:** Let a user bring a small CSV dataset, describe an analysis in natural language, review/edit the generated Jev classifier query, run a bounded row-by-row Jev analysis, watch results arrive live, and share/replay the completed analysis at a unique URL.
 
@@ -95,7 +95,8 @@ These questions materially change the data model, abuse controls, and UI. Record
 2. **Execution cap — DECIDED:** Maximum 5,000 accepted rows and 5,000 Jev calls per analysis. This is a hard server-side ceiling, not a promise that every user may run 5,000 calls without additional global throttling or budget approval. The run confirmation must show the maximum call count; concurrency, retry policy, and global quota remain enforced server-side.
 3. **Jev classifier contract — DECIDED:** Each row produces a selected class, per-class probabilities, and confidence when Jev provides it; no free-form explanation by default. The implementation must generalize the existing typed `Choice` adapter from hard-coded football outcomes to dynamic user-defined classes, subject to the confirmed Jev API contract.
 4. **CSV URLs — DECIDED:** Accept public HTTPS URLs that directly return CSV. No cookies, authorization headers, authenticated/private links, or arbitrary URL fetches.
-5. **Result visualization — DECIDED:** Live results table plus class-distribution bar chart, current-row inspector, and replay scrubber.
+5. **Result visualization — DECIDED:** Live class-distribution chart ticks on every persisted row prediction for sample and BYOD in the same shell, plus a current-row inspector, replay scrubber, and secondary results table.
+6. **Sample dataset — DECIDED:** Secondary to BYOD upload/URL. Keep the checked-in Seahawks fixture as a thin on-ramp (39 H1 rows, four-class Choice, CC BY 4.0, no PII). Sports is optional, not the product. Do not swap the sample or delay upload/URL/live chart for a perfect CSV. If a later swap happens, use a small public CSV with a clean license, no PII, a clear multi-class Choice question, and ~30–200 rows so the chart visibly moves while streaming.
 
 ### Working defaults pending provider-contract confirmation
 
