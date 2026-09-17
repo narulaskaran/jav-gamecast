@@ -1,8 +1,10 @@
 export type ForecastChoice = 'home' | 'away' | 'tie'
 export type GameStatus = 'quarter' | 'halftime' | 'final'
+export type FeedStatus = 'REPLAY' | 'LIVE' | 'STALE'
 
 export interface GameState {
   id: string
+  eventId?: string
   homeTeam: string
   awayTeam: string
   homeScore: number
@@ -35,8 +37,13 @@ export interface GamecastFixture {
   points: readonly ForecastPoint[]
 }
 
+export interface GameStateSnapshot {
+  state: GameState
+  status: FeedStatus
+}
+
 export interface GameStateSource {
-  getStateAt(pointIndex: number): GameState
+  getSnapshotAt(pointIndex: number): GameStateSnapshot
 }
 
 export interface ForecastSource {

@@ -1,19 +1,30 @@
 import { fixture } from './fixture'
-import type { ForecastSource, GameState, GameStateSource } from './types'
+import type { FeedStatus, ForecastSource, GameState, GameStateSource, GameStateSnapshot } from './types'
 
-const replaySnapshots: readonly GameState[] = [
-  { ...fixture.game, homeScore: 0, awayScore: 0, quarter: 'Q1', clock: '15:00', status: 'quarter', possession: 'away', lastPlay: 'Opening kickoff; the replay begins.' },
-  { ...fixture.game, homeScore: 7, awayScore: 0, quarter: 'Q1', clock: '11:42', status: 'quarter', possession: 'away', lastPlay: 'Harbor Hawks finish a long opening drive.' },
-  { ...fixture.game, homeScore: 14, awayScore: 0, quarter: 'Q2', clock: '08:10', status: 'quarter', possession: 'home', lastPlay: 'A red-zone catch extends the Hawks lead.' },
-  { ...fixture.game, homeScore: 14, awayScore: 14, quarter: 'Q2', clock: '02:48', status: 'quarter', possession: 'away', lastPlay: 'Cedar Foxes answer before the break.' },
-  { ...fixture.game, homeScore: 14, awayScore: 17, quarter: 'Q3', clock: '09:34', status: 'quarter', possession: 'home', lastPlay: 'A field goal nudges the Foxes ahead.' },
-  { ...fixture.game, homeScore: 17, awayScore: 17, quarter: 'HALF', clock: '00:00', status: 'halftime', possession: null, lastPlay: 'Halftime checkpoint in the synthetic replay.' },
-  { ...fixture.game, homeScore: 24, awayScore: 17, quarter: 'Q4', clock: '02:00', status: 'quarter', possession: 'away', lastPlay: 'Hawks lead late after a quick strike.' },
-  fixture.game,
-]
+const replayState = (pointIndex: number, overrides: Partial<GameState>): GameState => {
+  const point = fixture.points[pointIndex]
+  return {
+    ...fixture.game,
+    eventId: point.eventId,
+    timestamp: point.timestamp,
+    lastPlay: point.eventLabel ? `${point.eventLabel} — replay state recorded.` : fixture.game.lastPlay,
+    ...overrides,
+  }
+}
+
+const replaySnapshots: readonly GameStateSnapshot[] = [
+  { state: replayState(0, { homeScore: 0, awayScore: 0, quarter: 'Q1', clock: '15:00', status: 'quarter', possession: 'away' }), status: 'REPLAY' },
+  { state: replayState(1, { homeScore: 7, awayScore: 0, quarter: 'Q1', clock: '11:42', status: 'quarter', possession: 'away' }), status: 'REPLAY' },
+  { state: replayState(2, { homeScore: 14, awayScore: 0, quarter: 'Q2', clock: '08:10', status: 'quarter', possession: 'home' }), status: 'REPLAY' },
+  { state: replayState(3, { homeScore: 14, awayScore: 14, quarter: 'Q2', clock: '02:48', status: 'quarter', possession: 'away' }), status: 'REPLAY' },
+  { state: replayState(4, { homeScore: 14, awayScore: 17, quarter: 'Q3', clock: '09:34', status: 'quarter', possession: 'home' }), status: 'REPLAY' },
+  { state: replayState(5, { homeScore: 17, awayScore: 17, quarter: 'HALF', clock: '00:00', status: 'halftime', possession: null }), status: 'REPLAY' },
+  { state: replayState(6, { homeScore: 17, awayScore: 24, quarter: 'Q4', clock: '02:00', status: 'quarter', possession: 'away' }), status: 'REPLAY' },
+  { state: replayState(7, { homeScore: 24, awayScore: 27, quarter: 'Q4', clock: '00:42', status: 'final', possession: 'away' }), status: 'REPLAY' },
+].map((snapshot) => Object.freeze({ state: Object.freeze(snapshot.state), status: snapshot.status as FeedStatus }))
 
 export const fixtureGameStateSource: GameStateSource = {
-  getStateAt(pointIndex) {
+  getSnapshotAt(pointIndex) {
     return replaySnapshots[Math.max(0, Math.min(pointIndex, replaySnapshots.length - 1))]
   },
 }

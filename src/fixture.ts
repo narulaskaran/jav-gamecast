@@ -1,4 +1,4 @@
-import type { ForecastPoint, GamecastFixture, GameState } from './types'
+import type { ForecastChoice, ForecastPoint, GamecastFixture, GameState, GameStatus } from './types'
 
 const rawFixture = {
   game: {
@@ -24,25 +24,95 @@ const rawFixture = {
     { id: 'p-07', gameId: 'demo-2026-09-17', eventId: 'score-03', timestamp: '2026-09-17T03:00:02Z', elapsedSeconds: 540, homeProbability: 31, awayProbability: 57, tieProbability: 12, choice: 'away', confidence: 70, eventLabel: 'Foxes take the lead', eventKind: 'score' },
     { id: 'p-08', gameId: 'demo-2026-09-17', eventId: 'final-01', timestamp: '2026-09-17T03:01:32Z', elapsedSeconds: 630, homeProbability: 28, awayProbability: 63, tieProbability: 9, choice: 'away', confidence: 76, eventLabel: 'Final whistle', eventKind: 'final' },
   ],
-} satisfies { game: GameState; points: ForecastPoint[] }
+}
 
-const isProbability = (value: unknown): value is number => typeof value === 'number' && value >= 0 && value <= 100
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+const isProbability = (value: unknown): value is number => isFiniteNumber(value) && value >= 0 && value <= 100
+const isDateString = (value: unknown): value is string => isNonEmptyString(value) && !Number.isNaN(Date.parse(value))
+const gameStatuses: readonly GameStatus[] = ['quarter', 'halftime', 'final']
+const choices: readonly ForecastChoice[] = ['home', 'away', 'tie']
+const eventKinds = ['opening', 'swing', 'score', 'turnover', 'halftime', 'final'] as const
+
+const requireGame = (value: unknown): GameState => {
+  if (!isRecord(value)) throw new Error('Fixture game is required')
+  if (!isNonEmptyString(value.id) || !isNonEmptyString(value.homeTeam) || !isNonEmptyString(value.awayTeam)) throw new Error('Fixture game IDs and teams are required')
+  if (value.homeTeam === value.awayTeam) throw new Error('Fixture game teams must differ')
+  if (!isFiniteNumber(value.homeScore) || value.homeScore < 0 || !isFiniteNumber(value.awayScore) || value.awayScore < 0) throw new Error('Fixture game scores are invalid')
+  if (!isNonEmptyString(value.quarter) || !isNonEmptyString(value.clock)) throw new Error('Fixture game period and clock are required')
+  if (!gameStatuses.includes(value.status as GameStatus)) throw new Error('Fixture game status is invalid')
+  if (value.possession !== null && value.possession !== 'home' && value.possession !== 'away') throw new Error('Fixture game possession is invalid')
+  if (!isNonEmptyString(value.lastPlay) || !isDateString(value.timestamp)) throw new Error('Fixture game text and timestamp are invalid')
+  if (value.eventId !== undefined && !isNonEmptyString(value.eventId)) throw new Error('Fixture game event ID is invalid')
+
+  return {
+    id: value.id,
+    ...(value.eventId === undefined ? {} : { eventId: value.eventId }),
+    homeTeam: value.homeTeam,
+    awayTeam: value.awayTeam,
+    homeScore: value.homeScore,
+    awayScore: value.awayScore,
+    quarter: value.quarter,
+    clock: value.clock,
+    status: value.status as GameStatus,
+    possession: value.possession,
+    lastPlay: value.lastPlay,
+    timestamp: value.timestamp,
+  }
+}
 
 export const parseFixture = (input: unknown): GamecastFixture => {
-  if (!input || typeof input !== 'object') throw new Error('Fixture must be an object')
-  const candidate = input as { game?: unknown; points?: unknown }
-  if (!candidate.game || typeof candidate.game !== 'object') throw new Error('Fixture game is required')
-  if (!Array.isArray(candidate.points) || candidate.points.length < 2) throw new Error('Fixture needs forecast points')
-  const game = candidate.game as Partial<GameState>
-  if (!game.id || !game.homeTeam || !game.awayTeam) throw new Error('Fixture game teams are required')
-  const points = candidate.points as ForecastPoint[]
-  for (const point of points) {
-    if (!point.id || !point.gameId || point.gameId !== game.id) throw new Error('Forecast point has an invalid game ID')
-    if (![point.homeProbability, point.awayProbability, point.tieProbability].every(isProbability)) throw new Error('Forecast probabilities must be between 0 and 100')
-    if (point.homeProbability + point.awayProbability + point.tieProbability !== 100) throw new Error('Forecast probabilities must total 100')
-    if (!point.timestamp || point.elapsedSeconds < 0) throw new Error('Forecast point timestamp is invalid')
-  }
-  return Object.freeze({ game: Object.freeze({ ...game }) as GameState, points: Object.freeze(points.map((point) => Object.freeze({ ...point }))) })
+  if (!isRecord(input)) throw new Error('Fixture must be an object')
+  if (!Array.isArray(input.points) || input.points.length < 2) throw new Error('Fixture needs forecast points')
+  const game = requireGame(input.game)
+  const pointIds = new Set<string>()
+  const eventIds = new Set<string>()
+  let previousTimestamp = -Infinity
+  let previousElapsed = -Infinity
+
+  const points = input.points.map((value, index): ForecastPoint => {
+    if (!isRecord(value)) throw new Error(`Forecast point ${index + 1} is invalid`)
+    if (!isNonEmptyString(value.id) || !isNonEmptyString(value.gameId) || value.gameId !== game.id) throw new Error(`Forecast point ${index + 1} has an invalid game ID`)
+    if (!isNonEmptyString(value.eventId)) throw new Error(`Forecast point ${index + 1} event ID is invalid`)
+    if (pointIds.has(value.id) || eventIds.has(value.eventId)) throw new Error(`Forecast point ${index + 1} has a duplicate ID`)
+    pointIds.add(value.id)
+    eventIds.add(value.eventId)
+
+    if (!isDateString(value.timestamp)) throw new Error(`Forecast point ${index + 1} timestamp is invalid`)
+    if (!isFiniteNumber(value.elapsedSeconds) || value.elapsedSeconds < 0) throw new Error(`Forecast point ${index + 1} elapsed seconds are invalid`)
+    const timestamp = Date.parse(value.timestamp)
+    if (timestamp <= previousTimestamp || value.elapsedSeconds <= previousElapsed) throw new Error('Forecast points must be in chronological order')
+    previousTimestamp = timestamp
+    previousElapsed = value.elapsedSeconds
+
+    const probabilities = [value.homeProbability, value.awayProbability, value.tieProbability]
+    if (!probabilities.every(isProbability)) throw new Error(`Forecast point ${index + 1} probabilities are invalid`)
+    const [homeProbability, awayProbability, tieProbability] = probabilities
+    if (Math.abs(homeProbability + awayProbability + tieProbability - 100) > 1e-9) throw new Error('Forecast probabilities must total 100')
+    if (!choices.includes(value.choice as ForecastChoice)) throw new Error(`Forecast point ${index + 1} choice is invalid`)
+    if (!isFiniteNumber(value.confidence) || value.confidence < 0 || value.confidence > 100) throw new Error(`Forecast point ${index + 1} confidence is invalid`)
+    if (value.eventLabel !== undefined && !isNonEmptyString(value.eventLabel)) throw new Error(`Forecast point ${index + 1} event label is invalid`)
+    if (value.eventKind !== undefined && !eventKinds.includes(value.eventKind as typeof eventKinds[number])) throw new Error(`Forecast point ${index + 1} event kind is invalid`)
+
+    return {
+      id: value.id,
+      gameId: value.gameId,
+      eventId: value.eventId,
+      timestamp: value.timestamp,
+      elapsedSeconds: value.elapsedSeconds,
+      homeProbability,
+      awayProbability,
+      tieProbability,
+      choice: value.choice as ForecastChoice,
+      confidence: value.confidence,
+      ...(value.eventLabel === undefined ? {} : { eventLabel: value.eventLabel }),
+      ...(value.eventKind === undefined ? {} : { eventKind: value.eventKind as typeof eventKinds[number] }),
+    }
+  })
+
+  const frozenPoints = Object.freeze(points.map((point) => Object.freeze(point)))
+  return Object.freeze({ game: Object.freeze(game), points: frozenPoints })
 }
 
 export const fixture = parseFixture(rawFixture)
