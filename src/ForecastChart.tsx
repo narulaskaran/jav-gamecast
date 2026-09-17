@@ -32,7 +32,7 @@ export const ForecastChart = ({ points, currentIndex, game }: ForecastChartProps
   return (
     <div className="chart-shell">
       <div className="chart-wrap">
-        <svg className="forecast-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={`Historical forecast chart for ${game.homeTeam}, ${game.awayTeam}, and tie probabilities`}>
+        <svg className="forecast-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`Historical forecast chart for ${game.homeTeam}, ${game.awayTeam}, and tie probabilities`}>
           {[0, 25, 50, 75, 100].map((value) => (
             <g key={value}>
               <line className="grid-line" x1={PADDING.left} x2={WIDTH - PADDING.right} y1={yFor(value)} y2={yFor(value)} />

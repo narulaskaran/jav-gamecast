@@ -190,6 +190,60 @@ describe('gamecast forecast rendering', () => {
     expect(document.querySelector('.forecast-panel')?.querySelectorAll('h2')).toHaveLength(1)
   })
 
+  it('keeps the promise, matchup, forecast, chart, and timeline in the first-viewport flow', () => {
+    render(<App />)
+
+    const flow = [
+      document.querySelector('#page-title'),
+      document.querySelector('.game-card'),
+      document.querySelector('#forecast-heading'),
+      document.querySelector('.forecast-chart'),
+      document.querySelector('.event-rail'),
+    ]
+    expect(flow.every((element): element is Element => element !== null)).toBe(true)
+    for (let index = 1; index < flow.length; index += 1) {
+      expect(flow[index - 1]?.compareDocumentPosition(flow[index] as Node) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    }
+    expect(document.querySelector('.page-shell')).toHaveAttribute('data-flow', 'promise matchup forecast chart timeline')
+  })
+
+  it.each([
+    ['REPLAY', 'Synthetic replay fixture', 'No live inference'],
+    ['LIVE', 'Live ESPN snapshot', 'Live inference state'],
+    ['STALE', 'ESPN snapshot stale', 'Showing last available inference'],
+    ['ERROR', 'ESPN snapshot unavailable', 'Showing fallback forecast'],
+    ['LIMITED', 'ESPN snapshot limited', 'Inference may be incomplete'],
+    ['MOCK', 'Mock data', 'No live inference'],
+  ] as const)('uses truthful %s disclosure copy', (status, sourceCopy, inferenceCopy) => {
+    const source = { getPoints: () => fixture.points, feedStatus: status }
+    render(<App forecastSource={source} gameStateSource={makeSource(fixture.game, status)} />)
+
+    const disclosure = document.querySelector(`[data-disclosure-status="${status}"]`)
+    expect(disclosure).toBeInTheDocument()
+    expect(disclosure).toHaveTextContent(sourceCopy)
+    expect(disclosure).toHaveTextContent(inferenceCopy)
+  })
+
+  it('renders STALE after a live refresh rejects without dropping fallback points', async () => {
+    let status: FeedStatus = 'LIVE'
+    const source = {
+      mode: 'live' as const,
+      get feedStatus() { return status },
+      getPoints: () => fixture.points,
+      async refresh() {
+        status = 'STALE'
+        throw new Error('live read rejected')
+      },
+    }
+
+    render(<App forecastSource={source} />)
+
+    await waitFor(() => expect(document.querySelector('.status-pill.is-current')).toHaveAttribute('data-status', 'STALE'))
+    expect(screen.getByText('Punt pins the opener')).toBeInTheDocument()
+    expect(document.querySelector('.forecast-chart')).toBeInTheDocument()
+    expect(document.querySelector('[data-disclosure-status="STALE"]')).toHaveTextContent('ESPN snapshot stale')
+  })
+
   it('distinguishes non-replay feed states with the same single indicator', () => {
     const source = makeSource(fixture.game, 'ERROR')
     render(<App forecastSource={{ getPoints: () => fixture.points, feedStatus: 'ERROR' }} gameStateSource={source} />)

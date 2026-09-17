@@ -23,6 +23,17 @@ const statusDescription: Record<FeedStatus, string> = {
   LIMITED: 'Limited live data',
   MOCK: 'Mock data',
 }
+const disclosureCopy: Record<FeedStatus, { source: string; inference: string }> = {
+  REPLAY: { source: 'Synthetic replay fixture', inference: 'No live inference' },
+  LIVE: { source: 'Live ESPN snapshot', inference: 'Live inference state' },
+  STALE: { source: 'ESPN snapshot stale', inference: 'Showing last available inference' },
+  ERROR: { source: 'ESPN snapshot unavailable', inference: 'Showing fallback forecast' },
+  LIMITED: { source: 'ESPN snapshot limited', inference: 'Inference may be incomplete' },
+  MOCK: { source: 'Mock data', inference: 'No live inference' },
+}
+
+const sourceFeedStatus = (source: ForecastSource | BrowserForecastSource): FeedStatus | undefined =>
+  'feedStatus' in source ? source.feedStatus : undefined
 
 const StatusPill = ({ label }: { label: FeedStatus }) => (
   <span className={`status-pill status-${label.toLowerCase()} is-current`} data-status={label} aria-label={`${statusDescription[label]} status`}>
@@ -34,23 +45,30 @@ const StatusPill = ({ label }: { label: FeedStatus }) => (
 
 export const App = ({ forecastSource = defaultForecastSource, gameStateSource = fixtureGameStateSource }: AppProps) => {
   const [points, setPoints] = useState(() => forecastSource.getPoints())
+  const [sourceStatus, setSourceStatus] = useState<FeedStatus | undefined>(() => sourceFeedStatus(forecastSource))
   const [replay, dispatch] = useReducer(replayReducer, points.length, initialReplayState)
   const pointIndex = Math.max(0, Math.min(replay.index, points.length - 1))
   const point = points[pointIndex]
   const snapshot = gameStateSource.getSnapshotAt(pointIndex)
   const game = snapshot.state
-  const status = 'feedStatus' in forecastSource && forecastSource.feedStatus ? forecastSource.feedStatus : snapshot.status
+  const status = sourceStatus ?? snapshot.status
   const awayCode = teamCode(game.awayTeam)
   const homeCode = teamCode(game.homeTeam)
   const updateAge = pointIndex === 0 ? 'opening point' : `${Math.round(point.elapsedSeconds / 60)} min into replay`
 
   useEffect(() => {
     setPoints(forecastSource.getPoints())
+    setSourceStatus(sourceFeedStatus(forecastSource))
     if (!('refresh' in forecastSource)) return undefined
     let active = true
     void forecastSource.refresh().then((nextPoints) => {
-      if (active) setPoints(nextPoints)
-    }, () => undefined)
+      if (active) {
+        setPoints(nextPoints)
+        setSourceStatus(sourceFeedStatus(forecastSource))
+      }
+    }, () => {
+      if (active) setSourceStatus(sourceFeedStatus(forecastSource))
+    })
     return () => { active = false }
   }, [forecastSource])
 
@@ -63,7 +81,7 @@ export const App = ({ forecastSource = defaultForecastSource, gameStateSource = 
   const step = (delta: number) => dispatch({ type: 'step', delta, total: points.length })
 
   return (
-    <main className="page-shell">
+    <main className="page-shell" data-flow="promise matchup forecast chart timeline">
       <header className="site-header">
         <a className="brand" href="/" aria-label="Jev Gamecast home"><span className="brand-mark">J</span><span>JEV / GAMECAST</span></a>
         <p className="positioning">A replay-first forecast for one game</p>
@@ -74,12 +92,12 @@ export const App = ({ forecastSource = defaultForecastSource, gameStateSource = 
           <p className="eyebrow">Football / forecast replay</p>
           <h1 id="page-title">Jev forecasts<br /><em>this football game.</em></h1>
         </div>
-        <p className="intro-copy">Follow the read as the game moves. Scrub the timeline or play the replay to see each checkpoint change.</p>
+        <p className="intro-copy">Scrub or play to follow each forecast checkpoint.</p>
       </section>
 
       <section className="game-card" aria-label="Featured game">
         <div className="game-card-top">
-          <div className="fixture-label"><span>Featured game</span><span className="muted-divider" aria-hidden="true">/</span><span>{status === 'LIVE' ? 'ESPN snapshot' : 'Synthetic fixture'}</span></div>
+          <div className="fixture-label"><span>Featured game</span><span className="muted-divider" aria-hidden="true">/</span><span>{status === 'REPLAY' || status === 'MOCK' ? 'Synthetic fixture' : 'ESPN snapshot'}</span></div>
           <StatusPill label={status} />
         </div>
         <div className="matchup">
@@ -119,7 +137,7 @@ export const App = ({ forecastSource = defaultForecastSource, gameStateSource = 
         </section>
       </section>
 
-      <footer className="disclosure"><span><b>Experimental forecast</b> · Synthetic sanitized fixture · No live inference call</span><span>Updated {formatTimestamp(point.timestamp)} UTC · Not betting odds</span></footer>
+      <footer className="disclosure" data-disclosure-status={status}><span><b>Experimental forecast</b> · {disclosureCopy[status].source} · {disclosureCopy[status].inference}</span><span>Updated {formatTimestamp(point.timestamp)} UTC · Not betting odds</span></footer>
     </main>
   )
 }
