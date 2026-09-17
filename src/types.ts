@@ -5,6 +5,8 @@ export type FeedStatus = 'REPLAY' | 'LIVE' | 'STALE'
 export interface GameState {
   id: string
   eventId?: string
+  playId?: string
+  sequenceNumber?: number
   homeTeam: string
   awayTeam: string
   homeScore: number
@@ -13,8 +15,13 @@ export interface GameState {
   clock: string
   status: GameStatus
   possession: 'home' | 'away' | null
+  down?: number | null
+  distance?: number | null
+  fieldPosition?: string | null
   lastPlay: string
   timestamp: string
+  feedTimestamp?: string
+  sourceStatus?: FeedStatus
 }
 
 export interface ForecastPoint {
@@ -44,6 +51,11 @@ export interface GameStateSnapshot {
 
 export interface GameStateSource {
   getSnapshotAt(pointIndex: number): GameStateSnapshot
+}
+
+export interface LiveGameStateSource {
+  poll(): Promise<GameStateSnapshot>
+  getCachedSnapshot(): GameStateSnapshot | undefined
 }
 
 export interface ForecastSource {
