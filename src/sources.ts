@@ -1,5 +1,8 @@
+import { createBrowserForecastReadPath, createBrowserForecastSource } from './browser/forecastRead'
 import { fixture } from './fixture'
-import type { FeedStatus, ForecastSource, GameState, GameStateSource, GameStateSnapshot } from './types'
+import { InMemoryForecastStore } from './persistence/forecastStore'
+import type { ForecastRecord } from './shared/forecastRecords'
+import type { FeedStatus, GameState, GameStateSource, GameStateSnapshot } from './types'
 
 const replayState = (pointIndex: number, overrides: Partial<GameState>): GameState => {
   const point = fixture.points[pointIndex]
@@ -29,6 +32,41 @@ export const fixtureGameStateSource: GameStateSource = {
   },
 }
 
-export const fixtureForecastSource: ForecastSource = {
-  getPoints: () => fixture.points,
-}
+const fixtureForecastRecords: readonly ForecastRecord[] = fixture.points.map((point) => ({
+  idempotencyKey: point.id,
+  gameId: point.gameId,
+  providerEventId: point.eventId,
+  stateHash: point.id,
+  rawNormalizedState: {
+    eventId: point.eventId,
+    timestamp: point.timestamp,
+    ...(point.eventLabel === undefined ? {} : { eventLabel: point.eventLabel }),
+    ...(point.eventKind === undefined ? {} : { eventKind: point.eventKind }),
+  },
+  model: 'replay-fixture',
+  status: 'success',
+  source: 'replay',
+  requestedAt: point.timestamp,
+  completedAt: point.timestamp,
+  latencyMs: 0,
+  choice: point.choice,
+  probabilities: {
+    home: point.homeProbability,
+    away: point.awayProbability,
+    tie: point.tieProbability,
+  },
+  confidence: point.confidence,
+}))
+
+const fixtureForecastStore = new InMemoryForecastStore()
+fixtureForecastRecords.forEach((record) => fixtureForecastStore.put(record))
+
+export const fixtureForecastReadPath = createBrowserForecastReadPath(fixtureForecastStore)
+export const defaultForecastSource = createBrowserForecastSource({
+  readPath: fixtureForecastReadPath,
+  gameId: fixture.game.id,
+  fallback: fixture.points,
+})
+
+/** Backward-compatible name for the offline replay source. */
+export const fixtureForecastSource = defaultForecastSource

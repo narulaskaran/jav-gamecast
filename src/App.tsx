@@ -1,13 +1,14 @@
-import { useEffect, useReducer } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { ForecastChart } from './ForecastChart'
-import { fixtureForecastSource, fixtureGameStateSource } from './sources'
+import { defaultForecastSource, fixtureGameStateSource } from './sources'
 import { teamCode } from './teamMetadata'
 import { initialReplayState, replayReducer } from './replay'
+import type { BrowserForecastSource } from './browser/forecastRead'
 import type { FeedStatus, ForecastSource, GameState, GameStateSource } from './types'
 import './styles.css'
 
 interface AppProps {
-  forecastSource?: ForecastSource
+  forecastSource?: ForecastSource | BrowserForecastSource
   gameStateSource?: GameStateSource
 }
 
@@ -18,8 +19,8 @@ const feedStatuses: readonly FeedStatus[] = ['REPLAY', 'LIVE', 'STALE']
 
 const StatusPill = ({ label, active = false }: { label: FeedStatus; active?: boolean }) => <span className={`status-pill status-${label.toLowerCase()} ${active ? 'is-current' : ''}`} aria-current={active ? 'true' : undefined}><span className="status-dot" />{label}</span>
 
-export const App = ({ forecastSource = fixtureForecastSource, gameStateSource = fixtureGameStateSource }: AppProps) => {
-  const points = forecastSource.getPoints()
+export const App = ({ forecastSource = defaultForecastSource, gameStateSource = fixtureGameStateSource }: AppProps) => {
+  const [points, setPoints] = useState(() => forecastSource.getPoints())
   const [replay, dispatch] = useReducer(replayReducer, points.length, initialReplayState)
   const pointIndex = Math.max(0, Math.min(replay.index, points.length - 1))
   const point = points[pointIndex]
@@ -29,6 +30,16 @@ export const App = ({ forecastSource = fixtureForecastSource, gameStateSource = 
   const awayCode = teamCode(game.awayTeam)
   const homeCode = teamCode(game.homeTeam)
   const updateAge = pointIndex === 0 ? 'opening point' : `${Math.round(point.elapsedSeconds / 60)} min into replay`
+
+  useEffect(() => {
+    setPoints(forecastSource.getPoints())
+    if (!('refresh' in forecastSource)) return undefined
+    let active = true
+    void forecastSource.refresh().then((nextPoints) => {
+      if (active) setPoints(nextPoints)
+    }, () => undefined)
+    return () => { active = false }
+  }, [forecastSource])
 
   useEffect(() => {
     if (!replay.isPlaying) return undefined

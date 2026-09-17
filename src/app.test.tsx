@@ -1,7 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from './App'
+import { createBrowserForecastReadPath, createBrowserForecastSource } from './browser/forecastRead'
 import { fixture, parseFixture } from './fixture'
+import { InMemoryForecastStore } from './persistence/forecastStore'
+import type { ForecastRecord } from './shared/forecastRecords'
 import type { GameStateSource } from './types'
 
 const makeSource = (game: typeof fixture.game, status: 'REPLAY' | 'LIVE' | 'STALE'): GameStateSource => ({
@@ -20,6 +23,45 @@ const makeSource = (game: typeof fixture.game, status: 'REPLAY' | 'LIVE' | 'STAL
 })
 
 describe('gamecast forecast rendering', () => {
+  it('renders forecast points loaded through the injected shared read boundary', async () => {
+    const record: ForecastRecord = {
+      idempotencyKey: 'demo-2026-09-17:cached-event:event:shared-state',
+      gameId: fixture.game.id,
+      providerEventId: 'cached-event',
+      stateHash: 'shared-state',
+      rawNormalizedState: {
+        eventId: 'cached-event',
+        timestamp: '2026-09-17T03:40:00Z',
+        eventLabel: 'Shared cached checkpoint',
+        eventKind: 'swing',
+      },
+      model: 'replay-fixture',
+      status: 'success',
+      source: 'replay',
+      requestedAt: '2026-09-17T03:40:00Z',
+      completedAt: '2026-09-17T03:40:00Z',
+      latencyMs: 0,
+      choice: 'home',
+      probabilities: { home: 0.6, away: 0.3, tie: 0.1 },
+      confidence: 0.6,
+    }
+    const store = new InMemoryForecastStore()
+    store.put(record)
+    const source = createBrowserForecastSource({
+      readPath: createBrowserForecastReadPath({
+        async getForecastByIdempotencyKey(key) { return store.getForecastByIdempotencyKey(key) },
+        async listForecastsByGame(gameId) { return store.listForecastsByGame(gameId) },
+      }),
+      gameId: fixture.game.id,
+      fallback: fixture.points,
+    })
+
+    render(<App forecastSource={source} />)
+
+    await waitFor(() => expect(screen.getByText('Shared cached checkpoint')).toBeInTheDocument())
+    expect(document.querySelector('.probabilities')?.textContent).toContain('HH 0.6')
+  })
+
   it('renders chart series, event markers, metadata, and replay state', () => {
     render(<App />)
 

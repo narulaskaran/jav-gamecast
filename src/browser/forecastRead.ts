@@ -1,4 +1,4 @@
-import type { ForecastPoint } from '../types'
+import type { ForecastPoint, ForecastSource } from '../types'
 import type { ForecastRecord, ForecastRecordReadBoundary } from '../shared/forecastRecords'
 
 export interface BrowserForecastReadPath {
@@ -15,12 +15,26 @@ export const createBrowserForecastReadPath = (boundary: ForecastRecordReadBounda
   },
 })
 
+const stateObject = (record: ForecastRecord): Record<string, unknown> | undefined =>
+  typeof record.rawNormalizedState === 'object' && record.rawNormalizedState !== null && !Array.isArray(record.rawNormalizedState)
+    ? record.rawNormalizedState as Record<string, unknown>
+    : undefined
+
 const stateTimestamp = (record: ForecastRecord): string => {
-  if (typeof record.rawNormalizedState === 'object' && record.rawNormalizedState !== null && !Array.isArray(record.rawNormalizedState)) {
-    const timestamp = record.rawNormalizedState.timestamp
-    if (typeof timestamp === 'string' && !Number.isNaN(Date.parse(timestamp))) return timestamp
-  }
+  const timestamp = stateObject(record)?.timestamp
+  if (typeof timestamp === 'string' && !Number.isNaN(Date.parse(timestamp))) return timestamp
   return record.completedAt
+}
+
+const eventMetadata = (record: ForecastRecord): Pick<ForecastPoint, 'eventLabel' | 'eventKind'> => {
+  const state = stateObject(record)
+  const eventLabel = typeof state?.eventLabel === 'string' && state.eventLabel.length > 0 ? state.eventLabel : undefined
+  const eventKinds = ['opening', 'swing', 'score', 'turnover', 'halftime', 'final'] as const
+  const eventKind = eventKinds.includes(state?.eventKind as typeof eventKinds[number]) ? state?.eventKind as typeof eventKinds[number] : undefined
+  return {
+    ...(eventLabel === undefined ? {} : { eventLabel }),
+    ...(eventKind === undefined ? {} : { eventKind }),
+  }
 }
 
 export const forecastRecordsToPoints = (records: readonly ForecastRecord[]): readonly ForecastPoint[] => {
@@ -41,6 +55,30 @@ export const forecastRecordsToPoints = (records: readonly ForecastRecord[]): rea
       tieProbability: record.probabilities.tie,
       choice: record.choice,
       confidence: record.confidence,
+      ...eventMetadata(record),
     }
   })
+}
+
+export interface BrowserForecastSource extends ForecastSource {
+  refresh(): Promise<readonly ForecastPoint[]>
+}
+
+export interface BrowserForecastSourceOptions {
+  readPath: Pick<BrowserForecastReadPath, 'getReplayForecasts'>
+  gameId: string
+  fallback: readonly ForecastPoint[]
+}
+
+export const createBrowserForecastSource = ({ readPath, gameId, fallback }: BrowserForecastSourceOptions): BrowserForecastSource => {
+  let points = fallback
+
+  return {
+    getPoints: () => points,
+    async refresh() {
+      const nextPoints = forecastRecordsToPoints(await readPath.getReplayForecasts(gameId))
+      if (nextPoints.length > 0) points = nextPoints
+      return points
+    },
+  }
 }
