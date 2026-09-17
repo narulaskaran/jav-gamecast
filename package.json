@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "test:convex": "vitest run convex/forecasts.test.ts",
+    "test:convex": "vitest run convex/*.test.ts",
     "typecheck": "tsc -b",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "typecheck:convex": "tsc -p convex/tsconfig.json --noEmit",
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0",
+    "@vercel/functions": "^3.9.8",
     "@vitejs/plugin-react": "^6.1.1",
     "convex": "^1.46.0",
     "react": "^18.3.1",

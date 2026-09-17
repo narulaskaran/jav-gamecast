@@ -4,6 +4,8 @@ export const ANALYSIS_MAX_CALLS = 5_000
 export const ANALYSIS_MAX_ROWS = 5_000
 export const ANALYSIS_MAX_QUERY_LENGTH = 20_000
 export const ANALYSIS_MAX_TASK_LENGTH = 2_000
+export const ANALYSIS_RUN_LEASE_MS = 5 * 60_000
+export const ANALYSIS_STALE_AFTER_MS = 15 * 60_000
 export const ANALYSIS_CLASS_NAMES = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'] as const
 
 export type AnalysisClassName = typeof ANALYSIS_CLASS_NAMES[number]
@@ -73,6 +75,9 @@ export interface AnalysisStartInput {
 export interface AnalysisStorage {
   get(analysisId: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
   put(snapshot: AnalysisSnapshot): Promise<void> | void
+  getPublic?(analysisId: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
+  claim?(analysisId: string, ownerToken: string, nowMs: number, leaseMs: number): Promise<'claimed' | 'busy' | 'complete' | 'missing'> | 'claimed' | 'busy' | 'complete' | 'missing'
+  release?(analysisId: string, ownerToken: string): Promise<void> | void
 }
 
 export const cloneAnalysisSnapshot = (snapshot: AnalysisSnapshot): AnalysisSnapshot => JSON.parse(JSON.stringify({

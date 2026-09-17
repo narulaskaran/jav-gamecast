@@ -63,7 +63,7 @@ export const createAnalysisDraftHandler = (service: AnalysisService): AnalysisAp
   }
 }
 
-export const createAnalysisRunHandler = (service: AnalysisService): AnalysisApiHandler => async (request, response) => {
+export const createAnalysisRunHandler = (service: AnalysisService, options: { schedule?: (task: Promise<unknown>) => void } = {}): AnalysisApiHandler => async (request, response) => {
   applyHeaders(response)
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST')
@@ -77,7 +77,16 @@ export const createAnalysisRunHandler = (service: AnalysisService): AnalysisApiH
   }
   try {
     const snapshot = await service.start({ fixtureId: body.fixtureId as string, query: body.query as string, analysisId: body.analysisId as string | undefined })
-    void service.run(snapshot.analysisId).catch(() => undefined)
+    const execution = service.run(snapshot.analysisId)
+    if (options.schedule) {
+      try {
+        options.schedule(execution.catch(() => undefined))
+      } catch {
+        await execution
+      }
+    } else {
+      await execution
+    }
     response.status(202).json(snapshotBody(snapshot))
   } catch (error) {
     errorResponse(response, error)
