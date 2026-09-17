@@ -27,7 +27,7 @@ export const readPublicRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): P
 
 export const readLiveRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): LiveRuntimeConfig | undefined => {
   const publicConfig = readPublicRuntimeConfig(env)
-  const typesafeApiKey = required(env, 'TYPESAFE_API_KEY')
+  const typesafeApiKey = required(env, 'JEV_API_KEY')
   const cronSecret = required(env, 'CRON_SECRET')
   const convexWriteSecret = required(env, 'CONVEX_WRITE_SECRET')
   if (!publicConfig || !typesafeApiKey || !cronSecret || !convexWriteSecret) return undefined

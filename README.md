@@ -42,6 +42,7 @@ Regenerate from verified local source assets with `node scripts/generate-footbal
 - `api/cron/forecast.ts` is a Vercel-compatible POST entrypoint. It authenticates the cron request, polls ESPN once, invokes the server-only Jev provider, and persists through Convex. It never starts a long-lived loop. Convex claims and budgets protect against overlapping workers and process restarts; the local `running` flag is only an optimization.
 - `api/gamecast.ts` is the public, browser-safe read route. It exposes only the featured game, strips Convex system fields, applies CORS/read-rate controls, and returns `503` rather than inventing live data when provisioning is missing or the durable read fails.
 - `src/browser/forecastHttp.ts` and `src/browser/forecastRead.ts` consume the public read response. They do not import ESPN, TypeSafe, Convex server code, or credentials. `VITE_GAMECAST_MODE=live` opts into this source; failed live reads retain the replay points instead of silently labeling them live.
+- `api/analysis/draft`, `api/analysis/run`, `api/analysis/[analysisId]`, and `api/share/[analysisId]` implement the fixture-first Jev Data Analysis contract documented in `docs/analysis-api.md`. Drafting uses server-only OpenRouter; only a run can invoke server-only Jev. The current analysis store is explicitly process-local and non-production until the Convex adapter lands.
 - `vercel.json` schedules the bounded cron route every two minutes. This is compatible with the 90-second worker cadence and leaves scheduler ownership outside application code.
 
 ## Convex provisioning (operator step)
@@ -84,7 +85,7 @@ The public route intentionally serves one featured game and at most 128 persiste
 ## Safety boundaries
 
 - Server-only modules contain the ESPN adapter, TypeSafe SDK, `JEV_API_KEY`, and the Convex HTTP client.
-- The Vite build fails if server markers (`@typesafe-ai/sdk`, `JEV_API_KEY`, TypeSafe endpoint, `convex/browser`, or `CONVEX_URL`) enter a browser chunk.
+- The Vite build fails if server markers (`@typesafe-ai/sdk`, `JEV_API_KEY`, `OPENROUTER_KEY`, either provider endpoint, `convex/browser`, or `CONVEX_URL`) enter a browser chunk.
 - Missing keys, invalid Convex URLs, unauthorized cron requests, unsupported game IDs, provider errors, stale ESPN data, and durable read failures fail closed. They do not silently become live success.
 - Convex records are keyed by `gameId + providerEventId + stateHash` through the worker idempotency key. Forecast documents are immutable; claims are not reclaimed by nominal lease expiry; budget settlement is idempotent.
 - Replay behavior and controls remain deterministic and credential-free.

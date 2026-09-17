@@ -9,6 +9,8 @@ describe('browser/server boundary', () => {
     expect(browserSource).not.toMatch(/from ['\"].*\/server\//)
     expect(browserSource).not.toContain('@typesafe-ai/sdk')
     expect(browserSource).not.toContain('JEV_API_KEY')
+    expect(browserSource).not.toContain('OPENROUTER_KEY')
     expect(browserSource).not.toContain('api.typesafe.ai')
+    expect(browserSource).not.toContain('openrouter.ai')
   })
 })

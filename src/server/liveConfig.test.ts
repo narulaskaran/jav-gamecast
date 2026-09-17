@@ -9,7 +9,7 @@ describe('live environment validation', () => {
 
   it('requires all server-side live inputs and never reads a VITE key', () => {
     const config = readLiveRuntimeConfig({
-      CONVEX_URL: 'https://demo.convex.cloud', FEATURED_GAME_ID: 'game', CRON_SECRET: 'secret', CONVEX_WRITE_SECRET: 'write-secret', TYPESAFE_API_KEY: 'key', VITE_TYPESAFE_API_KEY: 'wrong',
+      CONVEX_URL: 'https://demo.convex.cloud', FEATURED_GAME_ID: 'game', CRON_SECRET: 'secret', CONVEX_WRITE_SECRET: 'write-secret', JEV_API_KEY: 'key', VITE_TYPESAFE_API_KEY: 'wrong',
     })
     expect(config).toEqual(expect.objectContaining({ convexUrl: 'https://demo.convex.cloud', featuredGameId: 'game', cronSecret: 'secret', convexWriteSecret: 'write-secret', typesafeApiKey: 'key' }))
   })
