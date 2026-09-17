@@ -51,11 +51,11 @@ const fixtureForecastRecords: readonly ForecastRecord[] = fixture.points.map((po
   latencyMs: 0,
   choice: point.choice,
   probabilities: {
-    home: point.homeProbability,
-    away: point.awayProbability,
-    tie: point.tieProbability,
+    home: point.homeProbability / 100,
+    away: point.awayProbability / 100,
+    tie: point.tieProbability / 100,
   },
-  confidence: point.confidence,
+  confidence: point.confidence / 100,
 }))
 
 const fixtureForecastStore = new InMemoryForecastStore()

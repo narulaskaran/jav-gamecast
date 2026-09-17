@@ -165,9 +165,9 @@ describe('bounded ESPN → forecast → persistence → browser read orchestrati
         gameId: 'game-1',
         eventId: 'event-1',
         choice: 'home',
-        homeProbability: 0.62,
-        awayProbability: 0.28,
-        tieProbability: 0.1,
+        homeProbability: 62,
+        awayProbability: 28,
+        tieProbability: 10,
       }),
     ])
   })

@@ -12,11 +12,25 @@ import {
 } from './forecastWorker'
 
 const state = {
-  game_id: 'game-1',
-  event_id: 'event-1',
-  play_id: 'play-1',
-  score: { home: 17, away: 14 },
+  id: 'game-1',
+  eventId: 'event-1',
+  playId: 'play-1',
+  sequenceNumber: 1,
+  homeTeam: 'Harbor Hawks',
+  awayTeam: 'Cedar Foxes',
+  homeScore: 17,
+  awayScore: 14,
+  quarter: 'Q2',
   clock: '04:12',
+  status: 'quarter' as const,
+  possession: 'home' as const,
+  down: 2,
+  distance: 7,
+  fieldPosition: 'FOX 34',
+  lastPlay: 'Pass complete to the Harbor Hawks 34 yard line',
+  timestamp: '2026-09-17T03:40:00Z',
+  feedTimestamp: '2026-09-17T03:40:00Z',
+  sourceStatus: 'LIVE' as const,
 }
 
 const job: ForecastJob = {
@@ -43,19 +57,18 @@ const successProvider = (calls: { keys: string[] }): JevProvider => ({
 
 describe('forecast identity and persistence boundary', () => {
   it('normalizes object key order and includes game, provider identity, and state hash', () => {
-    const first = createIdempotencyKey({
-      gameId: 'game-1', providerEventId: 'event-1', providerPlayId: 'play-1',
-      state: { b: 2, a: 1 },
-    })
-    const second = createIdempotencyKey({
-      gameId: 'game-1', providerEventId: 'event-1', providerPlayId: 'play-1',
-      state: { a: 1, b: 2 },
-    })
+    const first = createIdempotencyKey({ ...job, state })
+    const second = createIdempotencyKey({ ...job, state: Object.fromEntries(Object.entries(state).reverse()) })
     const different = createIdempotencyKey({ ...job, state: { ...state, clock: '04:11' } })
     expect(first).toBe(second)
-    expect(first).toMatch(/^game-1:event-1:play-1:[a-f0-9]{64}$/)
+    expect(first).toMatch(/^6:game-1\|7:event-1\|6:play-1\|64:[a-f0-9]{64}$/)
     expect(different).not.toBe(first)
-    expect(normalizeForecastState({ undefinedValue: undefined, nested: { z: 1, a: 2 } })).toEqual({ nested: { a: 2, z: 1 } })
+    expect(normalizeForecastState(state)).toEqual(state)
+    expect(() => normalizeForecastState({ ...state, outcome: 'home' })).toThrow(/unsupported/i)
+
+    const colonSeparated = createIdempotencyKey({ ...job, gameId: 'a', providerEventId: 'b:c', providerPlayId: 'd' })
+    const ambiguousWithoutEncoding = createIdempotencyKey({ ...job, gameId: 'a:b', providerEventId: 'c', providerPlayId: 'd' })
+    expect(colonSeparated).not.toBe(ambiguousWithoutEncoding)
   })
 
   it('makes exactly one provider call and returns an exact cached replay for duplicates', async () => {
@@ -87,9 +100,11 @@ describe('forecast identity and persistence boundary', () => {
   it('coalesces concurrent duplicate jobs before the first result is persisted', async () => {
     const calls = { keys: [] as string[] }
     let release: (() => void) | undefined
+    let started!: () => void
     const provider: JevProvider = {
       forecast: async ({ idempotencyKey }) => {
         calls.keys.push(idempotencyKey)
+        started()
         await new Promise<void>((resolve) => { release = resolve })
         return {
           model: 'jev-latest',
@@ -98,15 +113,47 @@ describe('forecast identity and persistence boundary', () => {
       },
     }
     const worker = new ForecastWorker({ provider, now: () => 1_000 })
+    const providerStarted = new Promise<void>((resolve) => { started = resolve })
     const firstPromise = worker.forecast(job)
     const duplicatePromise = worker.forecast(job)
-    await Promise.resolve()
+    await providerStarted
     release?.()
     const [first, duplicate] = await Promise.all([firstPromise, duplicatePromise])
 
     expect(calls.keys).toHaveLength(1)
     expect(first.record).toEqual(duplicate.record)
     expect(duplicate.cacheHit).toBe(true)
+  })
+
+  it('atomically claims a key across distinct workers sharing persistence', async () => {
+    const calls = { keys: [] as string[] }
+    let release: (() => void) | undefined
+    let started!: () => void
+    const provider: JevProvider = {
+      forecast: async ({ idempotencyKey }) => {
+        calls.keys.push(idempotencyKey)
+        started()
+        await new Promise<void>((resolve) => { release = resolve })
+        return {
+          model: 'jev-latest',
+          answer: { type: 'choice', choice: 'home', probabilities: { home: 0.6, away: 0.3, tie: 0.1 }, confidence: 0.6 },
+        }
+      },
+    }
+    const store = new InMemoryForecastStore()
+    const workerA = new ForecastWorker({ provider, store, now: () => 1_000 })
+    const workerB = new ForecastWorker({ provider, store, now: () => 1_000 })
+    const providerStarted = new Promise<void>((resolve) => { started = resolve })
+    const firstPromise = workerA.forecast(job)
+    await providerStarted
+    const secondPromise = workerB.forecast(job)
+    await Promise.resolve()
+    release?.()
+    const [first, second] = await Promise.all([firstPromise, secondPromise])
+
+    expect(calls.keys).toHaveLength(1)
+    expect(second.cacheHit).toBe(true)
+    expect(second.record).toBe(first.record)
   })
 })
 
@@ -122,7 +169,7 @@ describe('cadence and finite live limits', () => {
 
     const first = await worker.forecast(job)
     now += 89_999
-    const limited = await worker.forecast({ ...job, providerPlayId: 'play-2', state: { ...state, play_id: 'play-2' } })
+    const limited = await worker.forecast({ ...job, providerPlayId: 'play-2', state: { ...state, playId: 'play-2' } })
 
     expect(first.record.status).toBe('success')
     expect(limited.record.status).toBe('limited')
@@ -148,7 +195,7 @@ describe('cadence and finite live limits', () => {
 
     await expect(worker.forecast(job)).resolves.toMatchObject({ record: { status: 'success' } })
     now = 10_001
-    const spendLimited = await worker.forecast({ ...job, providerPlayId: 'play-2', state: { ...state, play_id: 'play-2' } })
+    const spendLimited = await worker.forecast({ ...job, providerPlayId: 'play-2', state: { ...state, playId: 'play-2' } })
     expect(spendLimited.record.status).toBe('limited')
     expect(spendLimited.record.error?.code).toBe('SPEND_LIMIT')
     expect(calls.keys).toHaveLength(1)
@@ -215,7 +262,7 @@ describe('provider errors and explicit deterministic fallback modes', () => {
   it('keeps deterministic mock answers stable for the same normalized state', async () => {
     const provider = new DeterministicMockForecastProvider()
     const first = await provider.forecast({ state: normalizeForecastState(state) })
-    const second = await provider.forecast({ state: normalizeForecastState({ ...state, unused: undefined }) })
+    const second = await provider.forecast({ state: normalizeForecastState({ ...state }) })
     expect(second.answer).toEqual(first.answer)
   })
 })

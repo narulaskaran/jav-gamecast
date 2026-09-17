@@ -4,6 +4,7 @@ export type ForecastRecordSource = 'live' | 'mock' | 'replay'
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
 export interface ForecastProbabilities {
+  /** Canonical persisted unit is 0..1; browser display converts once to 0..100. */
   home: number
   away: number
   tie: number
@@ -30,11 +31,22 @@ export interface ForecastRecord {
   latencyMs: number
   choice?: ForecastChoice
   probabilities?: ForecastProbabilities
+  /** Canonical persisted confidence is the provider's 0..1 unit value. */
   confidence?: number
   error?: ForecastErrorMetadata
 }
 
 export type MaybePromise<T> = T | Promise<T>
+
+export interface ForecastClaim {
+  ownerToken: string
+  leaseExpiresAt: number
+}
+
+export type ForecastClaimResult =
+  | { status: 'claimed'; claim: ForecastClaim }
+  | { status: 'busy' }
+  | { status: 'existing'; record: ForecastRecord }
 
 export interface ForecastRecordReadBoundary {
   getForecastByIdempotencyKey(idempotencyKey: string): MaybePromise<ForecastRecord | undefined>
@@ -44,5 +56,8 @@ export interface ForecastRecordReadBoundary {
 export interface ForecastRecordStore {
   get(idempotencyKey: string): MaybePromise<ForecastRecord | undefined>
   put(record: ForecastRecord): MaybePromise<void>
-  putIfAbsent?(record: ForecastRecord): MaybePromise<ForecastRecord>
+  putIfAbsent(record: ForecastRecord): MaybePromise<ForecastRecord>
+  /** Atomically claim a key before any provider invocation. */
+  claimForecast(idempotencyKey: string, ownerToken: string, nowMs: number, leaseMs: number): MaybePromise<ForecastClaimResult>
+  releaseForecastClaim(idempotencyKey: string, ownerToken: string): MaybePromise<void>
 }

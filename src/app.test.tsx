@@ -4,6 +4,7 @@ import { App } from './App'
 import { createBrowserForecastReadPath, createBrowserForecastSource } from './browser/forecastRead'
 import { fixture, parseFixture } from './fixture'
 import { InMemoryForecastStore } from './persistence/forecastStore'
+import { ForecastWorker } from './server/forecastWorker'
 import type { ForecastRecord } from './shared/forecastRecords'
 import type { GameStateSource } from './types'
 
@@ -23,6 +24,35 @@ const makeSource = (game: typeof fixture.game, status: 'REPLAY' | 'LIVE' | 'STAL
 })
 
 describe('gamecast forecast rendering', () => {
+  it('renders a live-shaped TypeSafe unit answer as display percentages exactly once', async () => {
+    const store = new InMemoryForecastStore()
+    const worker = new ForecastWorker({
+      store,
+      now: () => 1_000,
+      provider: {
+        async forecast() {
+          return {
+            model: 'jev-latest',
+            answer: { type: 'choice' as const, choice: 'home' as const, probabilities: { home: 0.62, away: 0.28, tie: 0.1 }, confidence: 0.62 },
+          }
+        },
+      },
+    })
+    await worker.forecast({ gameId: fixture.game.id, providerEventId: 'live-event', state: fixture.game })
+    const source = createBrowserForecastSource({
+      readPath: createBrowserForecastReadPath(store),
+      gameId: fixture.game.id,
+      fallback: fixture.points,
+    })
+
+    render(<App forecastSource={source} />)
+
+    await waitFor(() => expect(document.querySelector('.probabilities')?.textContent).toContain('HH 62%'))
+    expect(document.querySelector('.probabilities')?.textContent).toContain('CF 28%')
+    expect(document.querySelector('.probabilities')?.textContent).toContain('TIE 10%')
+    expect(document.querySelector('.metric strong')).toHaveTextContent('62%')
+  })
+
   it('renders forecast points loaded through the injected shared read boundary', async () => {
     const record: ForecastRecord = {
       idempotencyKey: 'demo-2026-09-17:cached-event:event:shared-state',
@@ -37,7 +67,7 @@ describe('gamecast forecast rendering', () => {
       },
       model: 'replay-fixture',
       status: 'success',
-      source: 'replay',
+      source: 'live',
       requestedAt: '2026-09-17T03:40:00Z',
       completedAt: '2026-09-17T03:40:00Z',
       latencyMs: 0,
@@ -59,7 +89,7 @@ describe('gamecast forecast rendering', () => {
     render(<App forecastSource={source} />)
 
     await waitFor(() => expect(screen.getByText('Shared cached checkpoint')).toBeInTheDocument())
-    expect(document.querySelector('.probabilities')?.textContent).toContain('HH 0.6')
+    expect(document.querySelector('.probabilities')?.textContent).toContain('HH 60%')
   })
 
   it('renders chart series, event markers, metadata, and replay state', () => {

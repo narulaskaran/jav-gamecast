@@ -1,4 +1,4 @@
-import type { ForecastRecord, ForecastRecordReadBoundary, MaybePromise } from '../shared/forecastRecords'
+import type { ForecastClaimResult, ForecastRecord, ForecastRecordReadBoundary, MaybePromise } from '../shared/forecastRecords'
 
 /**
  * Typed shape for the future Convex document and query/mutation boundary.
@@ -18,8 +18,8 @@ export const forecastRecordSchema = {
   completedAt: 'ISO timestamp',
   latencyMs: 'number',
   choice: 'optional home | away | tie',
-  probabilities: 'optional home/away/tie distribution',
-  confidence: 'optional number',
+  probabilities: 'optional unit (0..1) home/away/tie distribution; browser converts once to display percentages',
+  confidence: 'optional unit 0..1 confidence; browser converts once to display percentage',
   error: 'optional error metadata',
 } as const
 
@@ -32,6 +32,8 @@ export interface ForecastQueryFunctions extends ForecastRecordReadBoundary {
 
 export interface ForecastMutationFunctions {
   putForecastIfAbsent(record: ForecastRecord): MaybePromise<ForecastRecord>
+  claimForecast(idempotencyKey: string, ownerToken: string, nowMs: number, leaseMs: number): MaybePromise<ForecastClaimResult>
+  releaseForecastClaim(idempotencyKey: string, ownerToken: string): MaybePromise<void>
 }
 
 export type ForecastFunctionBoundary = ForecastQueryFunctions & ForecastMutationFunctions

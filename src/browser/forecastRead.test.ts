@@ -38,9 +38,10 @@ describe('browser forecast read path', () => {
       id: record.idempotencyKey,
       eventId: 'event-1',
       choice: 'away',
-      homeProbability: 0.3,
-      awayProbability: 0.6,
-      tieProbability: 0.1,
+      homeProbability: 30,
+      awayProbability: 60,
+      tieProbability: 10,
+      confidence: 60,
     })])
   })
 

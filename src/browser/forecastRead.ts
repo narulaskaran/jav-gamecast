@@ -37,9 +37,16 @@ const eventMetadata = (record: ForecastRecord): Pick<ForecastPoint, 'eventLabel'
   }
 }
 
+const isUnitProbability = (value: number): boolean => Number.isFinite(value) && value >= 0 && value <= 1
+const toDisplayPercent = (value: number): number => Math.round(value * 10_000) / 100
+const hasValidDistribution = (record: ForecastRecord): record is ForecastRecord & Required<Pick<ForecastRecord, 'choice' | 'probabilities' | 'confidence'>> => {
+  if (record.status !== 'success' || record.choice === undefined || record.probabilities === undefined || record.confidence === undefined) return false
+  const values = [record.probabilities.home, record.probabilities.away, record.probabilities.tie]
+  return values.every(isUnitProbability) && Math.abs(values.reduce((total, value) => total + value, 0) - 1) <= 1e-9 && isUnitProbability(record.confidence)
+}
+
 export const forecastRecordsToPoints = (records: readonly ForecastRecord[]): readonly ForecastPoint[] => {
-  const usable = records.filter((record): record is ForecastRecord & Required<Pick<ForecastRecord, 'choice' | 'probabilities' | 'confidence'>> =>
-    record.status === 'success' && record.choice !== undefined && record.probabilities !== undefined && record.confidence !== undefined)
+  const usable = records.filter(hasValidDistribution)
   const firstTimestamp = usable.length > 0 ? Date.parse(stateTimestamp(usable[0])) : 0
   return usable.map((record) => {
     const timestamp = stateTimestamp(record)
@@ -50,11 +57,11 @@ export const forecastRecordsToPoints = (records: readonly ForecastRecord[]): rea
       eventId: record.providerEventId,
       timestamp,
       elapsedSeconds,
-      homeProbability: record.probabilities.home,
-      awayProbability: record.probabilities.away,
-      tieProbability: record.probabilities.tie,
+      homeProbability: toDisplayPercent(record.probabilities.home),
+      awayProbability: toDisplayPercent(record.probabilities.away),
+      tieProbability: toDisplayPercent(record.probabilities.tie),
       choice: record.choice,
-      confidence: record.confidence,
+      confidence: toDisplayPercent(record.confidence),
       ...eventMetadata(record),
     }
   })

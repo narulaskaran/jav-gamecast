@@ -11,6 +11,7 @@ import {
   type SystemOneRequest,
   type TypeSafeClientConfig,
 } from '@typesafe-ai/sdk'
+import { normalizeCurrentForecastState, type CurrentForecastState } from './forecastState'
 
 export const TYPESAFE_SYSTEM_ONE_ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 export const TYPESAFE_BASE_URL = 'https://api.typesafe.ai'
@@ -20,6 +21,7 @@ export const JEV_INSTRUCTIONS = 'Who is most likely to win this game from the cu
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 export type TypeSafeState = Exclude<EntryType, null>
+export type { CurrentForecastState } from './forecastState'
 export type ChoiceLabel = 'home' | 'away' | 'tie'
 
 export interface ChoiceAnswer {
@@ -30,7 +32,7 @@ export interface ChoiceAnswer {
 }
 
 export interface JevProviderRequest {
-  state: TypeSafeState
+  state: CurrentForecastState
   idempotencyKey: string
 }
 
@@ -58,12 +60,11 @@ export type TypeSafeChoiceRequest = SystemOneRequest<{ winner: TypeSafeChoiceQue
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const isFiniteUnitNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
-const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const choiceLabels: readonly ChoiceLabel[] = ['home', 'away', 'tie']
 
-export const buildJevRequest = (state: TypeSafeState): TypeSafeChoiceRequest => ({
+export const buildJevRequest = (state: CurrentForecastState): TypeSafeChoiceRequest => ({
   model: JEV_MODEL,
-  state,
+  state: normalizeCurrentForecastState(state) as unknown as TypeSafeState,
   questions: {
     winner: choice(JEV_INSTRUCTIONS, choiceCriteria),
   },
@@ -93,7 +94,7 @@ export const parseChoiceAnswer = (value: unknown): ChoiceAnswer => {
   }
   const total = probabilities.home + probabilities.away + probabilities.tie
   if (Math.abs(total - 1) > 1e-9) throw new Error('TypeSafe Choice probabilities must sum to one')
-  if (!isFiniteNumber(value.confidence)) throw new Error('TypeSafe Choice confidence must be a finite number')
+  if (!isFiniteUnitNumber(value.confidence)) throw new Error('TypeSafe Choice confidence must be a finite number between zero and one')
 
   return {
     type: 'choice',

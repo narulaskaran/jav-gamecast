@@ -4,6 +4,7 @@ import {
   APITimeoutError,
   TypeSafeError,
 } from '@typesafe-ai/sdk'
+import { randomUUID } from 'node:crypto'
 import {
   JEV_MODEL,
   TypeSafeConfigurationError,
@@ -13,7 +14,7 @@ import {
   type JevProviderResult,
   sha256Hex,
 } from './jev'
-import type { TypeSafeState } from './jev'
+import { normalizeCurrentForecastState, type CurrentForecastState } from './forecastState'
 import type {
   ForecastErrorMetadata,
   ForecastRecord,
@@ -39,7 +40,7 @@ export interface ForecastJob {
 }
 
 export interface NormalizedForecastJob extends Omit<ForecastJob, 'state'> {
-  state: TypeSafeState
+  state: CurrentForecastState
   stateHash: string
   idempotencyKey: string
 }
@@ -51,6 +52,7 @@ export interface ForecastLimits {
   maxRequests: number
   maxSpendCents: number
   estimatedCostCentsPerRequest: number
+  claimLeaseMs: number
 }
 
 export const DEFAULT_FORECAST_LIMITS: ForecastLimits = {
@@ -60,6 +62,7 @@ export const DEFAULT_FORECAST_LIMITS: ForecastLimits = {
   maxRequests: 100,
   maxSpendCents: 100,
   estimatedCostCentsPerRequest: 1,
+  claimLeaseMs: 120_000,
 }
 
 const bounded = (name: string, value: number, minimum: number, maximum: number, integer = false): number => {
@@ -69,34 +72,10 @@ const bounded = (name: string, value: number, minimum: number, maximum: number, 
   return value
 }
 
-const normalizeJson = (value: unknown): JsonValue | undefined => {
-  if (value === undefined) return undefined
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new TypeError('Forecast state contains a non-finite number')
-    return value
-  }
-  if (Array.isArray(value)) return value.map((entry) => normalizeJson(entry) ?? null)
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    const normalized: Record<string, JsonValue> = {}
-    for (const key of Object.keys(record).sort()) {
-      const entry = normalizeJson(record[key])
-      if (entry !== undefined) normalized[key] = entry
-    }
-    return normalized
-  }
-  throw new TypeError('Forecast state contains a non-JSON value')
-}
+export const normalizeForecastState = normalizeCurrentForecastState
 
-export const normalizeForecastState = (value: unknown): TypeSafeState => {
-  const normalized = normalizeJson(value)
-  if (typeof normalized === 'string' || Array.isArray(normalized)) return normalized as TypeSafeState
-  if (normalized && typeof normalized === 'object') return normalized as TypeSafeState
-  throw new TypeError('Forecast state must be a string, object, or array')
-}
-
-const canonicalJson = (value: TypeSafeState): string => JSON.stringify(value)
+const canonicalJson = (value: CurrentForecastState): string => JSON.stringify(value)
+const recordState = (state: CurrentForecastState): Exclude<JsonValue, null> => state as unknown as Exclude<JsonValue, null>
 
 export const stateHash = (state: unknown): string => sha256Hex(canonicalJson(normalizeForecastState(state)))
 
@@ -105,7 +84,8 @@ export const createIdempotencyKey = (job: ForecastJob): string => {
   const eventId = job.providerEventId.trim()
   const playId = job.providerPlayId?.trim() || 'event'
   if (!gameId || !eventId) throw new Error('Forecast identity requires game and provider event IDs')
-  return `${gameId}:${eventId}:${playId}:${stateHash(job.state)}`
+  const encode = (value: string): string => `${value.length}:${value}`
+  return `${encode(gameId)}|${encode(eventId)}|${encode(playId)}|${encode(stateHash(job.state))}`
 }
 
 export const normalizeForecastJob = (job: ForecastJob): NormalizedForecastJob => {
@@ -174,7 +154,7 @@ export class ReplayForecastProvider implements JevProvider {
 }
 
 export class DeterministicMockForecastProvider implements JevProvider {
-  async forecast(request: { state: TypeSafeState }): Promise<JevProviderResult> {
+  async forecast(request: { state: CurrentForecastState }): Promise<JevProviderResult> {
     const firstByte = Number.parseInt(sha256Hex(canonicalJson(request.state)).slice(0, 2), 16)
     const home = 0.4 + (firstByte % 20) / 100
     const away = 0.5 - (firstByte % 20) / 100
@@ -216,6 +196,7 @@ export class ForecastWorker {
   private spentCents = 0
   private readonly liveRequestTimes: number[] = []
   private readonly inFlight = new Map<string, Promise<ForecastResult>>()
+  private readonly claimOwnerToken = randomUUID()
 
   constructor(options: ForecastWorkerOptions = {}) {
     this.mode = options.mode ?? 'live'
@@ -232,6 +213,7 @@ export class ForecastWorker {
       maxRequests: bounded('maxRequests', candidate.maxRequests, 1, 100_000, true),
       maxSpendCents: bounded('maxSpendCents', candidate.maxSpendCents, 0, 1_000_000),
       estimatedCostCentsPerRequest: bounded('estimatedCostCentsPerRequest', candidate.estimatedCostCentsPerRequest, 0, 1_000_000),
+      claimLeaseMs: bounded('claimLeaseMs', candidate.claimLeaseMs, 1_000, 86_400_000),
     }
   }
 
@@ -246,11 +228,20 @@ export class ForecastWorker {
       return { record: result.record, cacheHit: true }
     }
 
+    const claim = await this.store.claimForecast(job.idempotencyKey, this.claimOwnerToken, this.now(), this.limits.claimLeaseMs)
+    if (claim.status === 'existing') return { record: claim.record, cacheHit: true }
+    if (claim.status === 'busy') {
+      const record = await this.waitForClaimedRecord(job.idempotencyKey)
+      if (record) return { record, cacheHit: true }
+      throw new Error('Forecast key is already claimed by another worker')
+    }
+
     const execution = this.executeForecast(job)
     this.inFlight.set(job.idempotencyKey, execution)
     try {
       return await execution
     } finally {
+      await this.store.releaseForecastClaim(job.idempotencyKey, this.claimOwnerToken)
       if (this.inFlight.get(job.idempotencyKey) === execution) this.inFlight.delete(job.idempotencyKey)
     }
   }
@@ -279,7 +270,7 @@ export class ForecastWorker {
         providerEventId: job.providerEventId,
         ...(job.providerPlayId ? { providerPlayId: job.providerPlayId } : {}),
         stateHash: job.stateHash,
-        rawNormalizedState: job.state,
+        rawNormalizedState: recordState(job.state),
         model: result.model || JEV_MODEL,
         status: 'success',
         source: this.mode,
@@ -298,7 +289,7 @@ export class ForecastWorker {
           providerEventId: job.providerEventId,
           ...(job.providerPlayId ? { providerPlayId: job.providerPlayId } : {}),
           stateHash: job.stateHash,
-          rawNormalizedState: job.state,
+          rawNormalizedState: recordState(job.state),
           model: JEV_MODEL,
           status: 'error',
           source: this.mode,
@@ -325,9 +316,17 @@ export class ForecastWorker {
   }
 
   private async persistRecord(record: ForecastRecord): Promise<ForecastRecord> {
-    if (this.store.putIfAbsent) return await this.store.putIfAbsent(record)
-    await this.store.put(record)
-    return record
+    return await this.store.putIfAbsent(record)
+  }
+
+  private async waitForClaimedRecord(idempotencyKey: string): Promise<ForecastRecord | undefined> {
+    const deadline = Date.now() + this.limits.claimLeaseMs + 1_000
+    while (Date.now() < deadline) {
+      const record = await this.store.get(idempotencyKey)
+      if (record) return record
+      await new Promise<void>((resolve) => setTimeout(resolve, 25))
+    }
+    return undefined
   }
 
   private limitRecord(job: NormalizedForecastJob, currentTime: number): ForecastRecord | undefined {
@@ -352,7 +351,7 @@ export class ForecastWorker {
       providerEventId: job.providerEventId,
       ...(job.providerPlayId ? { providerPlayId: job.providerPlayId } : {}),
       stateHash: job.stateHash,
-      rawNormalizedState: job.state,
+      rawNormalizedState: recordState(job.state),
       model: JEV_MODEL,
       status: 'limited',
       source: this.mode,

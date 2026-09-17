@@ -17,11 +17,25 @@ const validAnswer = {
 }
 
 const state = {
-  game_id: 'game-1',
-  home_team: 'Harbor Hawks',
-  away_team: 'Cedar Foxes',
-  score: { home: 17, away: 14 },
+  id: 'game-1',
+  eventId: 'event-1',
+  playId: 'play-1',
+  sequenceNumber: 1,
+  homeTeam: 'Harbor Hawks',
+  awayTeam: 'Cedar Foxes',
+  homeScore: 17,
+  awayScore: 14,
+  quarter: 'Q2',
   clock: '04:12',
+  status: 'quarter' as const,
+  possession: 'home' as const,
+  down: 2,
+  distance: 7,
+  fieldPosition: 'FOX 34',
+  lastPlay: 'Pass complete to the Harbor Hawks 34 yard line',
+  timestamp: '2026-09-17T03:40:00Z',
+  feedTimestamp: '2026-09-17T03:40:00Z',
+  sourceStatus: 'LIVE' as const,
 }
 
 describe('TypeSafe Choice contract', () => {
@@ -44,6 +58,10 @@ describe('TypeSafe Choice contract', () => {
     expect(TYPESAFE_SYSTEM_ONE_ENDPOINT).toBe('https://api.typesafe.ai/v1/systemone')
   })
 
+  it('rejects outcome and post-event fields before they reach TypeSafe', () => {
+    expect(() => buildJevRequest({ ...state, finalOutcome: 'home' } as unknown as typeof state)).toThrow(/unsupported/i)
+  })
+
   it('accepts every option with probabilities that sum to one', () => {
     expect(parseChoiceAnswer(validAnswer)).toEqual(validAnswer)
   })
@@ -56,6 +74,7 @@ describe('TypeSafe Choice contract', () => {
     ['probabilities do not sum to one', { ...validAnswer, probabilities: { home: 0.6, away: 0.2, tie: 0.2 + 0.01 } }],
     ['negative probability', { ...validAnswer, probabilities: { home: -0.1, away: 1, tie: 0.1 } }],
     ['confidence is not numeric', { ...validAnswer, confidence: 'high' }],
+    ['confidence is not a unit value', { ...validAnswer, confidence: 1.01 }],
   ])('rejects malformed Choice response: %s', (_label, response) => {
     expect(() => parseChoiceAnswer(response)).toThrow()
   })
