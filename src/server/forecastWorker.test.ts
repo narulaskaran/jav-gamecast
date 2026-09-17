@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { APIError, APITimeoutError } from '@typesafe-ai/sdk'
 import {
   DeterministicMockForecastProvider,
@@ -313,7 +313,7 @@ describe('provider errors and explicit deterministic fallback modes', () => {
     const timeout = await timeoutWorker.forecast(job)
     expect(timeout.record).toEqual(expect.objectContaining({ status: 'error', source: 'live' }))
     expect(timeout.record.error).toEqual(expect.objectContaining({ code: 'TIMEOUT', retryable: true }))
-    expect(JSON.stringify(timeout.record)).not.toContain('TYPESAFE_API_KEY')
+    expect(JSON.stringify(timeout.record)).not.toContain('JEV_API_KEY')
 
     const providerWorker = new ForecastWorker({
       provider: { forecast: async () => { throw APIError.fromResponse(529, { secret: 'do-not-store' }, new Headers()) } },
@@ -348,16 +348,14 @@ describe('provider errors and explicit deterministic fallback modes', () => {
       source: 'replay',
     }))
 
-    const savedKey = process.env.TYPESAFE_API_KEY
-    delete process.env.TYPESAFE_API_KEY
+    vi.stubEnv('JEV_API_KEY', '')
     try {
       const liveWithoutCredentials = new ForecastWorker({ now: () => 0 })
       const liveResult = await liveWithoutCredentials.forecast(job)
       expect(liveResult.record.status).toBe('error')
       expect(liveResult.record.error?.code).toBe('CONFIGURATION')
     } finally {
-      if (savedKey === undefined) delete process.env.TYPESAFE_API_KEY
-      else process.env.TYPESAFE_API_KEY = savedKey
+      vi.unstubAllEnvs()
     }
   })
 

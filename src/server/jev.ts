@@ -114,7 +114,7 @@ const serverEnv = (name: string): string | undefined => {
 }
 
 export class TypeSafeConfigurationError extends Error {
-  constructor(message = 'TYPESAFE_API_KEY is required for live Jev forecasts') {
+  constructor(message = 'JEV_API_KEY is required for live Jev forecasts') {
     super(message)
     this.name = 'TypeSafeConfigurationError'
   }
@@ -143,7 +143,7 @@ export const createTypeSafeSdkConfig = (options: TypeSafeSdkConfigOptions = {}):
   const maxRetries = bounded('maxRetries', options.maxRetries, 0, 5, 2)
   const backoffInitialMs = bounded('backoffInitialMs', options.backoffInitialMs, 0, 30_000, 500)
   const backoffMaxMs = bounded('backoffMaxMs', options.backoffMaxMs, backoffInitialMs, 60_000, 5_000)
-  const apiKey = options.apiKey ?? serverEnv('TYPESAFE_API_KEY')
+  const apiKey = options.apiKey ?? serverEnv('JEV_API_KEY')
 
   return {
     ...(apiKey ? { apiKey } : {}),
@@ -171,7 +171,7 @@ export interface TypeSafeJevProviderOptions extends TypeSafeSdkConfigOptions {
 }
 
 export const hasTypeSafeApiKey = (options: TypeSafeSdkConfigOptions = {}): boolean =>
-  Boolean((options.apiKey ?? serverEnv('TYPESAFE_API_KEY'))?.trim())
+  Boolean((options.apiKey ?? serverEnv('JEV_API_KEY'))?.trim())
 
 const sdkBoundary = (client: TypeSafeClient): TypeSafeClientBoundary => ({
   systemOne: (request, options) => client.systemOne(request, options),

@@ -8,7 +8,7 @@ describe('browser/server boundary', () => {
   it('does not import or expose the server-only Jev client or its credential boundary', () => {
     expect(browserSource).not.toMatch(/from ['\"].*\/server\//)
     expect(browserSource).not.toContain('@typesafe-ai/sdk')
-    expect(browserSource).not.toContain('TYPESAFE_API_KEY')
+    expect(browserSource).not.toContain('JEV_API_KEY')
     expect(browserSource).not.toContain('api.typesafe.ai')
   })
 })

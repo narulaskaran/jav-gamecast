@@ -48,11 +48,11 @@ A real Convex deployment and its URL are required for live operation. This repos
 
    Choose or create the project when prompted. This creates/updates the deployment configuration and regenerates `convex/_generated/` from the checked-in schema/functions. Keep generated output in the deployment branch and re-run `npm run typecheck:convex`.
 
-2. Set the server environment variables in the Convex/Vercel operator environments as appropriate. Set the same high-entropy `CONVEX_WRITE_SECRET` in Convex and the server runtime. Never put `TYPESAFE_API_KEY` or `CONVEX_WRITE_SECRET` in a `VITE_*` variable:
+2. Set the server environment variables in the Convex/Vercel operator environments as appropriate. Set the same high-entropy `CONVEX_WRITE_SECRET` in Convex and the server runtime. Never put `JEV_API_KEY` or `CONVEX_WRITE_SECRET` in a `VITE_*` variable:
 
    ```text
    CONVEX_URL=https://<deployment>.convex.cloud
-   TYPESAFE_API_KEY=<operator-provisioned-secret>
+   JEV_API_KEY=<operator-provisioned-secret>
    CRON_SECRET=<operator-provisioned-secret>
    CONVEX_WRITE_SECRET=<operator-provisioned-secret>
    FEATURED_GAME_ID=<one ESPN NFL event id>
@@ -64,7 +64,7 @@ A real Convex deployment and its URL are required for live operation. This repos
 ## Vercel deployment and live runbook (operator step)
 
 1. Import the repository into Vercel as a Vite project and configure Node 20+ serverless functions.
-2. Add `CONVEX_URL`, `TYPESAFE_API_KEY`, `CRON_SECRET`, `CONVEX_WRITE_SECRET`, `FEATURED_GAME_ID`, and `LIVE_PUBLIC_ORIGIN` as server-side environment variables. Add `VITE_GAMECAST_MODE=live` and `VITE_FEATURED_GAME_ID=<same featured id>` only when the Convex deployment and cron route have been verified.
+2. Add `CONVEX_URL`, `JEV_API_KEY`, `CRON_SECRET`, `CONVEX_WRITE_SECRET`, `FEATURED_GAME_ID`, and `LIVE_PUBLIC_ORIGIN` as server-side environment variables. Add `VITE_GAMECAST_MODE=live` and `VITE_FEATURED_GAME_ID=<same featured id>` only when the Convex deployment and cron route have been verified.
 3. Deploy. Vercel reads `vercel.json` and schedules `/api/cron/forecast` every two minutes. The route accepts `POST` only and requires `Authorization: Bearer $CRON_SECRET` (or the equivalent `x-cron-secret` header for a controlled smoke test).
 4. Verify the public path with `GET /api/gamecast?gameId=<featured id>` and inspect the returned `mode`, `status`, and persisted record identity. Verify one cron cycle through the protected route. Never use a browser call to ESPN or TypeSafe as a smoke test.
 5. Keep live mode off until provider rights, TypeSafe spend limits, Convex deployment, and Vercel cron provisioning are approved. If any required live variable is absent, the cron route returns `503` and the browser remains on replay.
@@ -75,8 +75,8 @@ The public route intentionally serves one featured game and at most 128 persiste
 
 ## Safety boundaries
 
-- Server-only modules contain the ESPN adapter, TypeSafe SDK, `TYPESAFE_API_KEY`, and the Convex HTTP client.
-- The Vite build fails if server markers (`@typesafe-ai/sdk`, `TYPESAFE_API_KEY`, TypeSafe endpoint, `convex/browser`, or `CONVEX_URL`) enter a browser chunk.
+- Server-only modules contain the ESPN adapter, TypeSafe SDK, `JEV_API_KEY`, and the Convex HTTP client.
+- The Vite build fails if server markers (`@typesafe-ai/sdk`, `JEV_API_KEY`, TypeSafe endpoint, `convex/browser`, or `CONVEX_URL`) enter a browser chunk.
 - Missing keys, invalid Convex URLs, unauthorized cron requests, unsupported game IDs, provider errors, stale ESPN data, and durable read failures fail closed. They do not silently become live success.
 - Convex records are keyed by `gameId + providerEventId + stateHash` through the worker idempotency key. Forecast documents are immutable; claims are not reclaimed by nominal lease expiry; budget settlement is idempotent.
 - Replay behavior and controls remain deterministic and credential-free.

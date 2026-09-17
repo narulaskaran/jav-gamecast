@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   JEV_MODEL,
   TYPESAFE_SYSTEM_ONE_ENDPOINT,
   TypeSafeJevProvider,
   buildJevRequest,
   createTypeSafeSdkConfig,
+  hasTypeSafeApiKey,
   parseChoiceAnswer,
   type TypeSafeClientBoundary,
 } from './jev'
@@ -96,6 +97,18 @@ describe('TypeSafe Choice contract', () => {
     expect(retry.backoffMaxMs).toBe(800)
     expect([...retry.httpStatuses!]).toEqual([429, 529])
     expect(config.dangerouslyAllowBrowser).toBe(false)
+  })
+
+  it('fails closed with the canonical JEV_API_KEY configuration error', async () => {
+    vi.stubEnv('JEV_API_KEY', '')
+    try {
+      expect(hasTypeSafeApiKey()).toBe(false)
+      await expect(new TypeSafeJevProvider().forecast({ state, idempotencyKey: 'game-1:event-1:hash' })).rejects.toThrow(
+        'JEV_API_KEY is required for live Jev forecasts',
+      )
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('adapts a typed client response without making a network call', async () => {
