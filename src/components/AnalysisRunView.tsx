@@ -5,6 +5,7 @@ import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader } from './ui/card'
 import { Progress as ProgressBar } from './ui/progress'
+import { runErrorHint, runViewHeading } from '../runView/format'
 import { useRunPlayhead } from '../runView/playhead'
 import { chartVisualFor, inferQuestionKind } from '../shared/questionKind'
 import type { AnalysisSnapshot, AnalysisStatus } from '../shared/analysis'
@@ -79,7 +80,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
       <CardHeader className="analysis-head flex-row items-start justify-between space-y-0 p-6 pb-0">
         <div>
           <p className="eyebrow">Run</p>
-          <h2 id="analysis-heading">Jev analysis run</h2>
+          <h2 id="analysis-heading">{runViewHeading(questionKind)}</h2>
         </div>
         <div className="analysis-actions">
           <StatusBadge status={snapshot.status} />
@@ -96,7 +97,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
         {snapshot.error ? (
           <div className="error-banner compact" role="alert">
             <b>{snapshot.error.code}</b>
-            <span>{snapshot.error.retryable ? 'Retryable.' : 'Stopped.'}</span>
+            <span>{runErrorHint(snapshot.error.retryable)}</span>
           </div>
         ) : null}
         <div className="run-view">

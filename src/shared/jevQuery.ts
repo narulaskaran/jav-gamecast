@@ -128,10 +128,6 @@ export const formatDraftQueryForEditor = (input: {
   return stringifyJevQuery(buildJevQuery({ type, instructions: input.query, classes: input.classes }))
 }
 
-export const jevQuerySummary = (query: JevQueryJson): string => {
-  if (query.type === 'noul') return 'Noul · yes/no probability 0–1'
-  if (query.type === 'score') return `Score · ${query.criteria.join(' → ')}`
-  return `Choice · ${Object.keys(query.criteria).join(', ')}`
-}
+export const jevQuerySummary = (query: JevQueryJson): string => query.instructions
 
 export const looksLikeJevQueryJson = (text: string): boolean => parseJevQueryJson(text) !== undefined
