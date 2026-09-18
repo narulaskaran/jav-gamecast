@@ -53,7 +53,7 @@ Regenerate from verified local source assets with `node scripts/generate-footbal
 - `api/cron/forecast.ts` is a Vercel-compatible POST entrypoint. It authenticates the cron request, polls ESPN once, invokes the server-only Jev provider, and persists through Convex. It never starts a long-lived loop. Convex claims and budgets protect against overlapping workers and process restarts; the local `running` flag is only an optimization.
 - `api/gamecast.ts` is the public, browser-safe read route. It exposes only the featured game, strips Convex system fields, applies CORS/read-rate controls, and returns `503` rather than inventing live data when provisioning is missing or the durable read fails.
 - `src/browser/forecastHttp.ts` and `src/browser/forecastRead.ts` consume the public read response. They do not import ESPN, TypeSafe, Convex server code, or credentials. `VITE_GAMECAST_MODE=live` opts into this source; failed live reads retain the replay points instead of silently labeling them live.
-- `api/analysis/draft`, `api/analysis/run`, `api/analysis/[analysisId]`, `api/share/[analysisId]`, `api/datasets/*`, and `api/browse` implement the Jev playground contract documented in `docs/analysis-api.md`. Drafting uses server-only OpenRouter; only a run can invoke server-only Jev. BYOD CSV blobs go through server-only UploadThing after validation. `src/server/analysisStore.ts` provides the server-only Convex adapters for analyses and datasets. The production runtime fails closed with `ANALYSIS_STORAGE_NOT_CONFIGURED` until both a valid `CONVEX_URL` and `CONVEX_WRITE_SECRET` are provisioned; upload/URL intake also fails closed without `UPLOADTHING_TOKEN`. `InMemoryAnalysisStore` / `InMemoryDatasetStore` are reserved for deterministic local tests.
+- `api/analysis/draft`, `api/analysis/run`, `api/analysis/[analysisId]`, `api/share/[analysisId]`, `api/datasets/*`, and `api/browse` implement the Jev playground contract documented in `docs/analysis-api.md`. Drafting uses server-only OpenRouter; only a run can invoke server-only Jev. BYOD CSV blobs go through server-only UploadThing after validation (v7 ingest HMAC, not retired `/v6/uploadFiles`). `src/server/analysisStore.ts` provides the server-only Convex adapters for analyses and datasets. The production runtime fails closed with `ANALYSIS_STORAGE_NOT_CONFIGURED` until both a valid `CONVEX_URL` and `CONVEX_WRITE_SECRET` are provisioned; upload/URL intake also fails closed without `UPLOADTHING_TOKEN`. `InMemoryAnalysisStore` / `InMemoryDatasetStore` are reserved for deterministic local tests.
 - `vercel.json` schedules the bounded cron route every two minutes. This is compatible with the 90-second worker cadence and leaves scheduler ownership outside application code.
 
 ## Convex provisioning (operator step)
@@ -80,6 +80,15 @@ A real Convex deployment and its URL are required for live operation and for dur
    ```
 
 3. Deploy the Convex functions with the official command (`npx convex deploy`) and verify the generated API/function metadata in the deployment dashboard. The `npx convex dev`/`deploy` steps require an operator login and are intentionally not run in CI without credentials.
+
+## UploadThing provisioning (operator step)
+
+BYOD CSV upload and public URL intake store the original blob on UploadThing. Sample-fixture runs do not need this.
+
+1. In the UploadThing dashboard, open the app → **API Keys** → **V7** tab. Copy the token. It is a base64 JSON object `{ apiKey, appId, regions }` (optionally `ingestHost`). Do not use only the inner `sk_…` secret.
+2. Set `UPLOADTHING_TOKEN` (preferred) or `UPLOADTHING_SECRET` as a server-side Vercel env var. Never put it in a `VITE_*` variable.
+3. Redeploy. `GET /api/datasets/status` reports `uploadThing: true` when a usable `sk_…` key is present. A successful `POST /api/datasets/from-csv` or `/from-url` also needs `appId` and `regions` so the server can HMAC-sign `https://<region>.ingest.uploadthing.com/<fileKey>` and PUT the CSV (the same path as `UTApi.uploadFiles`).
+4. `POST https://api.uploadthing.com/v6/uploadFiles` is retired. A valid v7 app key calling it returns HTTP 400 `Unsupported operation`. Missing tokens return `UPLOADTHING_NOT_CONFIGURED`; present-but-unusable tokens or ingest rejections return `UPLOADTHING_FAILED`.
 
 ## Vercel deployment and live runbook (operator step)
 

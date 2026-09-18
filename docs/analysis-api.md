@@ -6,7 +6,9 @@ The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1`; it has 39 
 
 ## Dataset intake
 
-`GET /api/datasets/status` returns `{ convex, uploadThing, sampleAvailable }` with no secrets. `uploadThing: true` means the same token reader the upload path uses found a usable `UPLOADTHING_TOKEN` / `UPLOADTHING_SECRET` (raw `sk_…` or an UploadThing dashboard token that unwraps to one). Empty or invalid-format values are `false`. Upload and public URL fail closed (`UPLOADTHING_NOT_CONFIGURED` or `ANALYSIS_STORAGE_NOT_CONFIGURED`) when those flags are false. When storage is configured but UploadThing rejects or returns an unexpected response, the routes return `UPLOADTHING_FAILED` — never a false “not configured”.
+`GET /api/datasets/status` returns `{ convex, uploadThing, sampleAvailable }` with no secrets. `uploadThing: true` means the same token reader the upload path uses found a usable `UPLOADTHING_TOKEN` / `UPLOADTHING_SECRET` (raw `sk_…` or an UploadThing dashboard v7 token). Empty or invalid-format values are `false`. Upload and public URL fail closed (`UPLOADTHING_NOT_CONFIGURED` or `ANALYSIS_STORAGE_NOT_CONFIGURED`) when those flags are false. When storage is configured but the credential cannot upload (retired `/v6/uploadFiles`, missing app id/region, or an ingest rejection), the routes return `UPLOADTHING_FAILED` — never a false “not configured”.
+
+BYOD upload uses the v7 server-side ingest path (`UTApi.uploadFiles`): the adapter HMAC-signs `https://<region>.ingest.uploadthing.com/<fileKey>` and PUTs the CSV. It does not call `POST /v6/uploadFiles` (UploadThing returns HTTP 400 `Unsupported operation` for that). A raw `sk_…` key is enough for `uploadThing: true`, but a successful upload needs the dashboard **API Keys → V7** token: base64 JSON `{ apiKey, appId, regions }`.
 
 `POST /api/datasets/from-csv`
 
@@ -107,7 +109,7 @@ This reconstructs the same bounded, deterministic snapshot from the storage inte
 
 `AnalysisStorage` is intentionally small and is implemented in production by the server-only `ConvexAnalysisStore` (`src/server/analysisStore.ts`). It uses the generated Convex functions for authorized snapshot writes/claims and the public share query for read-only share pages, so queued, incremental, completed, and partial-error snapshots survive process restarts and can be read across instances. `InMemoryAnalysisStore` remains available only for deterministic local tests; it is process-local and is not a production fallback. Snapshot cloning and row sorting keep reads and share serialization deterministic.
 
-The production runtime requires a valid `CONVEX_URL` (or Convex Vite alias `VITE_CONVEX_URL`) and `CONVEX_WRITE_SECRET` before constructing the Convex adapter. BYOD CSV intake additionally requires `UPLOADTHING_TOKEN` (or `UPLOADTHING_SECRET`). If those are absent, API reads/writes and upload/URL intake fail closed rather than silently using process-local storage or faking a run. The sample fixture on-ramp does not need UploadThing. Provisioning is an operator step.
+The production runtime requires a valid `CONVEX_URL` (or Convex Vite alias `VITE_CONVEX_URL`) and `CONVEX_WRITE_SECRET` before constructing the Convex adapter. BYOD CSV intake additionally requires `UPLOADTHING_TOKEN` (or `UPLOADTHING_SECRET`). Prefer the UploadThing dashboard **V7** token (base64 JSON with `apiKey`, `appId`, and `regions`). A standalone `sk_…` secret reports configured but cannot sign ingest URLs. If those are absent, API reads/writes and upload/URL intake fail closed rather than silently using process-local storage or faking a run. The sample fixture on-ramp does not need UploadThing. Provisioning is an operator step.
 
 ## Server boundary
 

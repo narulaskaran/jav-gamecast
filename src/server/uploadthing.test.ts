@@ -1,18 +1,28 @@
+import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { DatasetError } from '../dataset/csvTypes'
 import { readDatasetIntakeStatus } from './runtimeStatus'
 import {
   createCsvBlobStore,
   isUploadThingConfigured,
+  readUploadThingCredentials,
   readUploadThingToken,
+  signedIngestUrl,
+  uploadThingAppIdPrefix,
   UploadThingBlobStore,
 } from './uploadthing'
 
-const encodedToken = (apiKey: string): string => Buffer.from(JSON.stringify({ apiKey, appId: 'app_demo', regions: ['sea1'] })).toString('base64')
+const encodedToken = (apiKey: string, extras?: { appId?: string; regions?: string[] }): string => (
+  Buffer.from(JSON.stringify({
+    apiKey,
+    appId: extras?.appId ?? 'app_demo',
+    regions: extras?.regions ?? ['sea1'],
+  })).toString('base64')
+)
 
 const jwtToken = (apiKey: string): string => {
   const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
-  const payload = Buffer.from(JSON.stringify({ apiKey, appId: 'app_demo' })).toString('base64url')
+  const payload = Buffer.from(JSON.stringify({ apiKey, appId: 'app_demo', regions: ['sea1'] })).toString('base64url')
   return `${header}.${payload}.sig`
 }
 
@@ -31,11 +41,21 @@ describe('UploadThing credential reader', () => {
     expect(readUploadThingToken({ UPLOADTHING_TOKEN: '"sk_live_quoted"' })).toBe('sk_live_quoted')
   })
 
-  it('extracts the inner API key from an UploadThing dashboard token', () => {
+  it('extracts the inner API key and v7 app fields from an UploadThing dashboard token', () => {
     const token = encodedToken('sk_live_from_token')
     expect(readUploadThingToken({ UPLOADTHING_TOKEN: token })).toBe('sk_live_from_token')
+    expect(readUploadThingCredentials({ UPLOADTHING_TOKEN: token })).toEqual({
+      apiKey: 'sk_live_from_token',
+      appId: 'app_demo',
+      regions: ['sea1'],
+    })
     expect(isUploadThingConfigured({ UPLOADTHING_TOKEN: token })).toBe(true)
     expect(readUploadThingToken({ UPLOADTHING_TOKEN: jwtToken('sk_live_jwt') })).toBe('sk_live_jwt')
+    expect(readUploadThingCredentials({ UPLOADTHING_TOKEN: jwtToken('sk_live_jwt') })).toMatchObject({
+      apiKey: 'sk_live_jwt',
+      appId: 'app_demo',
+      regions: ['sea1'],
+    })
     expect(readUploadThingToken({
       UPLOADTHING_TOKEN: JSON.stringify({ apiKey: 'sk_live_json', appId: 'app_demo', regions: ['sea1'] }),
     })).toBe('sk_live_json')
@@ -73,6 +93,37 @@ describe('UploadThing credential reader', () => {
   })
 })
 
+describe('UploadThing v7 ingest signing', () => {
+  it('HMAC-signs the ingest URL the same way UTApi does (encode-then-append)', () => {
+    const url = signedIngestUrl({
+      apiKey: 'sk_live_sign',
+      appId: 'app_demo',
+      region: 'sea1',
+      fileKey: 'abc123',
+      filename: 'n.csv',
+      byteSize: 8,
+      contentType: 'text/csv',
+      expiresAtMs: 1_700_000_000_000,
+    })
+    const parsed = new URL(url)
+    expect(parsed.origin).toBe('https://sea1.ingest.uploadthing.com')
+    expect(parsed.pathname).toBe('/abc123')
+    expect(parsed.searchParams.get('x-ut-identifier')).toBe(encodeURIComponent('app_demo'))
+    expect(parsed.searchParams.get('x-ut-file-type')).toBe(encodeURIComponent('text/csv'))
+    const signature = parsed.searchParams.get('signature')
+    expect(signature).toMatch(/^hmac-sha256=[0-9a-f]+$/)
+    const unsigned = new URL(url)
+    unsigned.searchParams.delete('signature')
+    const expected = `hmac-sha256=${createHmac('sha256', 'sk_live_sign').update(unsigned.toString()).digest('hex')}`
+    expect(signature).toBe(expected)
+  })
+
+  it('keeps a stable app-id file-key prefix', () => {
+    expect(uploadThingAppIdPrefix('app_demo')).toMatch(/^[A-Za-z0-9]{12,}$/)
+    expect(uploadThingAppIdPrefix('app_demo')).toBe(uploadThingAppIdPrefix('app_demo'))
+  })
+})
+
 describe('UploadThing blob store', () => {
   it('fails closed with UPLOADTHING_NOT_CONFIGURED when the shared reader has no token', async () => {
     const store = new UploadThingBlobStore({})
@@ -82,8 +133,22 @@ describe('UploadThing blob store', () => {
     })
   })
 
-  it('does not map a rejected UploadThing API response to not-configured', async () => {
-    const env: NodeJS.ProcessEnv = { UPLOADTHING_TOKEN: 'sk_live_upload' }
+  it('does not map a missing v7 app id to not-configured when an sk_ key is present', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch
+    const store = new UploadThingBlobStore({ UPLOADTHING_TOKEN: 'sk_live_upload' }, fetchMock)
+    const error = await store.putCsv({ bytes: csvBytes(), filename: 'n.csv' }).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(DatasetError)
+    expect(error).toMatchObject({ code: 'UPLOADTHING_FAILED', statusCode: 503 })
+    expect((error as DatasetError).code).not.toBe('UPLOADTHING_NOT_CONFIGURED')
+    expect((error as DatasetError).code).not.toBe('DATASET_INTAKE_UNAVAILABLE')
+    expect((error as DatasetError).message).not.toMatch(/not configured/i)
+    expect((error as DatasetError).message).toMatch(/v7/i)
+    expect((error as DatasetError).message).toMatch(/uploadFiles/i)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not map a rejected ingest response to not-configured', async () => {
+    const env: NodeJS.ProcessEnv = { UPLOADTHING_TOKEN: encodedToken('sk_live_upload') }
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'Invalid API key' }), { status: 401 })) as unknown as typeof fetch
     const store = new UploadThingBlobStore(env, fetchMock)
     const error = await store.putCsv({ bytes: csvBytes(), filename: 'n.csv' }).catch((caught: unknown) => caught)
@@ -97,58 +162,39 @@ describe('UploadThing blob store', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('sends the parsed API key and uploads via the JSON presign path', async () => {
+  it('PUTs the CSV to the regional ingest host and never calls v6 uploadFiles', async () => {
     const env: NodeJS.ProcessEnv = { UPLOADTHING_TOKEN: encodedToken('sk_live_upload') }
     const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const url = String(input)
-      if (url === 'https://api.uploadthing.com/v6/uploadFiles') {
-        expect(init?.headers).toEqual(expect.objectContaining({ 'x-uploadthing-api-key': 'sk_live_upload' }))
-        expect(String(init?.body)).toContain('n.csv')
-        expect(String(init?.body)).toContain('public-read')
-        expect(String(init?.body)).toContain('inline')
-        return new Response(JSON.stringify({ data: [{ key: 'blob-1', url: 'https://upload.example/put' }] }), { status: 200 })
-      }
-      if (url === 'https://upload.example/put') {
-        expect(init?.method).toBe('PUT')
-        return new Response(null, { status: 200 })
-      }
-      throw new Error(`unexpected fetch ${url}`)
+      expect(url).not.toContain('/v6/uploadFiles')
+      expect(url).toContain('https://sea1.ingest.uploadthing.com/')
+      expect(init?.method).toBe('PUT')
+      expect(init?.body).toBeInstanceOf(FormData)
+      const form = init?.body as FormData
+      expect(form.get('file')).toBeInstanceOf(Blob)
+      expect(new URL(url).searchParams.get('x-ut-file-name')).toBe(encodeURIComponent('n.csv'))
+      return new Response(JSON.stringify({ ufsUrl: 'https://app_demo.ufs.sh/f/key' }), { status: 200 })
     }) as unknown as typeof fetch
     const store = new UploadThingBlobStore(env, fetchMock)
-    await expect(store.putCsv({ bytes: csvBytes(), filename: 'n.csv' })).resolves.toEqual({
-      blobKey: 'blob-1',
-      byteSize: 8,
-    })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const result = await store.putCsv({ bytes: csvBytes(), filename: 'n.csv' })
+    expect(result.byteSize).toBe(8)
+    expect(result.blobKey.startsWith(uploadThingAppIdPrefix('app_demo'))).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('POSTs the CSV through v6 presigned fields and returns the blob key', async () => {
-    const env: NodeJS.ProcessEnv = { UPLOADTHING_TOKEN: 'sk_live_fields' }
-    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      const url = String(input)
-      if (url === 'https://api.uploadthing.com/v6/uploadFiles') {
-        return new Response(JSON.stringify({
-          data: [{
-            key: 'blob-fields',
-            url: 'https://s3.example/post',
-            fields: { bucket: 'uploadthing', key: 'blob-fields' },
-          }],
-        }), { status: 200 })
-      }
-      if (url === 'https://s3.example/post') {
-        expect(init?.method).toBe('POST')
-        expect(init?.body).toBeInstanceOf(FormData)
-        const form = init?.body as FormData
-        expect(form.get('bucket')).toBe('uploadthing')
-        expect(form.get('key')).toBe('blob-fields')
-        expect(form.get('file')).toBeInstanceOf(Blob)
-        return new Response(null, { status: 204 })
-      }
-      throw new Error(`unexpected fetch ${url}`)
+  it('signs ingest URLs for a dashboard token that includes a custom ingest host', async () => {
+    const token = Buffer.from(JSON.stringify({
+      apiKey: 'sk_live_fields',
+      appId: 'app_demo',
+      regions: ['fra1'],
+      ingestHost: 'ingest.example.test',
+    })).toString('base64')
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      expect(String(input)).toContain('https://fra1.ingest.example.test/')
+      return new Response(null, { status: 204 })
     }) as unknown as typeof fetch
-    const store = new UploadThingBlobStore(env, fetchMock)
-    await expect(store.putCsv({ bytes: csvBytes(), filename: 'tickets.csv' })).resolves.toEqual({
-      blobKey: 'blob-fields',
+    const store = new UploadThingBlobStore({ UPLOADTHING_TOKEN: token }, fetchMock)
+    await expect(store.putCsv({ bytes: csvBytes(), filename: 'tickets.csv' })).resolves.toMatchObject({
       byteSize: 8,
     })
   })

@@ -1,3 +1,5 @@
+import { createHmac, randomBytes } from 'node:crypto'
+import Sqids, { defaultOptions } from 'sqids'
 import { DatasetError } from '../dataset/csvTypes.js'
 
 export interface StoredCsvBlob {
@@ -11,7 +13,15 @@ export interface CsvBlobStore {
   getCsv(blobKey: string): Promise<Uint8Array>
 }
 
+export interface UploadThingCredentials {
+  apiKey: string
+  appId?: string
+  regions?: readonly string[]
+  ingestHost?: string
+}
+
 const NOT_CONFIGURED_COPY = 'CSV storage is not configured on this deployment.'
+const V7_TOKEN_REQUIRED_COPY = 'UploadThing v7 needs a dashboard API token with app id and region. The v6 uploadFiles API is no longer supported.'
 
 const notConfigured = (): never => {
   throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', NOT_CONFIGURED_COPY, 503)
@@ -53,9 +63,10 @@ export class InMemoryBlobStore implements CsvBlobStore {
 }
 
 const UPLOADTHING_ENV_KEYS = ['UPLOADTHING_TOKEN', 'UPLOADTHING_SECRET'] as const
-const UPLOADTHING_UPLOAD_FILES_URL = 'https://api.uploadthing.com/v6/uploadFiles'
 const UPLOADTHING_LIST_FILES_URL = 'https://api.uploadthing.com/v6/listFiles'
+const DEFAULT_INGEST_HOST = 'ingest.uploadthing.com'
 const API_KEY_PREFIX = 'sk_'
+const SIGNATURE_PREFIX = 'hmac-sha256='
 const SAFE_PROVIDER_ERROR = /^[A-Za-z0-9][A-Za-z0-9 .,_':()-]{0,160}$/
 
 const envValue = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
@@ -116,11 +127,42 @@ const apiKeyFromRecord = (record: Record<string, unknown> | undefined): string |
   return undefined
 }
 
-const credentialFromEncoded = (raw: string): string | undefined => {
-  const fromJson = apiKeyFromRecord(parseJsonObject(raw)) ?? apiKeyFromRecord(decodeBase64Json(raw))
+const stringField = (record: Record<string, unknown>, ...keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+const regionsFromRecord = (record: Record<string, unknown>): string[] | undefined => {
+  if (Array.isArray(record.regions)) {
+    const regions = record.regions.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim())).map((entry) => entry.trim())
+    return regions.length > 0 ? regions : undefined
+  }
+  const single = stringField(record, 'region')
+  return single ? [single] : undefined
+}
+
+const credentialsFromRecord = (record: Record<string, unknown> | undefined): UploadThingCredentials | undefined => {
+  const apiKey = apiKeyFromRecord(record)
+  if (!apiKey || !record) return undefined
+  const appId = stringField(record, 'appId', 'app_id')
+  const regions = regionsFromRecord(record)
+  const ingestHost = stringField(record, 'ingestHost', 'ingest_host')
+  return {
+    apiKey,
+    ...(appId ? { appId } : {}),
+    ...(regions ? { regions } : {}),
+    ...(ingestHost ? { ingestHost } : {}),
+  }
+}
+
+const credentialsFromEncoded = (raw: string): UploadThingCredentials | undefined => {
+  const fromJson = credentialsFromRecord(parseJsonObject(raw)) ?? credentialsFromRecord(decodeBase64Json(raw))
   if (fromJson) return fromJson
   const parts = raw.split('.')
-  if (parts.length >= 2 && parts[1]) return apiKeyFromRecord(decodeBase64Json(parts[1]))
+  if (parts.length >= 2 && parts[1]) return credentialsFromRecord(decodeBase64Json(parts[1]))
   return undefined
 }
 
@@ -128,22 +170,29 @@ const credentialFromEncoded = (raw: string): string | undefined => {
  * Credential the upload/fetch path will send. Status must use this same reader
  * so `uploadThing: true` cannot diverge from `createCsvBlobStore()`.
  *
- * Accepts `UPLOADTHING_TOKEN` (raw sk_ key or UploadThing's base64/JWT token)
- * or `UPLOADTHING_SECRET`. Encoded tokens are reduced to the inner API key.
+ * Accepts `UPLOADTHING_TOKEN` (raw sk_ key or UploadThing's v7 dashboard token)
+ * or `UPLOADTHING_SECRET`. Encoded tokens keep apiKey, appId, and regions.
  * Empty or invalid-format values are treated as missing — never as configured.
+ *
+ * A raw sk_ key is enough to report configured, but server-side upload requires
+ * the v7 dashboard token (apiKey + appId + regions). v6 uploadFiles is retired.
  */
-export const readUploadThingToken = (env: NodeJS.ProcessEnv = process.env): string | undefined => {
+export const readUploadThingCredentials = (env: NodeJS.ProcessEnv = process.env): UploadThingCredentials | undefined => {
   for (const name of UPLOADTHING_ENV_KEYS) {
     const raw = envValue(env, name)
     if (!raw) continue
     const normalized = normalizeSecret(raw)
     if (!normalized) continue
-    if (isApiKey(normalized)) return normalized
-    const extracted = credentialFromEncoded(normalized)
+    if (isApiKey(normalized)) return { apiKey: normalized }
+    const extracted = credentialsFromEncoded(normalized)
     if (extracted) return extracted
   }
   return undefined
 }
+
+export const readUploadThingToken = (env: NodeJS.ProcessEnv = process.env): string | undefined => (
+  readUploadThingCredentials(env)?.apiKey
+)
 
 export const isUploadThingConfigured = (env: NodeJS.ProcessEnv = process.env): boolean => Boolean(readUploadThingToken(env))
 
@@ -152,78 +201,6 @@ const csvFilename = (filename: string): string => (filename.endsWith('.csv') ? f
 const asRecord = (value: unknown): Record<string, unknown> | undefined => (
   typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 )
-
-const firstOf = (value: unknown): Record<string, unknown> | undefined => (
-  Array.isArray(value) ? asRecord(value[0]) : undefined
-)
-
-const looksLikeFileRecord = (record: Record<string, unknown> | undefined): record is Record<string, unknown> => (
-  Boolean(record && (typeof record.key === 'string' || typeof record.fileKey === 'string' || typeof record.url === 'string' || asRecord(record.fields)))
-)
-
-const firstFileRecord = (payload: unknown): Record<string, unknown> | undefined => {
-  const record = asRecord(payload)
-  if (!record) return undefined
-  const nested = asRecord(record.data)
-  return firstOf(record.data)
-    ?? firstOf(nested?.files)
-    ?? firstOf(record.files)
-    ?? (looksLikeFileRecord(nested) ? nested : undefined)
-    ?? (looksLikeFileRecord(record) ? record : undefined)
-}
-
-const readBlobKey = (payload: unknown): string | undefined => {
-  const file = firstFileRecord(payload)
-  if (!file) return undefined
-  if (typeof file.key === 'string' && file.key.trim()) return file.key.trim()
-  if (typeof file.fileKey === 'string' && file.fileKey.trim()) return file.fileKey.trim()
-  return undefined
-}
-
-const isHttpUrl = (value: string): boolean => {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' || url.protocol === 'http:'
-  } catch {
-    return false
-  }
-}
-
-const isCdnFileUrl = (value: string): boolean => {
-  try {
-    const host = new URL(value).hostname.toLowerCase()
-    return host === 'utfs.io' || host.endsWith('.utfs.io') || host === 'ufs.sh' || host.endsWith('.ufs.sh')
-  } catch {
-    return false
-  }
-}
-
-const readStringFields = (value: unknown): Record<string, string> | undefined => {
-  const record = asRecord(value)
-  if (!record) return undefined
-  const fields: Record<string, string> = {}
-  for (const [key, entry] of Object.entries(record)) {
-    if (typeof entry === 'string') fields[key] = entry
-  }
-  return Object.keys(fields).length > 0 ? fields : undefined
-}
-
-interface UploadThingPresign {
-  key?: string
-  uploadUrl?: string
-  fields?: Record<string, string>
-}
-
-const readPresign = (payload: unknown): UploadThingPresign => {
-  const file = firstFileRecord(payload)
-  const key = readBlobKey(payload)
-  if (!file) return { key }
-  const fields = readStringFields(file.fields)
-  const candidates = [file.uploadUrl, file.presignedUrl, file.url]
-  const uploadUrl = candidates.find((value): value is string => typeof value === 'string' && isHttpUrl(value.trim()) && !isCdnFileUrl(value.trim()))
-    ?.trim()
-  return { key, uploadUrl, fields }
-}
 
 const readSafeProviderError = (payload: unknown): string | undefined => {
   const candidates: unknown[] = [payload]
@@ -265,76 +242,145 @@ const failureFromResponse = async (response: Response, action: string): Promise<
   )
 }
 
+/** Effect Hash.string + optimize — must match @uploadthing/shared file-key prefixes. */
+const hashString = (value: string): number => {
+  let hash = 5381
+  let index = value.length
+  while (index) {
+    hash = hash * 33 ^ value.charCodeAt(--index)
+  }
+  return (hash & 0xbfffffff) | ((hash >>> 1) & 0x40000000)
+}
+
+const shuffleAlphabet = (alphabet: string, seed: string): string => {
+  const chars = alphabet.split('')
+  const seedNum = hashString(seed)
+  for (let i = 0; i < chars.length; i++) {
+    const j = ((seedNum % (i + 1)) + i) % chars.length
+    const temp = chars[i]!
+    chars[i] = chars[j]!
+    chars[j] = temp
+  }
+  return chars.join('')
+}
+
+export const uploadThingAppIdPrefix = (appId: string): string => {
+  const alphabet = shuffleAlphabet(defaultOptions.alphabet, appId)
+  return new Sqids({ alphabet, minLength: 12 }).encode([Math.abs(hashString(appId))])
+}
+
+const generateFileKey = (appId: string, file: { name: string; size: number; type: string; lastModified: number }): string => {
+  const alphabet = shuffleAlphabet(defaultOptions.alphabet, appId)
+  const hashParts = JSON.stringify([file.name, file.size, file.type, file.lastModified, Date.now(), randomBytes(8).toString('hex')])
+  const encodedFileSeed = new Sqids({ alphabet, minLength: 36 }).encode([Math.abs(hashString(hashParts))])
+  return `${uploadThingAppIdPrefix(appId)}${encodedFileSeed}`
+}
+
+const canSignIngest = (credentials: UploadThingCredentials): credentials is UploadThingCredentials & { appId: string; regions: readonly [string, ...string[]] } => (
+  Boolean(credentials.appId && credentials.regions && credentials.regions.length > 0)
+)
+
+/**
+ * v7 server-side upload: locally HMAC-sign an ingest URL (UTApi.uploadFiles).
+ * Matches @uploadthing/shared generateSignedURL, including encode-then-append.
+ */
+export const signedIngestUrl = (input: {
+  apiKey: string
+  appId: string
+  region: string
+  ingestHost?: string
+  fileKey: string
+  filename: string
+  byteSize: number
+  contentType: string
+  expiresAtMs: number
+  acl?: 'public-read' | 'private'
+}): string => {
+  const ingestHost = input.ingestHost || DEFAULT_INGEST_HOST
+  const url = new URL(`https://${input.region}.${ingestHost}/${input.fileKey}`)
+  url.searchParams.append('expires', String(input.expiresAtMs))
+  const data: Record<string, string | number> = {
+    'x-ut-identifier': input.appId,
+    'x-ut-file-name': input.filename,
+    'x-ut-file-size': input.byteSize,
+    'x-ut-file-type': input.contentType,
+    'x-ut-content-disposition': 'inline',
+    'x-ut-acl': input.acl ?? 'public-read',
+  }
+  for (const [key, value] of Object.entries(data)) {
+    url.searchParams.append(key, encodeURIComponent(value))
+  }
+  const signature = `${SIGNATURE_PREFIX}${createHmac('sha256', input.apiKey).update(url.toString()).digest('hex')}`
+  url.searchParams.append('signature', signature)
+  return url.href
+}
+
 /**
  * Server-only UploadThing adapter. The browser never sees the token.
  * Credentials are read lazily from env so a module-load snapshot cannot
  * ignore a token that `/api/datasets/status` would report as present.
+ *
+ * Uploads follow the v7 UTApi path: sign an ingest URL with the dashboard
+ * token and PUT the CSV. Do not call retired `/v6/uploadFiles`.
  */
 export class UploadThingBlobStore implements CsvBlobStore {
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly now: () => number = Date.now,
   ) {}
 
-  private token(): string | undefined {
-    return readUploadThingToken(this.env)
+  private credentials(): UploadThingCredentials | undefined {
+    return readUploadThingCredentials(this.env)
   }
 
   isConfigured(): boolean {
-    return Boolean(this.token())
+    return Boolean(this.credentials()?.apiKey)
   }
 
   async putCsv(input: { bytes: Uint8Array; filename: string; contentType?: string }): Promise<StoredCsvBlob> {
-    const token = this.token()
-    if (!token) return notConfigured()
+    const credentials = this.credentials()
+    if (!credentials) return notConfigured()
+    if (!canSignIngest(credentials)) return uploadFailed(V7_TOKEN_REQUIRED_COPY)
+
     const filename = csvFilename(input.filename)
     const contentType = input.contentType ?? 'text/csv'
     const bytes = Uint8Array.from(input.bytes)
-    const response = await this.fetcher(UPLOADTHING_UPLOAD_FILES_URL, {
-      method: 'POST',
-      headers: {
-        'x-uploadthing-api-key': token,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        files: [{ name: filename, size: bytes.byteLength, type: contentType }],
-        metadata: {},
-        contentDisposition: 'inline',
-        acl: 'public-read',
-      }),
+    const lastModified = this.now()
+    const fileKey = generateFileKey(credentials.appId, {
+      name: filename,
+      size: bytes.byteLength,
+      type: contentType,
+      lastModified,
     })
-    if (!response.ok) return failureFromResponse(response, 'uploadFiles')
-    let payload: unknown
-    try { payload = await response.json() } catch {
-      return uploadFailed('UploadThing returned a non-JSON uploadFiles response.')
-    }
-    const presign = readPresign(payload)
-    if (presign.fields && presign.uploadUrl) {
-      const form = new FormData()
-      for (const [key, value] of Object.entries(presign.fields)) form.append(key, value)
-      form.append('file', new Blob([bytes], { type: contentType }), filename)
-      const uploaded = await this.fetcher(presign.uploadUrl, { method: 'POST', body: form })
-      if (!uploaded.ok) return failureFromResponse(uploaded, 'blob upload')
-    } else if (presign.uploadUrl) {
-      const uploaded = await this.fetcher(presign.uploadUrl, {
-        method: 'PUT',
-        headers: { 'content-type': contentType },
-        body: new Blob([bytes], { type: contentType }),
-      })
-      if (!uploaded.ok) return failureFromResponse(uploaded, 'blob upload')
-    }
-    if (!presign.key) {
-      return uploadFailed('UploadThing returned an unexpected uploadFiles response (missing file key).')
-    }
-    return { blobKey: presign.key, byteSize: bytes.byteLength }
+    const uploadUrl = signedIngestUrl({
+      apiKey: credentials.apiKey,
+      appId: credentials.appId,
+      region: credentials.regions[0],
+      ingestHost: credentials.ingestHost,
+      fileKey,
+      filename,
+      byteSize: bytes.byteLength,
+      contentType,
+      expiresAtMs: lastModified + 60 * 60 * 1000,
+    })
+    const form = new FormData()
+    form.append('file', new File([bytes], filename, { type: contentType }))
+    const uploaded = await this.fetcher(uploadUrl, {
+      method: 'PUT',
+      headers: { Range: 'bytes=0-' },
+      body: form,
+    })
+    if (!uploaded.ok) return failureFromResponse(uploaded, 'ingest upload')
+    return { blobKey: fileKey, byteSize: bytes.byteLength }
   }
 
   async getCsv(blobKey: string): Promise<Uint8Array> {
-    const token = this.token()
-    if (!token) return notConfigured()
+    const credentials = this.credentials()
+    if (!credentials) return notConfigured()
     const response = await this.fetcher(UPLOADTHING_LIST_FILES_URL, {
       method: 'POST',
-      headers: { 'x-uploadthing-api-key': token, 'content-type': 'application/json' },
+      headers: { 'x-uploadthing-api-key': credentials.apiKey, 'content-type': 'application/json' },
       body: JSON.stringify({ fileKeys: [blobKey] }),
     })
     if (!response.ok) throw new DatasetError('DATASET_NOT_FOUND', 'CSV blob was not found', 404)
