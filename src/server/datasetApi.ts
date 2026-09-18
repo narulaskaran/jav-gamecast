@@ -1,7 +1,7 @@
 import { DatasetError } from '../dataset/csvTypes.js'
 import { AnalysisError } from './analysis.js'
 import type { DatasetIntakeService } from './datasetIntake.js'
-import type { DatasetPreview } from '../shared/dataset.js'
+import type { DatasetIntakeStatus, DatasetPreview } from '../shared/dataset.js'
 
 export interface DatasetApiRequest {
   method?: string
@@ -58,7 +58,7 @@ const errorResponse = (response: DatasetApiResponse, error: unknown): void => {
   response.status(500).json({ error: 'DATASET_UNAVAILABLE' })
 }
 
-export const createDatasetStatusHandler = (intake: DatasetIntakeService): DatasetApiHandler => async (request, response) => {
+export const createDatasetStatusHandler = (intake: { status: () => DatasetIntakeStatus }): DatasetApiHandler => async (request, response) => {
   applyHeaders(response)
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET')

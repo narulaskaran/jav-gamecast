@@ -107,7 +107,7 @@ This reconstructs the same bounded, deterministic snapshot from the storage inte
 
 `AnalysisStorage` is intentionally small and is implemented in production by the server-only `ConvexAnalysisStore` (`src/server/analysisStore.ts`). It uses the generated Convex functions for authorized snapshot writes/claims and the public share query for read-only share pages, so queued, incremental, completed, and partial-error snapshots survive process restarts and can be read across instances. `InMemoryAnalysisStore` remains available only for deterministic local tests; it is process-local and is not a production fallback. Snapshot cloning and row sorting keep reads and share serialization deterministic.
 
-The production runtime requires both a valid `CONVEX_URL` and `CONVEX_WRITE_SECRET` before constructing the Convex adapter. BYOD CSV intake additionally requires `UPLOADTHING_TOKEN`. If those are absent, API reads/writes and upload/URL intake fail closed rather than silently using process-local storage or faking a run. The sample fixture on-ramp does not need UploadThing. Provisioning is an operator step.
+The production runtime requires a valid `CONVEX_URL` (or Convex Vite alias `VITE_CONVEX_URL`) and `CONVEX_WRITE_SECRET` before constructing the Convex adapter. BYOD CSV intake additionally requires `UPLOADTHING_TOKEN` (or `UPLOADTHING_SECRET`). If those are absent, API reads/writes and upload/URL intake fail closed rather than silently using process-local storage or faking a run. The sample fixture on-ramp does not need UploadThing. Provisioning is an operator step.
 
 ## Server boundary
 

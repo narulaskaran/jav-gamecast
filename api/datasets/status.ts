@@ -1,4 +1,4 @@
 import { createDatasetStatusHandler } from '../../src/server/datasetApi.js'
-import { datasetIntake } from '../../src/server/analysisRuntime.js'
+import { readDatasetIntakeStatus } from '../../src/server/runtimeStatus.js'
 
-export default createDatasetStatusHandler(datasetIntake)
+export default createDatasetStatusHandler({ status: readDatasetIntakeStatus })
