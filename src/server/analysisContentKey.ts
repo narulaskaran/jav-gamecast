@@ -6,9 +6,10 @@ import {
   parseJevQueryJson,
   type JevQueryJson,
 } from '../shared/jevQuery.js'
-import { inferQuestionKind } from '../shared/questionKind.js'
+import { inferQuestionKind, normalizeAnalysisTask } from '../shared/questionKind.js'
 
 const CONTENT_KEY_VERSION = 1
+const DRAFT_CONTENT_KEY_VERSION = 1
 
 const compactJevQuery = (query: JevQueryJson): string => {
   if (query.type === 'noul') {
@@ -63,3 +64,17 @@ export const analysisContentKeyFromSnapshot = (snapshot: Pick<AnalysisSnapshot, 
     classes: snapshot.classes,
   })
 )
+
+export const draftContentFingerprint = (input: {
+  datasetId: string
+  task: string
+}): string => JSON.stringify({
+  v: DRAFT_CONTENT_KEY_VERSION,
+  datasetId: input.datasetId.trim(),
+  task: normalizeAnalysisTask(input.task),
+})
+
+export const draftContentKey = (input: {
+  datasetId: string
+  task: string
+}): string => createHash('sha256').update(draftContentFingerprint(input), 'utf8').digest('hex')

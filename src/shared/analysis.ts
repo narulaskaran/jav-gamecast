@@ -110,6 +110,10 @@ export interface AnalysisStorage {
   put(snapshot: AnalysisSnapshot): Promise<void> | void
   getPublic?(analysisId: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
   findCompleteByContentKey(contentKey: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
+  /** Return a complete/running/queued snapshot for this key, or store `snapshot` and return it. */
+  claimByContentKey(contentKey: string, snapshot: AnalysisSnapshot): Promise<AnalysisSnapshot> | AnalysisSnapshot
+  getDraftByContentKey(contentKey: string): Promise<AnalysisDraftResult | undefined> | AnalysisDraftResult | undefined
+  putDraft(contentKey: string, draft: AnalysisDraftResult): Promise<void> | void
   claim?(analysisId: string, ownerToken: string, nowMs: number, leaseMs: number): Promise<'claimed' | 'busy' | 'complete' | 'missing'> | 'claimed' | 'busy' | 'complete' | 'missing'
   release?(analysisId: string, ownerToken: string): Promise<void> | void
 }

@@ -100,6 +100,8 @@ describe('draft honors the user prompt', () => {
 
   it('caches the sample noul only for the exact default task, not a broad win regex', () => {
     expect(isSampleDefaultWinTask(SAMPLE_WIN_LIKELIHOOD_TASK)).toBe(true)
+    expect(isSampleDefaultWinTask(`  ${SAMPLE_WIN_LIKELIHOOD_TASK}  `)).toBe(true)
+    expect(isSampleDefaultWinTask('Win  likelihood of the game per play.')).toBe(true)
     expect(isSampleDefaultWinTask('Will SEA win given this play state?')).toBe(false)
     expect(looksLikeWinLikelihood('probability will win')).toBe(false)
     expect(looksLikeWinLikelihood('chance of winning the raffle')).toBe(false)

@@ -15,6 +15,9 @@ class UnconfiguredAnalysisStore implements AnalysisStorage {
   put(): never { return this.unavailable() }
   getPublic(): never { return this.unavailable() }
   findCompleteByContentKey(): never { return this.unavailable() }
+  claimByContentKey(): never { return this.unavailable() }
+  getDraftByContentKey(): never { return this.unavailable() }
+  putDraft(): never { return this.unavailable() }
   claim(): never { return this.unavailable() }
   release(): never { return this.unavailable() }
 }

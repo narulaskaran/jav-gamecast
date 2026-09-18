@@ -4,6 +4,7 @@ import { DatasetError } from '../dataset/csvTypes.js'
 import {
   cloneAnalysisSnapshot,
   normalizeSnapshot,
+  type AnalysisDraftResult,
   type AnalysisRowInput,
   type AnalysisSnapshot,
   type AnalysisStorage,
@@ -45,6 +46,24 @@ export class ConvexAnalysisStore implements AnalysisStorage {
   async findCompleteByContentKey(contentKey: string): Promise<AnalysisSnapshot | undefined> {
     const snapshot = await this.client.action(api.analyses.authorizedGetCompleteAnalysisByContentKey, { authToken: this.authToken(), contentKey }) as AnalysisSnapshot | null
     return snapshot ? cloneAnalysisSnapshot(normalizeSnapshot(snapshot)) : undefined
+  }
+
+  async claimByContentKey(contentKey: string, snapshot: AnalysisSnapshot): Promise<AnalysisSnapshot> {
+    const claimed = await this.client.action(api.analyses.authorizedClaimAnalysisByContentKey, {
+      authToken: this.authToken(),
+      contentKey,
+      snapshot: { ...snapshot, contentKey: contentKey || analysisContentKeyFromSnapshot(snapshot) },
+    }) as AnalysisSnapshot
+    return cloneAnalysisSnapshot(normalizeSnapshot(claimed))
+  }
+
+  async getDraftByContentKey(contentKey: string): Promise<AnalysisDraftResult | undefined> {
+    const draft = await this.client.action(api.analyses.authorizedGetDraftByContentKey, { authToken: this.authToken(), contentKey }) as AnalysisDraftResult | null
+    return draft ? JSON.parse(JSON.stringify(draft)) as AnalysisDraftResult : undefined
+  }
+
+  async putDraft(contentKey: string, draft: AnalysisDraftResult): Promise<void> {
+    await this.client.action(api.analyses.authorizedPutDraft, { authToken: this.authToken(), contentKey, draft })
   }
 
   async put(snapshot: AnalysisSnapshot): Promise<void> {

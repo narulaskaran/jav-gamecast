@@ -101,6 +101,26 @@ export default defineSchema({
     contentKey: v.optional(v.string()),
   }).index('by_analysis_id', ['analysisId'])
     .index('by_content_key_status', ['contentKey', 'status']),
+  analysisDrafts: defineTable({
+    contentKey: v.string(),
+    fixtureId: v.string(),
+    datasetId: v.string(),
+    sourceType: v.union(v.literal('fixture'), v.literal('upload'), v.literal('public_url')),
+    query: v.string(),
+    metadata: v.object({
+      provider: v.string(),
+      model: v.string(),
+      rowCount: v.number(),
+      classes: v.array(v.string()),
+      columns: v.array(v.string()),
+      displayName: v.string(),
+      questionKind: v.optional(v.union(v.literal('noul'), v.literal('score'), v.literal('choice'))),
+      inputHalf: v.optional(v.literal('H1')),
+      labelHalf: v.optional(v.literal('H2')),
+    }),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  }).index('by_content_key', ['contentKey']),
   analysisRows: defineTable({
     analysisId: v.string(),
     rowIndex: v.number(),

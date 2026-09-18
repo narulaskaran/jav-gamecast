@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FOOTBALL_FIXTURE_ID } from '../fixtures/footballTimeline'
 import { SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
-import { analysisContentFingerprint, analysisContentKey } from './analysisContentKey'
+import { analysisContentFingerprint, analysisContentKey, draftContentFingerprint, draftContentKey } from './analysisContentKey'
 
 describe('analysis content key', () => {
   it('hashes datasetId, canonical query, question kind, and classes', () => {
@@ -64,5 +64,35 @@ describe('analysis content key', () => {
       classes: ['routine', 'urgent'],
     })
     expect(left).toBe(right)
+  })
+
+  it('hashes draft datasetId with normalized task text', () => {
+    const padded = draftContentKey({
+      datasetId: 'tickets',
+      task: '  Classify each ticket as urgent or routine.  ',
+    })
+    const collapsed = draftContentKey({
+      datasetId: 'tickets',
+      task: 'Classify  each   ticket as urgent or routine.',
+    })
+    const exact = draftContentKey({
+      datasetId: 'tickets',
+      task: 'Classify each ticket as urgent or routine.',
+    })
+    expect(padded).toBe(exact)
+    expect(collapsed).toBe(exact)
+    expect(exact).toMatch(/^[a-f0-9]{64}$/)
+    expect(JSON.parse(draftContentFingerprint({
+      datasetId: 'tickets',
+      task: '  Classify each ticket as urgent or routine.  ',
+    }))).toEqual({
+      v: 1,
+      datasetId: 'tickets',
+      task: 'classify each ticket as urgent or routine.',
+    })
+    expect(draftContentKey({
+      datasetId: FOOTBALL_FIXTURE_ID,
+      task: 'Classify each ticket as urgent or routine.',
+    })).not.toBe(exact)
   })
 })

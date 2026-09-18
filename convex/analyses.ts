@@ -172,33 +172,69 @@ export const getCompleteAnalysisByContentKeyInternal = internalQuery({
   },
 })
 
+const reusableStatusRank = (status: string): number => {
+  if (status === 'complete') return 0
+  if (status === 'running') return 1
+  if (status === 'queued') return 2
+  return 99
+}
+
+const findReusableDocument = async (ctx: { db: any }, contentKey: string) => {
+  if (!/^[a-f0-9]{64}$/.test(contentKey)) return null
+  const documents = await ctx.db.query('analyses').withIndex('by_content_key_status', (q: any) => q.eq('contentKey', contentKey)).take(32)
+  const reusable = documents.filter((document: { status: string }) => document.status === 'complete' || document.status === 'running' || document.status === 'queued')
+  reusable.sort((left: { status: string; updatedAt: string }, right: { status: string; updatedAt: string }) => {
+    const rank = reusableStatusRank(left.status) - reusableStatusRank(right.status)
+    if (rank !== 0) return rank
+    return left.updatedAt < right.updatedAt ? 1 : left.updatedAt > right.updatedAt ? -1 : 0
+  })
+  return reusable[0] ?? null
+}
+
+const writeSnapshot = async (ctx: { db: any }, snapshot: DurableSnapshot) => {
+  const existing = await findDocument(ctx, snapshot.analysisId)
+  const currentClaims = existing ? {
+    ...(existing.runOwnerToken === undefined ? {} : { runOwnerToken: existing.runOwnerToken }),
+    ...(existing.runLeaseExpiresAt === undefined ? {} : { runLeaseExpiresAt: existing.runLeaseExpiresAt }),
+  } : {}
+  const contentKey = typeof snapshot.contentKey === 'string' ? snapshot.contentKey : existing?.contentKey
+  const document = {
+    ...snapshotDocument({
+      ...snapshot,
+      ...(typeof contentKey === 'string' ? { contentKey } : {}),
+    }),
+    ...currentClaims,
+  }
+  if (existing) await ctx.db.replace(existing._id, document)
+  else await ctx.db.insert('analyses', document)
+
+  const currentRows = await ctx.db.query('analysisRows').withIndex('by_analysis_row', (q: any) => q.eq('analysisId', snapshot.analysisId)).take(MAX_ROWS)
+  for (const row of currentRows) await ctx.db.delete(row._id)
+  for (const row of snapshot.resultRows) {
+    const durableRow = row as { rowIndex: number; input: unknown; model: string; selectedClass?: string; probabilities?: unknown; confidence?: number; value?: number; questionKind?: 'noul' | 'score' | 'choice'; error?: { code: string; retryable: boolean } }
+    await ctx.db.insert('analysisRows', { analysisId: snapshot.analysisId, ...durableRow })
+  }
+  return publicSnapshot(document, snapshot.resultRows)
+}
+
 export const putAnalysisSnapshotInternal = internalMutation({
   args: { snapshot: v.any() },
   handler: async (ctx, { snapshot }) => {
     validateSnapshot(snapshot)
-    const existing = await findDocument(ctx, snapshot.analysisId)
-    const currentClaims = existing ? {
-      ...(existing.runOwnerToken === undefined ? {} : { runOwnerToken: existing.runOwnerToken }),
-      ...(existing.runLeaseExpiresAt === undefined ? {} : { runLeaseExpiresAt: existing.runLeaseExpiresAt }),
-    } : {}
-    const contentKey = typeof snapshot.contentKey === 'string' ? snapshot.contentKey : existing?.contentKey
-    const document = {
-      ...snapshotDocument({
-        ...snapshot,
-        ...(typeof contentKey === 'string' ? { contentKey } : {}),
-      }),
-      ...currentClaims,
-    }
-    if (existing) await ctx.db.replace(existing._id, document)
-    else await ctx.db.insert('analyses', document)
+    return await writeSnapshot(ctx, snapshot)
+  },
+})
 
-    const currentRows = await ctx.db.query('analysisRows').withIndex('by_analysis_row', (q: any) => q.eq('analysisId', snapshot.analysisId)).take(MAX_ROWS)
-    for (const row of currentRows) await ctx.db.delete(row._id)
-    for (const row of snapshot.resultRows) {
-      const durableRow = row as { rowIndex: number; input: unknown; model: string; selectedClass?: string; probabilities?: unknown; confidence?: number; value?: number; questionKind?: 'noul' | 'score' | 'choice'; error?: { code: string; retryable: boolean } }
-      await ctx.db.insert('analysisRows', { analysisId: snapshot.analysisId, ...durableRow })
+export const claimAnalysisByContentKeyInternal = internalMutation({
+  args: { snapshot: v.any() },
+  handler: async (ctx, { snapshot }) => {
+    validateSnapshot(snapshot)
+    const contentKey = typeof snapshot.contentKey === 'string' ? snapshot.contentKey : undefined
+    if (contentKey) {
+      const reusable = await findReusableDocument(ctx, contentKey)
+      if (reusable) return await readSnapshot(ctx, reusable.analysisId)
     }
-    return publicSnapshot(document, snapshot.resultRows)
+    return await writeSnapshot(ctx, snapshot)
   },
 })
 
@@ -240,6 +276,18 @@ export const authorizedGetCompleteAnalysisByContentKey = action({
   },
 })
 
+export const authorizedClaimAnalysisByContentKey = action({
+  args: { authToken: v.string(), contentKey: v.string(), snapshot: v.any() },
+  handler: async (ctx: any, { authToken, contentKey, snapshot }: { authToken: string; contentKey: string; snapshot: unknown }): Promise<unknown> => {
+    authorizeWrite(authToken)
+    if (typeof contentKey !== 'string' || !/^[a-f0-9]{64}$/.test(contentKey)) throw new Error('Invalid analysis content key')
+    validateSnapshot(snapshot)
+    return await ctx.runMutation(internal.analyses.claimAnalysisByContentKeyInternal, {
+      snapshot: { ...(snapshot as object), contentKey },
+    })
+  },
+})
+
 export const authorizedPutAnalysisSnapshot = action({
   args: { authToken: v.string(), snapshot: v.any() },
   handler: async (ctx: any, { authToken, snapshot }: { authToken: string; snapshot: unknown }): Promise<unknown> => {
@@ -262,6 +310,125 @@ export const authorizedReleaseAnalysis = action({
   handler: async (ctx: any, { authToken, ...args }: { authToken: string; analysisId: string; ownerToken: string }): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runMutation(internal.analyses.releaseAnalysisInternal, args)
+  },
+})
+
+type DurableDraft = {
+  contentKey: string
+  fixtureId: string
+  datasetId: string
+  sourceType: 'fixture' | 'upload' | 'public_url'
+  query: string
+  metadata: {
+    provider: string
+    model: string
+    rowCount: number
+    classes: string[]
+    columns: string[]
+    displayName: string
+    questionKind?: 'noul' | 'score' | 'choice'
+    inputHalf?: 'H1'
+    labelHalf?: 'H2'
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+const publicDraft = (document: DurableDraft) => ({
+  fixtureId: document.fixtureId,
+  datasetId: document.datasetId,
+  sourceType: document.sourceType,
+  query: document.query,
+  metadata: document.metadata,
+})
+
+const validateDraft: (value: unknown) => asserts value is DurableDraft = (value) => {
+  if (!isRecord(value) || typeof value.contentKey !== 'string' || !/^[a-f0-9]{64}$/.test(value.contentKey)) throw new Error('Invalid draft content key')
+  if (typeof value.fixtureId !== 'string' || value.fixtureId.length < 1 || value.fixtureId.length > MAX_ID_LENGTH) throw new Error('Invalid draft fixture')
+  if (typeof value.datasetId !== 'string' || value.datasetId.length < 1 || value.datasetId.length > MAX_ID_LENGTH) throw new Error('Invalid draft dataset')
+  if (value.sourceType !== 'fixture' && value.sourceType !== 'upload' && value.sourceType !== 'public_url') throw new Error('Invalid draft source')
+  if (typeof value.query !== 'string' || value.query.length < 1 || value.query.length > MAX_QUERY_LENGTH || value.query.includes('\u0000')) throw new Error('Invalid draft query')
+  if (typeof value.createdAt !== 'string' || Number.isNaN(Date.parse(value.createdAt)) || typeof value.updatedAt !== 'string' || Number.isNaN(Date.parse(value.updatedAt))) throw new Error('Invalid draft timestamp')
+  if (!isRecord(value.metadata)) throw new Error('Invalid draft metadata')
+  const metadata = value.metadata
+  if (typeof metadata.provider !== 'string' || !metadata.provider.trim() || metadata.provider.length > 64) throw new Error('Invalid draft provider')
+  if (typeof metadata.model !== 'string' || !metadata.model.trim() || metadata.model.length > 200) throw new Error('Invalid draft model')
+  if (typeof metadata.rowCount !== 'number' || !Number.isInteger(metadata.rowCount) || metadata.rowCount < 1 || metadata.rowCount > MAX_ROWS) throw new Error('Invalid draft row count')
+  if (typeof metadata.displayName !== 'string' || !metadata.displayName.trim() || metadata.displayName.length > 200) throw new Error('Invalid draft display name')
+  if (!Array.isArray(metadata.classes) || metadata.classes.length > 32 || metadata.classes.some((item) => typeof item !== 'string' || !item.trim() || item.length > 80)) throw new Error('Invalid draft classes')
+  if (!Array.isArray(metadata.columns) || metadata.columns.length < 1 || metadata.columns.length > 100 || metadata.columns.some((item) => typeof item !== 'string' || !item.trim() || item.length > 80)) throw new Error('Invalid draft columns')
+  if (metadata.questionKind !== undefined && metadata.questionKind !== 'noul' && metadata.questionKind !== 'score' && metadata.questionKind !== 'choice') throw new Error('Invalid draft question kind')
+  if (metadata.inputHalf !== undefined && metadata.inputHalf !== 'H1') throw new Error('Invalid draft input half')
+  if (metadata.labelHalf !== undefined && metadata.labelHalf !== 'H2') throw new Error('Invalid draft label half')
+  if (JSON.stringify(value).length > 200_000) throw new Error('Draft snapshot is too large')
+}
+
+const findDraftDocument = async (ctx: { db: any }, contentKey: string) => {
+  const documents = await ctx.db.query('analysisDrafts').withIndex('by_content_key', (q: any) => q.eq('contentKey', contentKey)).take(1)
+  return documents[0] ?? null
+}
+
+export const getDraftByContentKeyInternal = internalQuery({
+  args: { contentKey: v.string() },
+  handler: async (ctx, { contentKey }) => {
+    if (!/^[a-f0-9]{64}$/.test(contentKey)) return null
+    const document = await findDraftDocument(ctx, contentKey)
+    if (!document) return null
+    return publicDraft(document as DurableDraft)
+  },
+})
+
+export const putDraftInternal = internalMutation({
+  args: { draft: v.any() },
+  handler: async (ctx, { draft }) => {
+    validateDraft(draft)
+    const document = {
+      contentKey: draft.contentKey,
+      fixtureId: draft.fixtureId,
+      datasetId: draft.datasetId,
+      sourceType: draft.sourceType,
+      query: draft.query,
+      metadata: draft.metadata,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+    }
+    const existing = await findDraftDocument(ctx, draft.contentKey)
+    if (existing) {
+      await ctx.db.replace(existing._id, { ...document, createdAt: existing.createdAt })
+    } else {
+      await ctx.db.insert('analysisDrafts', document)
+    }
+    return publicDraft(document)
+  },
+})
+
+export const authorizedGetDraftByContentKey = action({
+  args: { authToken: v.string(), contentKey: v.string() },
+  handler: async (ctx: any, { authToken, contentKey }: { authToken: string; contentKey: string }): Promise<unknown> => {
+    authorizeWrite(authToken)
+    return await ctx.runQuery(internal.analyses.getDraftByContentKeyInternal, { contentKey })
+  },
+})
+
+export const authorizedPutDraft = action({
+  args: { authToken: v.string(), contentKey: v.string(), draft: v.any() },
+  handler: async (ctx: any, { authToken, contentKey, draft }: { authToken: string; contentKey: string; draft: unknown }): Promise<unknown> => {
+    authorizeWrite(authToken)
+    if (typeof contentKey !== 'string' || !/^[a-f0-9]{64}$/.test(contentKey)) throw new Error('Invalid draft content key')
+    if (!isRecord(draft)) throw new Error('Invalid draft snapshot')
+    const now = new Date().toISOString()
+    const snapshot = {
+      contentKey,
+      fixtureId: draft.fixtureId,
+      datasetId: draft.datasetId,
+      sourceType: draft.sourceType,
+      query: draft.query,
+      metadata: draft.metadata,
+      createdAt: typeof draft.createdAt === 'string' ? draft.createdAt : now,
+      updatedAt: now,
+    }
+    validateDraft(snapshot)
+    return await ctx.runMutation(internal.analyses.putDraftInternal, { draft: snapshot })
   },
 })
 

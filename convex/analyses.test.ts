@@ -80,4 +80,65 @@ describe('durable Convex analysis functions', () => {
     })
     await expect(t.action(api.analyses.authorizedGetCompleteAnalysisByContentKey, { authToken: 'wrong', contentKey })).rejects.toThrow(/unauthorized/i)
   })
+
+  it('claims the first analysis for a content key and joins later queued inserts', async () => {
+    const t = convexTest(schema, modules)
+    const contentKey = 'b'.repeat(64)
+    const queued = {
+      ...baseSnapshot,
+      analysisId: 'first-queued',
+      contentKey,
+      status: 'queued' as const,
+    }
+    await expect(t.action(api.analyses.authorizedClaimAnalysisByContentKey, { authToken: writeSecret, contentKey, snapshot: queued })).resolves.toMatchObject({
+      analysisId: 'first-queued',
+      status: 'queued',
+    })
+    await expect(t.action(api.analyses.authorizedClaimAnalysisByContentKey, {
+      authToken: writeSecret,
+      contentKey,
+      snapshot: { ...queued, analysisId: 'second-queued' },
+    })).resolves.toMatchObject({
+      analysisId: 'first-queued',
+      status: 'queued',
+    })
+    await expect(t.action(api.analyses.authorizedGetAnalysis, { authToken: writeSecret, analysisId: 'second-queued' })).resolves.toBeNull()
+  })
+
+  it('persists successful drafts by content key and requires write auth', async () => {
+    const t = convexTest(schema, modules)
+    const contentKey = 'c'.repeat(64)
+    const draft = {
+      fixtureId: 'football-fixture-2026',
+      datasetId: 'football-fixture-2026',
+      sourceType: 'fixture' as const,
+      query: '{"type":"noul","instructions":"Will SEA win given this play state?"}',
+      metadata: {
+        provider: 'openrouter',
+        model: 'openrouter/test',
+        rowCount: 71,
+        classes: [],
+        columns: ['play_id', 'qtr'],
+        displayName: '2026 Super Bowl Demo',
+        questionKind: 'noul' as const,
+      },
+    }
+    await expect(t.action(api.analyses.authorizedPutDraft, { authToken: 'wrong', contentKey, draft })).rejects.toThrow(/unauthorized/i)
+    await expect(t.action(api.analyses.authorizedGetDraftByContentKey, { authToken: writeSecret, contentKey })).resolves.toBeNull()
+    await expect(t.action(api.analyses.authorizedPutDraft, { authToken: writeSecret, contentKey, draft })).resolves.toMatchObject({
+      datasetId: draft.datasetId,
+      query: draft.query,
+      metadata: expect.objectContaining({ model: 'openrouter/test', questionKind: 'noul' }),
+    })
+    await expect(t.action(api.analyses.authorizedGetDraftByContentKey, { authToken: writeSecret, contentKey })).resolves.toMatchObject({
+      datasetId: draft.datasetId,
+      query: draft.query,
+    })
+    await expect(t.action(api.analyses.authorizedPutDraft, {
+      authToken: writeSecret,
+      contentKey,
+      draft: { ...draft, query: '{"type":"noul","instructions":"updated"}' },
+    })).resolves.toMatchObject({ query: '{"type":"noul","instructions":"updated"}' })
+    await expect(t.action(api.analyses.authorizedGetDraftByContentKey, { authToken: 'wrong', contentKey })).rejects.toThrow(/unauthorized/i)
+  })
 })

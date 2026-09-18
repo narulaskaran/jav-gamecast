@@ -253,6 +253,86 @@ describe('analysis domain contract', () => {
     })).rejects.toMatchObject({ code: 'INVALID_CLASSES' })
   })
 
+  it('reuses a successful draft for the same dataset and normalized task without calling the provider', async () => {
+    const draftCalls: unknown[] = []
+    const store = new InMemoryAnalysisStore()
+    const make = () => new AnalysisService({
+      store,
+      classifier: makeClassifier([]),
+      datasets: new InMemoryDatasetSource([ticketsDataset]),
+      draftProvider: {
+        async draft(input) {
+          draftCalls.push(input)
+          return {
+            query: JSON.stringify({ type: 'choice', instructions: 'Classify each ticket.', criteria: { urgent: 'urgent tickets', routine: 'routine tickets' } }),
+            model: 'openrouter/test',
+            questionKind: 'choice' as const,
+            classes: ['urgent', 'routine'],
+          }
+        },
+      },
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'draft-cache-1',
+    })
+    const task = 'Classify each ticket as urgent or routine using the message.'
+    const first = await make().draft({ datasetId: 'tickets', task })
+    const second = await make().draft({ datasetId: 'tickets', task: `  ${task}  ` })
+    const collapsed = await make().draft({ datasetId: 'tickets', task: 'Classify  each   ticket as urgent or routine using the message.' })
+    expect(draftCalls).toHaveLength(1)
+    expect(second).toEqual(first)
+    expect(collapsed).toEqual(first)
+    expect(parseJevQueryJson(second.query)).toEqual({
+      type: 'choice',
+      instructions: 'Classify each ticket.',
+      criteria: { urgent: 'urgent tickets', routine: 'routine tickets' },
+    })
+  })
+
+  it('does not cache failed drafts or INVALID_CLASSES', async () => {
+    const draftCalls: unknown[] = []
+    let shouldFail = true
+    const numbersDataset = {
+      datasetId: 'scores',
+      fixtureId: 'scores',
+      sourceType: 'upload' as const,
+      displayName: 'scores.csv',
+      columns: ['id', 'value'],
+      rows: [{ id: 1, value: 3 }, { id: 2, value: 7 }],
+    }
+    const service = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      classifier: makeClassifier([]),
+      datasets: new InMemoryDatasetSource([numbersDataset]),
+      draftProvider: {
+        async draft() {
+          draftCalls.push({})
+          if (shouldFail) {
+            return {
+              query: JSON.stringify({ type: 'choice', instructions: 'Classify the row.', criteria: { odd: 'odd numbers' } }),
+              model: 'openrouter/test',
+              questionKind: 'choice' as const,
+              classes: ['odd'],
+            }
+          }
+          return {
+            query: JSON.stringify({ type: 'choice', instructions: 'Classify the row.', criteria: { odd: 'odd', even: 'even' } }),
+            model: 'openrouter/test',
+            questionKind: 'choice' as const,
+            classes: ['odd', 'even'],
+          }
+        },
+      },
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'scores-retry',
+    })
+    const task = 'Classify each row using the visible columns.'
+    await expect(service.draft({ datasetId: 'scores', task })).rejects.toMatchObject({ code: 'INVALID_CLASSES' })
+    shouldFail = false
+    const recovered = await service.draft({ datasetId: 'scores', task })
+    expect(draftCalls).toHaveLength(2)
+    expect(recovered.metadata.classes).toEqual(['odd', 'even'])
+  })
+
   it('starts a Noul run from edited Jev query JSON', async () => {
     const jsonQuery = JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }, null, 2)
     const service = serviceWith(makeClassifier([]))
@@ -733,6 +813,93 @@ describe('analysis domain contract', () => {
     const retry = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
     expect(retry.analysisId).toBe('analysis-error-2')
     expect(retry.status).toBe('queued')
+  })
+
+  it('joins an in-flight queued run for the same content key instead of minting a duplicate', async () => {
+    const store = new InMemoryAnalysisStore()
+    const calls: unknown[] = []
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        calls.push(input)
+        return { model: 'jev-latest', questionKind: 'noul', value: 0.41 }
+      },
+    }
+    const first = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-inflight-a',
+      now: () => 1_800_000_000_000,
+    })
+    const second = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-inflight-b',
+      now: () => 1_800_000_000_000,
+    })
+    const started = await first.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
+    expect(started).toMatchObject({ analysisId: 'analysis-inflight-a', status: 'queued' })
+    const joined = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
+    expect(joined.analysisId).toBe(started.analysisId)
+    expect(joined.status).toBe('queued')
+    expect(store.get('analysis-inflight-b')).toBeUndefined()
+    expect(calls).toHaveLength(0)
+    const completed = await first.run(started.analysisId)
+    expect(completed.status).toBe('complete')
+    expect(calls).toHaveLength(71)
+    await expect(second.run(joined.analysisId)).resolves.toMatchObject({ analysisId: started.analysisId, status: 'complete' })
+    expect(calls).toHaveLength(71)
+  })
+
+  it('coalesces concurrent starts for the same content key onto one analysisId', async () => {
+    const calls: unknown[] = []
+    let nextId = 0
+    const service = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      classifier: {
+        async classify(input) {
+          calls.push(input)
+          return { model: 'jev-latest', questionKind: 'noul', value: 0.41 }
+        },
+      },
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => `analysis-race-${++nextId}`,
+      now: () => 1_800_000_000_000,
+    })
+    const [left, right] = await Promise.all([
+      service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' }),
+      service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' }),
+    ])
+    expect(left.analysisId).toBe(right.analysisId)
+    expect(left.status).toBe('queued')
+    const completed = await service.run(left.analysisId)
+    expect(completed.status).toBe('complete')
+    expect(completed.analysisId).toBe(left.analysisId)
+    expect(calls).toHaveLength(71)
+  })
+
+  it('mints a new analysis with forceNew even when a queued snapshot already exists', async () => {
+    const store = new InMemoryAnalysisStore()
+    const first = new AnalysisService({
+      store,
+      classifier: makeClassifier([]),
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-force-a',
+      now: () => 1_800_000_000_000,
+    })
+    const second = new AnalysisService({
+      store,
+      classifier: makeClassifier([]),
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-force-b',
+      now: () => 1_800_000_000_000,
+    })
+    const started = await first.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
+    const forced = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul', forceNew: true })
+    expect(started.analysisId).toBe('analysis-force-a')
+    expect(forced).toMatchObject({ analysisId: 'analysis-force-b', status: 'queued' })
+    expect(forced.analysisId).not.toBe(started.analysisId)
   })
 
   it('resumes a non-retryable mid-run Jev failure from the last good row when asked', async () => {
