@@ -28,3 +28,12 @@ export const previewWindow = ({
   overscan: PREVIEW_OVERSCAN,
   virtualizeAfter: previewVirtualizeAfter(rowCount, columnCount),
 })
+
+export const shouldDeferPreviewRows = (
+  sourceType: string,
+  rowCount: number,
+  columnCount: number,
+): boolean => (
+  sourceType !== 'fixture'
+  && previewWindow({ rowCount, columnCount, scrollOffset: 0 }).virtualized
+)

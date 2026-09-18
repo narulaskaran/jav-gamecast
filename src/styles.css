@@ -872,6 +872,32 @@ h3 {
   line-height: 0;
 }
 
+.dataset-preview .preview-loading {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-height: 160px;
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.dataset-preview .preview-loading p {
+  margin: 0;
+}
+
+.dataset-preview .preview-skeleton {
+  display: grid;
+  gap: 8px;
+}
+
+.dataset-preview .preview-skeleton span {
+  display: block;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--muted);
+}
+
 .dataset-preview table {
   width: max-content;
   min-width: 100%;

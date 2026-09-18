@@ -154,6 +154,7 @@ describe('Jev playground flow', () => {
     expect(within(previewTable).getAllByRole('columnheader').length).toBe(26)
     expect(within(previewTable).getAllByRole('row')).toHaveLength(72)
     expect(screen.queryByText(/showing first/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/loading rows/i)).not.toBeInTheDocument()
     expect(api.draft).not.toHaveBeenCalled()
     expect(api.start).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/^Analysis task$/i), { target: { value: 'Find a first-half signal.' } })

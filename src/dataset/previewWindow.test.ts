@@ -4,6 +4,7 @@ import {
   PREVIEW_VIRTUALIZE_AFTER_ROWS,
   previewVirtualizeAfter,
   previewWindow,
+  shouldDeferPreviewRows,
 } from './previewWindow'
 
 describe('dataset preview window', () => {
@@ -27,5 +28,13 @@ describe('dataset preview window', () => {
     expect(window.start).toBeGreaterThan(0)
     expect(window.padStart + window.padEnd).toBeGreaterThan(0)
     expect(window.end).toBeLessThanOrEqual(3_023)
+  })
+
+  it('defers only large BYOD tables, never the sample fixture', () => {
+    expect(shouldDeferPreviewRows('fixture', 71, 26)).toBe(false)
+    expect(shouldDeferPreviewRows('fixture', 3_023, 40)).toBe(false)
+    expect(shouldDeferPreviewRows('upload', 71, 7)).toBe(false)
+    expect(shouldDeferPreviewRows('public_url', 200, 40)).toBe(true)
+    expect(shouldDeferPreviewRows('upload', 3_023, 40)).toBe(true)
   })
 })

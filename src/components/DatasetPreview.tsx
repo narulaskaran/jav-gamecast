@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DatasetPreview } from '../shared/dataset'
-import { PREVIEW_VIEWPORT_SIZE, previewWindow } from '../dataset/previewWindow'
+import { PREVIEW_VIEWPORT_SIZE, previewWindow, shouldDeferPreviewRows } from '../dataset/previewWindow'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from './ui/card'
@@ -22,8 +22,21 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(PREVIEW_VIEWPORT_SIZE)
+  const deferRows = shouldDeferPreviewRows(dataset.sourceType, rows.length, columns.length)
+  const [rowsReady, setRowsReady] = useState(!deferRows)
 
   useEffect(() => {
+    if (!deferRows) {
+      setRowsReady(true)
+      return undefined
+    }
+    setRowsReady(false)
+    const frame = window.requestAnimationFrame(() => setRowsReady(true))
+    return () => window.cancelAnimationFrame(frame)
+  }, [dataset.datasetId, deferRows])
+
+  useEffect(() => {
+    if (!rowsReady) return undefined
     const node = scrollRef.current
     if (!node) return undefined
     const measure = () => setViewportHeight(node.clientHeight || PREVIEW_VIEWPORT_SIZE)
@@ -31,9 +44,9 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure)
     observer?.observe(node)
     return () => observer?.disconnect()
-  }, [rows.length, columns.length])
+  }, [rowsReady, rows.length, columns.length])
 
-  const window = useMemo(
+  const windowed = useMemo(
     () => previewWindow({
       rowCount: rows.length,
       columnCount: columns.length,
@@ -42,7 +55,8 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
     }),
     [columns.length, rows.length, scrollTop, viewportHeight],
   )
-  const visible = window.virtualized ? rows.slice(window.start, window.end) : rows
+  const showTable = !deferRows || rowsReady
+  const visible = showTable && windowed.virtualized ? rows.slice(windowed.start, windowed.end) : rows
 
   return (
     <Card className="dataset-preview" aria-labelledby="dataset-heading">
@@ -57,51 +71,62 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
         {columns.length > 0 ? (
           <p className="preview-meta">{columns.length} columns</p>
         ) : null}
-        <div
-          ref={scrollRef}
-          className={`table-scroll preview-table${window.virtualized ? ' is-virtualized' : ''}`}
-          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-        >
-          <table aria-label="Dataset preview" aria-rowcount={1 + rows.length}>
-            <thead>
-              <tr>
-                {columns.map((column, index) => (
-                  <th key={column.name} className={index === 0 ? 'is-sticky' : undefined}>{column.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {window.virtualized && window.padStart > 0 ? (
-                <tr aria-hidden="true">
-                  <td
-                    className="preview-spacer"
-                    colSpan={Math.max(1, columns.length)}
-                    style={{ height: window.padStart }}
-                  />
+        {showTable ? (
+          <div
+            ref={scrollRef}
+            className={`table-scroll preview-table${windowed.virtualized ? ' is-virtualized' : ''}`}
+            onScroll={windowed.virtualized ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined}
+          >
+            <table aria-label="Dataset preview" aria-rowcount={1 + rows.length}>
+              <thead>
+                <tr>
+                  {columns.map((column, index) => (
+                    <th key={column.name} className={index === 0 ? 'is-sticky' : undefined}>{column.name}</th>
+                  ))}
                 </tr>
-              ) : null}
-              {visible.map((row, offset) => {
-                const rowIndex = window.virtualized ? window.start + offset : offset
-                return (
-                  <tr key={rowIndex} aria-rowindex={rowIndex + 2}>
-                    {columns.map((column, index) => (
-                      <td key={column.name} className={index === 0 ? 'is-sticky' : undefined}>{previewValue(row[column.name])}</td>
-                    ))}
+              </thead>
+              <tbody>
+                {windowed.virtualized && windowed.padStart > 0 ? (
+                  <tr aria-hidden="true">
+                    <td
+                      className="preview-spacer"
+                      colSpan={Math.max(1, columns.length)}
+                      style={{ height: windowed.padStart }}
+                    />
                   </tr>
-                )
-              })}
-              {window.virtualized && window.padEnd > 0 ? (
-                <tr aria-hidden="true">
-                  <td
-                    className="preview-spacer"
-                    colSpan={Math.max(1, columns.length)}
-                    style={{ height: window.padEnd }}
-                  />
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+                ) : null}
+                {visible.map((row, offset) => {
+                  const rowIndex = windowed.virtualized ? windowed.start + offset : offset
+                  return (
+                    <tr key={rowIndex} aria-rowindex={rowIndex + 2}>
+                      {columns.map((column, index) => (
+                        <td key={column.name} className={index === 0 ? 'is-sticky' : undefined}>{previewValue(row[column.name])}</td>
+                      ))}
+                    </tr>
+                  )
+                })}
+                {windowed.virtualized && windowed.padEnd > 0 ? (
+                  <tr aria-hidden="true">
+                    <td
+                      className="preview-spacer"
+                      colSpan={Math.max(1, columns.length)}
+                      style={{ height: windowed.padEnd }}
+                    />
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="preview-loading" role="status">
+            <p>Loading rows…</p>
+            <div className="preview-skeleton" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        )}
       </CardContent>
       {onChange && (
         <CardFooter className="preview-actions">
