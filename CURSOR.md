@@ -16,7 +16,8 @@ Audience: engineers playing with Jev. This is a technical demo / playground, not
 
 ## Current slice
 
-- Landing: two equal cards — Try sample (Seahawks fixture stays) and Bring your own (CSV upload + public HTTPS CSV URL). Same draft → edit query → run flow. Sample default task is win likelihood per play (Jev Noul, live P(win) line). Choice classifiers keep class-distribution bars. Football is the sample, not the product.
+- Landing: two equal cards — Try sample (Seahawks fixture stays) and Bring your own (CSV upload + public HTTPS CSV URL). Same draft → run flow for every source (the query is editable; Run Jev unlocks when it is non-empty). Sample default task is win likelihood per play (Jev Noul, live P(win) line). Choice classifiers keep class-distribution bars. Football is the sample, not the product.
+- UI: Tailwind CSS + shadcn-style primitives (zinc neutrals; indigo only for Run Jev and the live chart accent). Engineer-tool layout, not a marketing landing.
 - Live chart is the run-view hero: Noul/Score draw a scrubbable P(win) (or score) series over play index; Choice draws class bars. Paired with a `Row X of Y` rail rather than a CSV inspector. Never plot CSV `wpa` as if Jev produced it.
 - Server routes under `api/analysis/*`, `api/datasets/*`, `api/share/*`, and `api/browse`. Drafting uses OpenRouter; only run may call Jev.
 - UploadThing stores original CSV blobs; Convex stores dataset metadata, immutable row refs, run progress, and incremental predictions.

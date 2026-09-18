@@ -1,5 +1,9 @@
 import { PUBLIC_DATA_WARNING, plainDatasetError } from '../dataset/csvTypes'
 import type { DatasetIntakeStatus } from '../shared/dataset'
+import { Button } from './ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
+import { Input } from './ui/input'
+import { Label } from './ui/label'
 
 export const DatasetIntake = ({
   status,
@@ -23,47 +27,61 @@ export const DatasetIntake = ({
       <h2 id="intake-heading" className="visually-hidden">Choose a dataset</h2>
       <p className="intake-disclosure">{PUBLIC_DATA_WARNING}</p>
       <div className="intake-cards">
-        <article className="intake-card">
-          <p className="eyebrow">Try sample</p>
-          <h3>Super Bowl Seahawks demo</h3>
-          <p>A thin on-ramp that shows the live row chart. Football is the sample, not the product.</p>
-          <button className="primary-button" type="button" onClick={onTrySample} disabled={disabled}>Try sample</button>
-        </article>
-        <article className={`intake-card ${disabled || byodBlocked ? 'is-disabled' : ''}`}>
-          <p className="eyebrow">Bring your own</p>
-          <h3>Upload .csv or public HTTPS CSV URL</h3>
-          <p>Same run UX as the sample. The chart updates as each row is classified.</p>
-          <label className="byod-file">
-            Upload .csv
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              aria-label="Upload CSV"
-              disabled={disabled || byodBlocked}
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                event.target.value = ''
-                if (file) onUploadFile(file)
+        <Card className="intake-card">
+          <CardHeader>
+            <p className="eyebrow">Try sample</p>
+            <CardTitle>Super Bowl Seahawks demo</CardTitle>
+            <CardDescription>A thin on-ramp that shows the live row chart. Football is the sample, not the product.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button type="button" onClick={onTrySample} disabled={disabled}>Try sample</Button>
+          </CardContent>
+        </Card>
+        <Card className={`intake-card ${disabled || byodBlocked ? 'is-disabled' : ''}`}>
+          <CardHeader>
+            <p className="eyebrow">Bring your own</p>
+            <CardTitle>Upload .csv or public HTTPS CSV URL</CardTitle>
+            <CardDescription>Same run UX as the sample. The chart updates as each row is classified.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="byod-file">
+              <Label htmlFor="csv-file">Upload .csv</Label>
+              <Input
+                id="csv-file"
+                type="file"
+                accept=".csv,text/csv"
+                aria-label="Upload CSV"
+                disabled={disabled || byodBlocked}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ''
+                  if (file) onUploadFile(file)
+                }}
+              />
+            </div>
+            <form
+              className="byod-url"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const form = event.currentTarget
+                const url = String(new FormData(form).get('csv-url') ?? '')
+                onSubmitUrl(url)
               }}
-            />
-          </label>
-          <form
-            className="byod-url"
-            onSubmit={(event) => {
-              event.preventDefault()
-              const form = event.currentTarget
-              const url = String(new FormData(form).get('csv-url') ?? '')
-              onSubmitUrl(url)
-            }}
-          >
-            <label htmlFor="csv-url">Public HTTPS CSV URL</label>
-            <input id="csv-url" name="csv-url" type="url" placeholder="https://example.com/data.csv" disabled={disabled || byodBlocked} />
-            <button className="secondary-button" type="submit" disabled={disabled || byodBlocked}>Use public CSV URL</button>
-          </form>
-        </article>
+            >
+              <Label htmlFor="csv-url">Public HTTPS CSV URL</Label>
+              <Input id="csv-url" name="csv-url" type="url" placeholder="https://example.com/data.csv" disabled={disabled || byodBlocked} />
+              <Button variant="secondary" type="submit" disabled={disabled || byodBlocked}>Use public CSV URL</Button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
       {missing && <p className="intake-missing" role="status">{missing} Sample still works; upload and public URL stay fail-closed.</p>}
-      {intakeError && <div className="error-banner" role="alert"><b>Dataset needs attention</b><span>{plainDatasetError(intakeError, intakeError)}</span></div>}
+      {intakeError && (
+        <div className="error-banner" role="alert">
+          <b>Dataset needs attention</b>
+          <span>{plainDatasetError(intakeError, intakeError)}</span>
+        </div>
+      )}
     </section>
   )
 }

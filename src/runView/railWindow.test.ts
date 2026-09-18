@@ -12,7 +12,7 @@ describe('processed-row rail window', () => {
       count: 400,
       scrollOffset: 0,
       viewportSize: 320,
-      itemSize: 40,
+      itemSize: 44,
       includeIndex: 250,
     })
     expect(window.virtualized).toBe(true)

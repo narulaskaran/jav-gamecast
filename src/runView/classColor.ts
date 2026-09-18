@@ -1,4 +1,4 @@
-const PALETTE = ['#3f8f76', '#d9654c', '#3d6e8a', '#c49a3c', '#6b5b95', '#5d8a4a', '#b85c38', '#4a7c8c'] as const
+const PALETTE = ['#4f46e5', '#0f766e', '#334155', '#6366f1', '#115e59', '#475569', '#4338ca', '#0e7490'] as const
 
 export const classColor = (name: string, classes: readonly string[] = []): string => {
   const known = classes.indexOf(name)

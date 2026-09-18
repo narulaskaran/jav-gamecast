@@ -1,5 +1,11 @@
+/// <reference types="vitest/config" />
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+
+const root = fileURLToPath(new URL('.', import.meta.url))
 
 const SERVER_ONLY_MARKERS = ['@typesafe-ai/sdk', 'JEV_API_KEY', 'OPENROUTER_KEY', 'UPLOADTHING_TOKEN', 'UPLOADTHING_SECRET', 'https://api.typesafe.ai', 'https://openrouter.ai', 'convex/browser', 'CONVEX_URL'] as const
 
@@ -18,5 +24,15 @@ const browserServerBoundaryGuard = (): Plugin => ({
 })
 
 export default defineConfig({
-  plugins: [react(), browserServerBoundaryGuard()],
+  plugins: [react(), tailwindcss(), browserServerBoundaryGuard()],
+  resolve: {
+    alias: {
+      '@': path.resolve(root, 'src'),
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.ts',
+    css: false,
+  },
 })
