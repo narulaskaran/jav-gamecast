@@ -11,7 +11,7 @@ The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1`; it has 39 
 - `TOKEN_MISSING_APP_REGION` — token is present (`uploadThing: true`) but is a raw `sk_…` without dashboard `appId`/`regions`
 - `INGEST_HTTP` — UploadThing ingest rejected the signed PUT
 - `INGEST_RUNTIME` — upload threw before a shaped DatasetError (sqids/HMAC/Blob/fetch)
-- `CONVEX_PUT_FAILED` — UploadThing ingest succeeded, then Convex `datasets.put` failed (undefined payload fields, write-secret mismatch, missing function, or mutation error). Includes a secret-free `message` reason. Never forwards the Convex dump (it can contain `authToken`).
+- `CONVEX_PUT_FAILED` — UploadThing ingest succeeded, then Convex `datasets.put` failed. Includes a secret-free `message`. A Convex HTTP `[Request ID] Server Error` (no Uncaught Error) means production did not run `npx convex deploy` with `CONVEX_DEPLOY_KEY`. Never forwards the Convex dump (it can contain `authToken`).
 - `UNCAUGHT` — handler catch-all; also logs `[datasets] intake failed` to Vercel runtime logs
 
 Do not treat HTTP 500 `{ "error": "DATASET_UNAVAILABLE" }` as “not configured”. That used to mean an unlogged throw; it should now include `failure`.
@@ -119,8 +119,10 @@ This reconstructs the same bounded, deterministic snapshot from the storage inte
 
 The production runtime requires a valid `CONVEX_URL` (or Convex Vite alias `VITE_CONVEX_URL`) and `CONVEX_WRITE_SECRET` before constructing the Convex adapter. Set the same `CONVEX_WRITE_SECRET` on the Convex deployment and the Vercel server runtime. BYOD CSV intake additionally requires `UPLOADTHING_TOKEN` (or `UPLOADTHING_SECRET`). Prefer the UploadThing dashboard **V7** token (base64 JSON with `apiKey`, `appId`, and `regions`). A standalone `sk_…` secret reports configured but cannot sign ingest URLs. If those are absent, API reads/writes and upload/URL intake fail closed rather than silently using process-local storage or faking a run. The sample fixture on-ramp does not need UploadThing. Provisioning is an operator step.
 
-`ConvexDatasetStore.put` sends only schema fields (no `publicDataWarning`, no `undefined` optional keys). The Convex action `datasets:authorizedPutDataset` authorizes with `CONVEX_WRITE_SECRET`, upserts metadata, then writes row documents in batches of 200. After a Convex functions deploy, a 5,000-row CSV no longer has to fit in one mutation or one 1.5 MB JSON check of every row.
+`ConvexDatasetStore.put` sends only schema fields (no `publicDataWarning`, no `undefined` optional keys). The Convex action `datasets:authorizedPutDataset` authorizes with `CONVEX_WRITE_SECRET`, upserts metadata, then writes row documents in batches of 200.
+
+Vercel Production build command is `node scripts/vercel-build.mjs` (`vercel.json`). That runs `npx convex deploy --cmd 'npm run build'` when `VERCEL_ENV=production` and `CONVEX_DEPLOY_KEY` is set, then copies `CONVEX_WRITE_SECRET` onto the Convex deployment. A frontend-only `npm run build` does not update Convex; `POST /api/datasets/from-url` then fails with `CONVEX_PUT_FAILED` / Convex HTTP `Server Error`. Preview builds skip Convex deploy so they cannot push to prod.
 
 ## Server boundary
 
-`OPENROUTER_KEY`, `JEV_API_KEY`, `CONVEX_WRITE_SECRET`, and `UPLOADTHING_TOKEN` are read only in `src/server`. The browser does not import provider adapters, the TypeSafe SDK, UploadThing, or runtime configuration. The Vite build guard scans browser chunks for credential markers and provider endpoints.
+`OPENROUTER_KEY`, `JEV_API_KEY`, `CONVEX_WRITE_SECRET`, `CONVEX_DEPLOY_KEY`, and `UPLOADTHING_TOKEN` are read only in `src/server` or the production Vercel build. The browser does not import provider adapters, the TypeSafe SDK, UploadThing, or runtime configuration. The Vite build guard scans browser chunks for credential markers and provider endpoints.

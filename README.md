@@ -61,7 +61,8 @@ Durable analysis, share, and dataset storage needs Convex. Production fails clos
 
 ```bash
 npx convex dev
-npx convex deploy
+npx convex deploy --cmd 'npm run build'
+printf '%s' "$CONVEX_WRITE_SECRET" | npx convex env set CONVEX_WRITE_SECRET
 ```
 
 Set these server-side. Never put secrets in a `VITE_*` variable:
@@ -69,6 +70,7 @@ Set these server-side. Never put secrets in a `VITE_*` variable:
 ```text
 CONVEX_URL=https://<deployment>.convex.cloud
 CONVEX_WRITE_SECRET=<operator-provisioned-secret>
+CONVEX_DEPLOY_KEY=<Convex production deploy key, Vercel Production only>
 OPENROUTER_KEY=<operator-provisioned-secret>
 JEV_API_KEY=<operator-provisioned-secret>
 UPLOADTHING_TOKEN=<UploadThing dashboard API Keys → V7 token>
@@ -76,12 +78,16 @@ UPLOADTHING_TOKEN=<UploadThing dashboard API Keys → V7 token>
 
 `VITE_CONVEX_URL` is accepted as an alias for `CONVEX_URL`. Keep the same Convex write secret in Convex and the server runtime. Import the repo into Vercel as a Vite project (Node 20+).
 
+Vercel Production uses `vercel.json` `buildCommand` `node scripts/vercel-build.mjs`. On `VERCEL_ENV=production` it requires `CONVEX_DEPLOY_KEY` and `CONVEX_WRITE_SECRET`, runs `npx convex deploy --cmd 'npm run build'`, then `npx convex env set CONVEX_WRITE_SECRET`. Preview and local Vercel builds skip Convex deploy so they cannot push to prod. A frontend-only `npm run build` leaves Convex on stale functions; BYOD then fails with Convex HTTP `[Request ID] Server Error`.
+
+Generate the deploy key in Convex dashboard → this production deployment → Settings → Generate Production Deploy Key (enable `deployment:deploy`). Attach it to Vercel **Production only**.
+
 BYOD CSV upload and public URL intake also need `UPLOADTHING_TOKEN`: the dashboard **API Keys → V7** token (base64 JSON `{ apiKey, appId, regions }`). A raw `sk_…` key is not enough to upload. The sample on-ramp does not need UploadThing. Caps and fail-closed codes are in `docs/analysis-api.md`.
 
 Historical Gamecast ESPN and cron code still exists under `historical/`. Those routes are not shipped as Vercel functions.
 
 ## Safety
 
-- Server-only modules own OpenRouter, the TypeSafe/Jev SDK, UploadThing, `JEV_API_KEY`, `OPENROUTER_KEY`, `UPLOADTHING_TOKEN`, and the Convex HTTP client.
+- Server-only modules own OpenRouter, the TypeSafe/Jev SDK, UploadThing, `JEV_API_KEY`, `OPENROUTER_KEY`, `UPLOADTHING_TOKEN`, `CONVEX_WRITE_SECRET`, `CONVEX_DEPLOY_KEY`, and the Convex HTTP client.
 - The Vite build fails if those markers enter a browser chunk.
 - Missing keys, invalid Convex URLs, and durable-read or intake failures fail closed. They do not silently become live success.

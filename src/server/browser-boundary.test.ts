@@ -31,5 +31,6 @@ describe('browser/server boundary', () => {
     expect(browserSource).not.toContain('openrouter.ai')
     expect(browserSource).not.toContain('uploadthing/server')
     expect(browserSource).not.toContain('CONVEX_WRITE_SECRET')
+    expect(browserSource).not.toContain('CONVEX_DEPLOY_KEY')
   })
 })
