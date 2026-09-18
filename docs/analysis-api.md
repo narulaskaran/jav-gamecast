@@ -117,9 +117,7 @@ A bounded snapshot has this shape:
 
 ## Public share read
 
-`GET /api/share/<analysisId>`
-
-This reconstructs the same bounded, deterministic snapshot from the storage interface. It performs no OpenRouter or Jev provider call and supports no write method.
+`GET /api/share/<analysisId>` reconstructs the same bounded, deterministic snapshot from the storage interface. It performs no OpenRouter or Jev provider call and supports no write method. Completed runs can also download a formula-escaped results CSV in the browser (`row_id,probability` or class columns). That export does not call Jev or hit this route.
 
 ## Storage boundary
 
