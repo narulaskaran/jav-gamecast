@@ -41,19 +41,14 @@ export interface AnalysisApiClient {
 const apiError = async (response: Response): Promise<Error> => {
   if (response.ok) return new Error('')
   let code = 'REQUEST_FAILED'
-  let message: string | undefined
-  let failure: string | undefined
+  let failure: DatasetError['failure']
   try {
-    const body = await response.json() as { error?: unknown; message?: unknown; failure?: unknown }
+    const body = await response.json() as { error?: unknown; failure?: unknown }
     if (typeof body.error === 'string' && /^[A-Z0-9_]+$/.test(body.error)) code = body.error
-    if (typeof body.message === 'string') {
-      const trimmed = body.message.trim()
-      if (trimmed && trimmed.length <= 240 && !/\bsk_|bearer\s/i.test(trimmed)) message = trimmed
-    }
-    if (typeof body.failure === 'string' && /^[A-Z0-9_]+$/.test(body.failure)) failure = body.failure
+    if (typeof body.failure === 'string' && /^[A-Z0-9_]+$/.test(body.failure)) failure = body.failure as DatasetError['failure']
   } catch { /* Keep a stable client-side error when the body is not JSON. */ }
-  if (message && code in DATASET_ERROR_COPY) {
-    return new DatasetError(code as DatasetError['code'], failure ? `${message} (${failure})` : message, response.status)
+  if (code in DATASET_ERROR_COPY) {
+    return new DatasetError(code as DatasetError['code'], DATASET_ERROR_COPY[code], response.status, failure)
   }
   return new Error(code)
 }
@@ -269,7 +264,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     try {
       const csvText = await readCsvText(file)
       validateCsvText(csvText)
-      if (!api.createFromCsv) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', 'CSV storage is not configured on this deployment.', 503)
+      if (!api.createFromCsv) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', DATASET_ERROR_COPY.UPLOADTHING_NOT_CONFIGURED, 503)
       const preview = await api.createFromCsv({ csvText, filename: file.name })
       resetRunState()
       setDataset(preview)
@@ -282,7 +277,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const handleUrl = async (url: string) => {
     setIntakeBusy(true); setError(undefined)
     try {
-      if (!api.createFromUrl) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', 'CSV storage is not configured on this deployment.', 503)
+      if (!api.createFromUrl) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', DATASET_ERROR_COPY.UPLOADTHING_NOT_CONFIGURED, 503)
       const preview = await api.createFromUrl({ url })
       resetRunState()
       setDataset(preview)

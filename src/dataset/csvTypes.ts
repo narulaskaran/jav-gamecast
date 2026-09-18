@@ -88,13 +88,13 @@ export const DATASET_ERROR_COPY: Record<string, string> = {
   CSV_INVALID_HEADER: 'The CSV header is missing, duplicated, or invalid.',
   URL_NOT_PUBLIC: 'The URL is not a public HTTPS CSV link.',
   URL_UNSAFE: 'The URL is not a public HTTPS CSV link.',
-  UPLOADTHING_NOT_CONFIGURED: 'CSV storage is not configured on this deployment.',
-  UPLOADTHING_FAILED: 'CSV storage is configured, but UploadThing rejected the upload. Check the API token on this deployment.',
-  DATASET_UNAVAILABLE: 'CSV intake failed on this deployment.',
-  ANALYSIS_STORAGE_NOT_CONFIGURED: 'Durable storage is not configured on this deployment.',
+  UPLOADTHING_NOT_CONFIGURED: 'Could not upload this CSV.',
+  UPLOADTHING_FAILED: 'Could not upload this CSV.',
+  DATASET_UNAVAILABLE: 'Could not use this CSV.',
+  ANALYSIS_STORAGE_NOT_CONFIGURED: 'Could not use this CSV.',
   DATASET_NOT_FOUND: 'That dataset was not found.',
   INVALID_DATASET: 'Choose a sample dataset, upload a CSV, or paste a public CSV URL.',
-  DATASET_INTAKE_UNAVAILABLE: 'CSV intake is unavailable on this deployment.',
+  DATASET_INTAKE_UNAVAILABLE: 'Could not use this CSV.',
 }
 
 export const plainDatasetError = (code: string, fallback = 'Could not use this dataset'): string => {

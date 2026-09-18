@@ -39,7 +39,7 @@ import {
   stringifyJevQuery,
 } from '../shared/jevQuery.js'
 import { asAnalysisRow } from '../shared/dataset.js'
-import { SAMPLE_DATASET_NAME } from '../dataset/sampleDataset.js'
+import { SAMPLE_DATASET_NAME } from '../shared/sampleDatasetName.js'
 import {
   FOOTBALL_FIXTURE_ID,
   footballFixture,

@@ -8,11 +8,12 @@ import {
 import { CSV_PREVIEW_ROWS } from './csvTypes'
 import { asAnalysisRow, type DatasetPreview } from '../shared/dataset'
 import { inferSampleColumns } from './sampleColumns'
+import { SAMPLE_DATASET_NAME } from '../shared/sampleDatasetName'
 
 const rows = getWinLikelihoodModelInput().map((row) => asAnalysisRow(row))
 
 export const SAMPLE_DATASET_ID = FOOTBALL_FIXTURE_ID
-export const SAMPLE_DATASET_NAME = '2026 Super Bowl Demo'
+export { SAMPLE_DATASET_NAME }
 
 export const getSampleDatasetPreview = (): DatasetPreview => ({
   datasetId: SAMPLE_DATASET_ID,

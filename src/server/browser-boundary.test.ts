@@ -33,4 +33,14 @@ describe('browser/server boundary', () => {
     expect(browserSource).not.toContain('CONVEX_WRITE_SECRET')
     expect(browserSource).not.toContain('CONVEX_DEPLOY_KEY')
   })
+
+  it('does not import the sample preview module from serverless analysis code', () => {
+    const analysis = readFileSync('src/server/analysis.ts', 'utf8')
+    const store = readFileSync('src/server/analysisStore.ts', 'utf8')
+    const runtime = readFileSync('src/server/analysisRuntime.ts', 'utf8')
+    for (const source of [analysis, store, runtime]) {
+      expect(source).not.toMatch(/dataset\/sampleDataset/)
+    }
+    expect(analysis).toMatch(/shared\/sampleDatasetName/)
+  })
 })

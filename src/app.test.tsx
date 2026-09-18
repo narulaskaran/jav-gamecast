@@ -476,15 +476,34 @@ describe('Jev playground flow', () => {
     expect(document.querySelector('[data-class="gold"]')).toHaveAttribute('data-count', '1')
   })
 
-  it('fails closed on upload when CSV storage is not configured and does not fake a run', async () => {
+  it('keeps idle intake quiet when durable storage is down, and still lets sample start', async () => {
     const api = makeApi({
-      intakeStatus: vi.fn(async (): Promise<DatasetIntakeStatus> => ({ convex: true, uploadThing: false, sampleAvailable: true })),
+      intakeStatus: vi.fn(async (): Promise<DatasetIntakeStatus> => ({ convex: false, uploadThing: false, sampleAvailable: true })),
       createFromCsv: vi.fn(async () => { throw new Error('UPLOADTHING_NOT_CONFIGURED') }),
     })
     render(<App api={api} />)
-    await waitFor(() => expect(screen.getByText(/csv storage is not configured/i)).toBeInTheDocument())
-    expect(screen.getByLabelText(/upload csv/i)).toBeDisabled()
+    await waitFor(() => expect(screen.getByLabelText(/upload csv/i)).toBeDisabled())
+    expect(screen.queryByText(/not configured on this deployment/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/durable storage/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/uploadthing/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/sample still works/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^try sample$/i })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
+    expect(api.start).not.toHaveBeenCalled()
+  })
+
+  it('shows a short BYOD error without durable-storage jargon', async () => {
+    const api = makeApi({
+      createFromCsv: vi.fn(async () => { throw new Error('UPLOADTHING_NOT_CONFIGURED') }),
+    })
+    render(<App api={api} />)
+    const file = new File(['message,tier\nhello,gold\n'], 'tickets.csv', { type: 'text/csv' })
+    fireEvent.change(screen.getByLabelText(/upload csv/i), { target: { files: [file] } })
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not upload this csv/i)
+    expect(screen.getByText(/couldn't use this csv/i)).toBeInTheDocument()
+    expect(screen.queryByText(/not configured on this deployment/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/durable storage/i)).not.toBeInTheDocument()
     expect(api.start).not.toHaveBeenCalled()
   })
 

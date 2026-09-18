@@ -1,10 +1,12 @@
-import { SAMPLE_DATASET_NAME } from '../dataset/sampleDataset'
+import { SAMPLE_DATASET_NAME } from '../shared/sampleDatasetName'
 import { plainDatasetError } from '../dataset/csvTypes'
 import type { DatasetIntakeStatus } from '../shared/dataset'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+
+const BYOD_ERROR_HEADING = "Couldn't use this CSV"
 
 export const DatasetIntake = ({
   status,
@@ -22,7 +24,6 @@ export const DatasetIntake = ({
   disabled?: boolean
 }) => {
   const byodBlocked = status?.convex === false || status?.uploadThing === false
-  const missing = status?.convex === false ? 'Durable storage is not configured on this deployment.' : status?.uploadThing === false ? 'CSV storage is not configured on this deployment.' : undefined
   return (
     <section className="intake-panel" aria-labelledby="intake-heading">
       <h2 id="intake-heading">Choose a dataset</h2>
@@ -73,10 +74,9 @@ export const DatasetIntake = ({
           </CardContent>
         </Card>
       </div>
-      {missing && <p className="intake-missing" role="status">{missing} Sample still works.</p>}
       {intakeError && (
         <div className="error-banner" role="alert">
-          <b>Dataset needs attention</b>
+          <b>{BYOD_ERROR_HEADING}</b>
           <span>{plainDatasetError(intakeError, intakeError)}</span>
         </div>
       )}
