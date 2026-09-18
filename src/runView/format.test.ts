@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { railMetaLine, runErrorCopy, runErrorHint, runSubsetCopy, runViewHeading, chartHeading, plainAnalysisError, savedRunCopy, resumeRunLabel } from './format'
+import { railMetaLine, runErrorCopy, runErrorHint, runProgressCount, runProgressPercent, runSubsetCopy, runViewHeading, chartHeading, plainAnalysisError, savedRunCopy, resumeRunLabel } from './format'
 
 describe('rail meta line', () => {
   it('keeps one compact play_id · qtr · class-or-percent line', () => {
@@ -34,6 +34,14 @@ describe('run view copy', () => {
     expect(chartHeading('noul')).toBe('Win probability')
     expect(chartHeading('score')).toBe('Score')
     expect(chartHeading('choice')).toBe('Class distribution')
+  })
+
+  it('surfaces completedRows/totalRows as a header percent without count-up', () => {
+    expect(runProgressPercent(12, 39, 'running')).toBe(31)
+    expect(runProgressPercent(0, 39, 'queued')).toBe(0)
+    expect(runProgressPercent(38, 39, 'complete')).toBe(100)
+    expect(runProgressCount(12, 39, 'running')).toBe('12 / 39')
+    expect(runProgressCount(38, 39, 'complete')).toBe('39 of 39')
   })
 
   it('humanizes retryable vs stopped run errors', () => {

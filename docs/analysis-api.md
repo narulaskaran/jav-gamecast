@@ -75,7 +75,7 @@ Request JSON:
 {"datasetId":"seahawks-super-bowl-2026-jev-v1","query":"Will SEA win given this play state?","questionKind":"noul"}
 ```
 
-`analysisId` is optional. Supplying it again with the same fixture/dataset and query is idempotent; it does not create another run. `resume: true` with that same `analysisId` requeues an **error** snapshot (retryable or not) and continues from `progress.completedRows`. The UI must never show internal codes such as `JEV_MALFORMED_RESPONSE`; it humanizes them and offers resume.
+`analysisId` is optional. Supplying it again with the same fixture/dataset and query is idempotent; it does not create another run. `resume: true` with that same `analysisId` requeues an **error** snapshot (retryable or not). Resume classifies missing `rowIndex` values and keeps already persisted rows. On error, `progress.completedRows` is the consecutive last-good prefix (the UI says resume from that next row). While running, `completedRows` is the count of persisted predictions, including out-of-order indexes; the playground header shows that as a percent via the existing snapshot poll. The UI must never show internal codes such as `JEV_MALFORMED_RESPONSE`; it humanizes them and offers resume.
 
 **Product rule (sample and BYOD):** if the same Jev query is run against the same dataset, return the saved complete snapshot. Do not recompute.
 
@@ -112,7 +112,7 @@ A bounded snapshot has this shape:
 }
 ```
 
-`status` is one of `queued`, `running`, `complete`, or `error`. Result rows are sorted by `rowIndex` on every read. Each completed row contains the row sent to Jev plus the Jev model and the typed answer: Noul/Score store `value` (P(win) or normalized score); Choice stores selected class, per-class probabilities, and optional confidence. Sample win-likelihood rows include in-progress scores and later-game plays. CSV columns such as `wpa` are inputs, not Jev outputs. Errors expose only a stable code and retryability flag; partial result rows remain bounded and readable. The playground UI maps those codes to plain language and can resume from the last good row.
+`status` is one of `queued`, `running`, `complete`, or `error`. Result rows are sorted by `rowIndex` on every read, including mid-run out-of-order completions. Each completed row contains the row sent to Jev plus the Jev model and the typed answer: Noul/Score store `value` (P(win) or normalized score); Choice stores selected class, per-class probabilities, and optional confidence. Sample win-likelihood rows include in-progress scores and later-game plays. CSV columns such as `wpa` are inputs, not Jev outputs. Errors expose only a stable code and retryability flag; partial result rows remain bounded and readable. The playground UI maps those codes to plain language and can resume from the last good row. The run worker overlaps Jev classify with Convex puts (one in-flight snapshot write, coalesced to the latest snapshot) and runs a bounded classify pool.
 
 ## Public share read
 

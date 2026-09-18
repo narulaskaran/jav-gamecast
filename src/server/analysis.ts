@@ -54,6 +54,9 @@ import {
 export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis.js'
 export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, ANALYSIS_MAX_ROWS, ANALYSIS_MAX_TASK_LENGTH } from '../shared/analysis.js'
 
+/** Bounded Jev pool size. Large BYOD runs overlap classify with Convex puts. */
+export const ANALYSIS_CLASSIFY_CONCURRENCY = 6
+
 export interface ResolvedAnalysisDataset {
   datasetId: string
   fixtureId: string
@@ -189,6 +192,8 @@ export interface AnalysisServiceOptions {
   datasets?: AnalysisDatasetSource
   now?: () => number
   idFactory?: () => string
+  /** Override Jev pool size (clamped 1–8). Default `ANALYSIS_CLASSIFY_CONCURRENCY`. */
+  classifyConcurrency?: number
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -277,6 +282,79 @@ const resultFromClassification = (rowIndex: number, row: AnalysisRowInput, class
   ...(classification.confidence === undefined ? {} : { confidence: classification.confidence }),
   ...(classification.value === undefined ? {} : { value: classification.value }),
 })
+
+export const consecutiveCompletedRows = (resultRows: readonly Pick<AnalysisResultRow, 'rowIndex'>[]): number => {
+  const done = new Set(resultRows.map((row) => row.rowIndex))
+  let count = 0
+  while (done.has(count)) count += 1
+  return count
+}
+
+export const pendingRowIndexes = (totalRows: number, resultRows: readonly Pick<AnalysisResultRow, 'rowIndex'>[]): number[] => {
+  const done = new Set(resultRows.map((row) => row.rowIndex))
+  const pending: number[] = []
+  for (let rowIndex = 0; rowIndex < totalRows; rowIndex += 1) {
+    if (!done.has(rowIndex)) pending.push(rowIndex)
+  }
+  return pending
+}
+
+const mergeResultRow = (resultRows: readonly AnalysisResultRow[], resultRow: AnalysisResultRow): AnalysisResultRow[] => (
+  [...resultRows.filter((item) => item.rowIndex !== resultRow.rowIndex), resultRow].sort((left, right) => left.rowIndex - right.rowIndex)
+)
+
+const runningProgress = (resultRows: readonly AnalysisResultRow[], totalRows: number) => ({
+  completedRows: resultRows.length,
+  totalRows,
+  completedCalls: resultRows.length,
+  totalCalls: totalRows,
+})
+
+const clampClassifyConcurrency = (value: number | undefined): number => {
+  const candidate = value ?? ANALYSIS_CLASSIFY_CONCURRENCY
+  if (!Number.isFinite(candidate)) return ANALYSIS_CLASSIFY_CONCURRENCY
+  return Math.max(1, Math.min(8, Math.trunc(candidate)))
+}
+
+const persistError = (error: unknown): AnalysisError => {
+  if (error instanceof AnalysisError) return error
+  return new AnalysisError('ANALYSIS_STORAGE_ERROR', 'Could not save analysis progress', 503, true)
+}
+
+/** One in-flight snapshot put; later enqueues coalesce to the latest snapshot. Classify does not await. */
+export const createSnapshotWritePipeline = (put: (snapshot: AnalysisSnapshot) => Promise<void> | void) => {
+  let latest: AnalysisSnapshot | undefined
+  let loop: Promise<void> | undefined
+  let failed: unknown
+
+  const runLoop = async (): Promise<void> => {
+    try {
+      while (latest !== undefined && failed === undefined) {
+        const snapshot = latest
+        latest = undefined
+        await put(snapshot)
+      }
+    } catch (error) {
+      failed = persistError(error)
+    }
+  }
+
+  return {
+    enqueue(snapshot: AnalysisSnapshot): void {
+      if (failed !== undefined) return
+      latest = snapshot
+      loop = (loop ?? Promise.resolve()).then(runLoop)
+    },
+    async flush(): Promise<void> {
+      await loop
+      if (latest !== undefined && failed === undefined) {
+        loop = runLoop()
+        await loop
+      }
+      if (failed !== undefined) throw failed
+    },
+  }
+}
 
 const datasetDraftClasses = (dataset: ResolvedAnalysisDataset): string[] => {
   const classes = dataset.classes && dataset.classes.length >= 2 ? [...dataset.classes] : []
@@ -488,43 +566,120 @@ export class AnalysisService {
     const questionKind = inferQuestionKind(snapshot0.query, classes, snapshot0.questionKind)
     let snapshot: AnalysisSnapshot = { ...snapshot0, status: 'running', questionKind, updatedAt: nowIso(this.now), resultRows: [...snapshot0.resultRows] }
     await this.options.store.put(snapshot)
+    const pipeline = createSnapshotWritePipeline((next) => this.options.store.put(next))
+    const persistFinal = async (next: AnalysisSnapshot): Promise<AnalysisSnapshot> => {
+      try {
+        await pipeline.flush()
+      } catch (error) {
+        if (next.status !== 'error') throw error
+      }
+      try {
+        await this.options.store.put(next)
+      } catch (error) {
+        if (next.status === 'error') return cloneAnalysisSnapshot(next)
+        throw persistError(error)
+      }
+      return cloneAnalysisSnapshot(next)
+    }
     try {
-      for (let rowIndex = snapshot.progress.completedRows; rowIndex < rows.length; rowIndex += 1) {
-        const row = rows[rowIndex]
-        snapshot = { ...snapshot, currentFixtureRow: { rowIndex, input: row }, updatedAt: nowIso(this.now) }
-        await this.options.store.put(snapshot)
-        try {
-          const classification = normalizeClassification(await this.options.classifier.classify({
-            analysisId,
-            fixtureId: snapshot.fixtureId,
-            datasetId: snapshot.datasetId,
-            query: snapshot.query,
-            rowIndex,
-            row,
-            classes,
-            questionKind,
-          }), classes, questionKind)
-          const resultRow = resultFromClassification(rowIndex, row, classification)
-          const resultRows = [...snapshot.resultRows.filter((item) => item.rowIndex !== rowIndex), resultRow].sort((left, right) => left.rowIndex - right.rowIndex)
-          snapshot = {
-            ...snapshot,
-            status: 'running',
-            currentFixtureRow: rowIndex + 1 < rows.length ? { rowIndex: rowIndex + 1, input: rows[rowIndex + 1] } : undefined,
-            updatedAt: nowIso(this.now),
-            progress: { completedRows: rowIndex + 1, totalRows: rows.length, completedCalls: rowIndex + 1, totalCalls: rows.length },
-            resultRows,
-            error: undefined,
+      const pending = pendingRowIndexes(rows.length, snapshot.resultRows)
+      if (pending.length === 0) {
+        snapshot = {
+          ...snapshot,
+          status: 'complete',
+          currentFixtureRow: undefined,
+          updatedAt: nowIso(this.now),
+          progress: { completedRows: rows.length, totalRows: rows.length, completedCalls: rows.length, totalCalls: rows.length },
+          error: undefined,
+        }
+        return await persistFinal(snapshot)
+      }
+      let resultRows = [...snapshot.resultRows]
+      let firstError: unknown
+      let stopped = false
+      let cursor = 0
+      let lastLeaseAt = this.now()
+      const concurrency = Math.min(clampClassifyConcurrency(this.options.classifyConcurrency), pending.length)
+      const refreshLease = () => {
+        const now = this.now()
+        if (now - lastLeaseAt < ANALYSIS_RUN_LEASE_MS / 4) return
+        lastLeaseAt = now
+        void Promise.resolve(this.options.store.claim?.(analysisId, ownerToken, now, ANALYSIS_RUN_LEASE_MS)).catch(() => undefined)
+      }
+      const applyResult = (resultRow: AnalysisResultRow) => {
+        resultRows = mergeResultRow(resultRows, resultRow)
+        snapshot = {
+          ...snapshot,
+          status: 'running',
+          currentFixtureRow: undefined,
+          updatedAt: nowIso(this.now),
+          progress: runningProgress(resultRows, rows.length),
+          resultRows,
+          error: undefined,
+        }
+        pipeline.enqueue(snapshot)
+        refreshLease()
+      }
+      const worker = async () => {
+        while (!stopped) {
+          const next = cursor
+          cursor += 1
+          if (next >= pending.length) return
+          const rowIndex = pending[next]
+          if (typeof rowIndex !== 'number') return
+          const row = rows[rowIndex]
+          if (!row) continue
+          try {
+            const classification = normalizeClassification(await this.options.classifier.classify({
+              analysisId,
+              fixtureId: snapshot.fixtureId,
+              datasetId: snapshot.datasetId,
+              query: snapshot.query,
+              rowIndex,
+              row,
+              classes,
+              questionKind,
+            }), classes, questionKind)
+            applyResult(resultFromClassification(rowIndex, row, classification))
+          } catch (error) {
+            stopped = true
+            if (firstError === undefined) firstError = error
           }
-          await this.options.store.put(snapshot)
-        } catch (error) {
-          snapshot = { ...snapshot, status: 'error', currentFixtureRow: undefined, updatedAt: nowIso(this.now), error: safeProviderError(error) }
-          await this.options.store.put(snapshot)
-          return cloneAnalysisSnapshot(snapshot)
         }
       }
-      snapshot = { ...snapshot, status: 'complete', currentFixtureRow: undefined, updatedAt: nowIso(this.now), progress: { completedRows: rows.length, totalRows: rows.length, completedCalls: rows.length, totalCalls: rows.length } }
-      await this.options.store.put(snapshot)
-      return cloneAnalysisSnapshot(snapshot)
+      await Promise.all(Array.from({ length: concurrency }, () => worker()))
+      try {
+        await pipeline.flush()
+      } catch (error) {
+        firstError = firstError ?? error
+      }
+      if (firstError !== undefined) {
+        snapshot = {
+          ...snapshot,
+          status: 'error',
+          currentFixtureRow: undefined,
+          updatedAt: nowIso(this.now),
+          progress: {
+            completedRows: consecutiveCompletedRows(resultRows),
+            totalRows: rows.length,
+            completedCalls: resultRows.length,
+            totalCalls: rows.length,
+          },
+          resultRows,
+          error: safeProviderError(firstError),
+        }
+        return await persistFinal(snapshot)
+      }
+      snapshot = {
+        ...snapshot,
+        status: 'complete',
+        currentFixtureRow: undefined,
+        updatedAt: nowIso(this.now),
+        progress: { completedRows: rows.length, totalRows: rows.length, completedCalls: rows.length, totalCalls: rows.length },
+        resultRows,
+        error: undefined,
+      }
+      return await persistFinal(snapshot)
     } finally {
       await this.options.store.release?.(analysisId, ownerToken)
     }

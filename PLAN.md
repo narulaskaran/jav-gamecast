@@ -104,7 +104,7 @@ These questions materially change the data model, abuse controls, and UI. Record
 - No authentication in the first vertical slice. Before production launch, add abuse controls sufficient for public-by-default paid execution, including rate limits, global quotas, a kill switch, and a decision on whether anonymous users may consume Jev budget.
 - Public CSV URLs only; no cookies, authorization headers, or arbitrary URL fetches.
 - 5 MB maximum file size, 5,000-row maximum execution, an explicit column cap such as 100 columns, and bounded row/field lengths. Byte size alone is never the Jev cost limit.
-- Sequential or concurrency-2 Jev calls, bounded retries, no speculative duplicate calls, and visible Cancel/Pause controls. A 5,000-call run must require explicit confirmation and remain subject to a global daily/project budget.
+- Bounded Jev pool (concurrency 6, clamped 1–8), pipelined Convex snapshot puts, bounded retries, no speculative duplicate calls, and visible Cancel/Pause controls. A 5,000-call run must require explicit confirmation and remain subject to a global daily/project budget.
 - Recommended results are classified labels plus provider-returned probabilities/confidence when available; explanations are not requested unless the confirmed Jev contract requires them.
 - OpenRouter drafts a typed query object, not executable code. The user edits the serialized query in a text area, and server validation rejects malformed or unsafe edits.
 - Convex realtime queries are the “stream”; do not hold an SSE connection open for the full run.

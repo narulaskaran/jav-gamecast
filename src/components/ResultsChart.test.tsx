@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ResultsChart } from './ResultsChart'
 import { AnalysisRunView } from './AnalysisRunView'
@@ -229,6 +229,8 @@ describe('AnalysisRunView tick isolation', () => {
       })),
     }
     render(<AnalysisRunView snapshot={noulSnapshot} shareUrl="" shareMessage="" onCopyShare={() => undefined} />)
+    expect(screen.getByRole('heading', { level: 2, name: '17%' })).toBeInTheDocument()
+    expect(screen.getByText('12 / 71')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Row 12 of 71' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /row 1 of 71/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /row 12 of 71/i })).toBeInTheDocument()
@@ -247,6 +249,24 @@ describe('AnalysisRunView tick isolation', () => {
     expect(screen.queryByRole('button', { name: /^play$/i })).not.toBeInTheDocument()
   })
 
+  it('renders out-of-order completed rows sorted by rowIndex without pool jargon', () => {
+    const sparse: AnalysisSnapshot = {
+      ...snapshot(0),
+      status: 'running',
+      progress: { completedRows: 2, totalRows: 10, completedCalls: 2, totalCalls: 10 },
+      resultRows: [row(4, 'gold'), row(1, 'silver')].sort((left, right) => left.rowIndex - right.rowIndex),
+    }
+    render(<AnalysisRunView snapshot={sparse} shareUrl="" shareMessage="" onCopyShare={() => undefined} />)
+    expect(screen.getByRole('heading', { level: 2, name: '20%' })).toBeInTheDocument()
+    expect(screen.getByText('2 / 10')).toBeInTheDocument()
+    expect(screen.getByText('Running')).toBeInTheDocument()
+    expect(screen.queryByText(/lease|pool|qps/i)).not.toBeInTheDocument()
+    const rail = screen.getByRole('complementary', { name: /processed rows/i })
+    const buttons = within(rail).getAllByRole('button')
+    expect(buttons[0]).toHaveAccessibleName(/row 2 of 10/i)
+    expect(buttons[1]).toHaveAccessibleName(/row 5 of 10/i)
+  })
+
   it('plays a completed run from the transport beside the scrubber and stays synced with Row X of Y', () => {
     vi.useFakeTimers()
     try {
@@ -257,6 +277,8 @@ describe('AnalysisRunView tick isolation', () => {
         resultRows: Array.from({ length: 5 }, (_, rowIndex) => row(rowIndex, rowIndex === 1 ? 'silver' : 'gold')),
       }
       render(<AnalysisRunView snapshot={complete} shareUrl="" shareMessage="" onCopyShare={() => undefined} />)
+      expect(screen.getByRole('heading', { level: 2, name: '100%' })).toBeInTheDocument()
+      expect(screen.getByText('5 of 5')).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: 'Row 5 of 5' })).toBeInTheDocument()
       expect(screen.queryByRole('heading', { name: /incremental results/i })).not.toBeInTheDocument()
       const play = screen.getByRole('button', { name: /^play$/i })

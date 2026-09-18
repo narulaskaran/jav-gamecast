@@ -3,12 +3,16 @@ import { footballFixture, getHalftimeModelInput, getWinLikelihoodModelInput, FOO
 import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
 import { parseJevQueryJson } from '../shared/jevQuery'
 import {
+  ANALYSIS_CLASSIFY_CONCURRENCY,
   ANALYSIS_MAX_CALLS,
   ANALYSIS_MAX_ROWS,
   AnalysisError,
   AnalysisService,
+  consecutiveCompletedRows,
+  createSnapshotWritePipeline,
   InMemoryAnalysisStore,
   InMemoryDatasetSource,
+  pendingRowIndexes,
   type AnalysisClassifier,
   type AnalysisDraftProvider,
   type AnalysisSnapshot,
@@ -335,7 +339,7 @@ describe('analysis domain contract', () => {
     const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses })
     const first = service.run(started.analysisId)
     const second = service.run(started.analysisId)
-    await vi.waitFor(() => expect(classifier.classify).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(classifier.classify).toHaveBeenCalled())
     resolve?.(classification())
     await expect(Promise.all([first, second])).resolves.toSatisfy((results: AnalysisSnapshot[]) => results[0] === results[1])
     expect(classifier.classify).toHaveBeenCalledTimes(39)
@@ -361,13 +365,28 @@ describe('analysis domain contract', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('persists each BYOD row prediction before the next classify call', async () => {
+  it('starts the next classify without waiting for the previous Convex put', async () => {
     const store = new InMemoryAnalysisStore()
-    const seenCounts: number[] = []
+    const originalPut = store.put.bind(store)
+    let releasePuts: (() => void) | undefined
+    const holdPuts = new Promise<void>((resolve) => { releasePuts = resolve })
+    store.put = (snapshot) => {
+      if (snapshot.status === 'running' && snapshot.resultRows.length > 0) {
+        return holdPuts.then(() => originalPut(snapshot))
+      }
+      originalPut(snapshot)
+    }
+    let inflight = 0
+    let peakInflight = 0
+    const startedAt: number[] = []
     const classifier: AnalysisClassifier = {
-      async classify() {
-        seenCounts.push(store.get('byod-1')?.resultRows.length ?? 0)
-        return { model: 'jev-latest', selectedClass: 'urgent', probabilities: { urgent: 0.7, routine: 0.3 } }
+      async classify(input) {
+        startedAt.push(input.rowIndex)
+        inflight += 1
+        peakInflight = Math.max(peakInflight, inflight)
+        await Promise.resolve()
+        inflight -= 1
+        return byodClassification()
       },
     }
     const service = new AnalysisService({
@@ -381,16 +400,122 @@ describe('analysis domain contract', () => {
     const started = await service.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
     expect(started.status).toBe('queued')
     expect(started.progress.totalRows).toBe(3)
-    const completed = await service.run(started.analysisId)
+    const running = service.run(started.analysisId)
+    await vi.waitFor(() => expect(startedAt).toHaveLength(3))
+    expect(peakInflight).toBeGreaterThan(1)
+    expect(store.get('byod-1')?.resultRows ?? []).toHaveLength(0)
+    releasePuts?.()
+    const completed = await running
     expect(completed.status).toBe('complete')
-    expect(completed.resultRows).toHaveLength(3)
-    expect(seenCounts).toEqual([0, 1, 2])
+    expect(completed.resultRows.map((row) => row.rowIndex)).toEqual([0, 1, 2])
+    expect(completed.progress).toEqual({ completedRows: 3, totalRows: 3, completedCalls: 3, totalCalls: 3 })
+  })
+
+  it('merges out-of-order Jev completions by rowIndex and keeps a bounded pool', async () => {
+    const store = new InMemoryAnalysisStore()
+    const order: number[] = []
+    const gates = ticketsDataset.rows.map(() => {
+      let release: (value: void) => void = () => undefined
+      const promise = new Promise<void>((resolve) => { release = resolve })
+      return { promise, release }
+    })
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        await gates[input.rowIndex]?.promise
+        order.push(input.rowIndex)
+        return byodClassification()
+      },
+    }
+    const service = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      datasets: new InMemoryDatasetSource([ticketsDataset]),
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'byod-pool',
+    })
+    const started = await service.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
+    const running = service.run(started.analysisId)
+    await vi.waitFor(() => expect(store.get('byod-pool')?.status).toBe('running'))
+    gates[2]?.release()
+    await vi.waitFor(() => expect(store.get('byod-pool')?.resultRows.map((row) => row.rowIndex)).toEqual([2]))
+    expect(store.get('byod-pool')?.progress.completedRows).toBe(1)
+    gates[0]?.release()
+    await vi.waitFor(() => expect(store.get('byod-pool')?.resultRows.map((row) => row.rowIndex)).toEqual([0, 2]))
+    gates[1]?.release()
+    const completed = await running
+    expect(order).toEqual([2, 0, 1])
+    expect(completed.resultRows.map((row) => row.rowIndex)).toEqual([0, 1, 2])
+    expect(completed.status).toBe('complete')
+    expect(completed.progress.completedRows).toBe(3)
+  })
+
+  it('coalesces overlapping snapshot puts onto the latest snapshot', async () => {
+    const writes: number[] = []
+    let release: (() => void) | undefined
+    const hold = new Promise<void>((resolve) => { release = resolve })
+    let startedFirst: (() => void) | undefined
+    const firstStarted = new Promise<void>((resolve) => { startedFirst = resolve })
+    const pipeline = createSnapshotWritePipeline(async (snapshot) => {
+      writes.push(snapshot.progress.completedRows)
+      startedFirst?.()
+      if (writes.length === 1) await hold
+    })
+    const queued: AnalysisSnapshot = {
+      analysisId: 'pipe-1',
+      fixtureId: 'tickets',
+      datasetId: 'tickets',
+      sourceType: 'upload',
+      query: byodTicketQuery,
+      status: 'running',
+      createdAt: '2026-09-18T00:00:00.000Z',
+      updatedAt: '2026-09-18T00:00:00.000Z',
+      progress: { completedRows: 0, totalRows: 3, completedCalls: 0, totalCalls: 3 },
+      classes: ['urgent', 'routine'],
+      columns: ['message'],
+      resultRows: [],
+    }
+    pipeline.enqueue({ ...queued, progress: { ...queued.progress, completedRows: 1, completedCalls: 1 } })
+    await firstStarted
+    pipeline.enqueue({ ...queued, progress: { ...queued.progress, completedRows: 2, completedCalls: 2 } })
+    pipeline.enqueue({ ...queued, progress: { ...queued.progress, completedRows: 3, completedCalls: 3 } })
+    await vi.waitFor(() => expect(writes).toEqual([1]))
+    release?.()
+    await pipeline.flush()
+    expect(writes[0]).toBe(1)
+    expect(writes.at(-1)).toBe(3)
+    expect(writes).not.toContain(2)
+  })
+
+  it('fails the run when a snapshot put fails after classifications land', async () => {
+    const store = new InMemoryAnalysisStore()
+    const originalPut = store.put.bind(store)
+    store.put = (snapshot) => {
+      if (snapshot.status === 'running' && snapshot.resultRows.length > 0) throw new Error('convex write qps')
+      originalPut(snapshot)
+    }
+    const service = new AnalysisService({
+      store,
+      classifier: { async classify() { return byodClassification() } },
+      draftProvider: makeDraftProvider([]),
+      datasets: new InMemoryDatasetSource([ticketsDataset]),
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'byod-put-fail',
+    })
+    const started = await service.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
+    const failed = await service.run(started.analysisId)
+    expect(failed.status).toBe('error')
+    expect(failed.error).toEqual({ code: 'ANALYSIS_STORAGE_ERROR', retryable: true })
+    expect(JSON.stringify(failed)).not.toMatch(/convex write qps/i)
   })
 
   it('keeps bounds explicit for future fixtures', () => {
     expect(ANALYSIS_MAX_CALLS).toBe(5_000)
     expect(ANALYSIS_MAX_ROWS).toBe(5_000)
+    expect(ANALYSIS_CLASSIFY_CONCURRENCY).toBe(6)
     expect(FOOTBALL_FIXTURE_SCHEMA).toHaveLength(31)
+    expect(consecutiveCompletedRows([{ rowIndex: 0 }, { rowIndex: 2 }])).toBe(1)
+    expect(pendingRowIndexes(4, [{ rowIndex: 0 }, { rowIndex: 2 }])).toEqual([1, 3])
   })
 
   it('requeues retryable provider failures and resumes from the persisted partial result', async () => {
@@ -632,6 +757,35 @@ describe('analysis domain contract', () => {
     expect(calls).toBe(40)
   })
 
+  it('does not reclassify later rows that landed before a fail-fast error', async () => {
+    const classified: number[] = []
+    let failedRow1 = false
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        classified.push(input.rowIndex)
+        if (input.rowIndex === 1 && !failedRow1) {
+          failedRow1 = true
+          throw new AnalysisError('JEV_TIMEOUT', 'timeout', 504, true)
+        }
+        return classification()
+      },
+    }
+    const service = serviceWith(classifier)
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'gap-resume', classes: choiceClasses })
+    const failed = await service.run(started.analysisId)
+    expect(failed.status).toBe('error')
+    expect(failed.progress.completedRows).toBe(1)
+    expect(failed.resultRows.some((row) => row.rowIndex === 1)).toBe(false)
+    expect(failed.resultRows.map((row) => row.rowIndex)).toEqual(expect.arrayContaining([0, 2]))
+    const recovered = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: started.analysisId, resume: true })
+    expect(recovered.status).toBe('queued')
+    const completed = await service.run(started.analysisId)
+    expect(completed.status).toBe('complete')
+    expect(completed.resultRows).toHaveLength(39)
+    expect(classified.filter((rowIndex) => rowIndex === 1)).toHaveLength(2)
+    expect(classified.filter((rowIndex) => rowIndex === 2)).toHaveLength(1)
+  })
+
   it('suppresses duplicate execution across independent service instances with a durable claim', async () => {
     const store = new InMemoryAnalysisStore()
     let releaseFirst: (() => void) | undefined
@@ -648,9 +802,9 @@ describe('analysis domain contract', () => {
     const secondService = make()
     const started = await firstService.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'claimed-analysis', classes: choiceClasses })
     const first = firstService.run(started.analysisId)
-    await vi.waitFor(() => expect(calls).toBe(1))
+    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(1))
     await expect(secondService.run(started.analysisId)).resolves.toMatchObject({ status: 'running' })
-    expect(calls).toBe(1)
+    expect(calls).toBeLessThan(39 * 2)
     releaseFirst?.()
     await expect(first).resolves.toMatchObject({ status: 'complete' })
   })
