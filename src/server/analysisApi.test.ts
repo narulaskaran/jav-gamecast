@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FOOTBALL_FIXTURE_ID } from '../fixtures/footballTimeline'
 import { SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
-import { AnalysisService, InMemoryAnalysisStore, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis'
+import { AnalysisService, InMemoryAnalysisStore, InMemoryDatasetSource, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis'
 import { createAnalysisDraftHandler, createAnalysisReadHandler, createAnalysisRunHandler } from './analysisApi'
 
 type ResponseState = { code?: number; body?: unknown; headers: Record<string, string> }
@@ -144,5 +144,51 @@ describe('analysis API contract', () => {
     expect(second.code).toBe(202)
     expect((second.body as { analysisId: string }).analysisId).not.toBe((first.body as { analysisId: string }).analysisId)
     expect(calls).toHaveLength(142)
+  })
+
+  it('returns an existing complete BYOD snapshot without invoking the classifier', async () => {
+    const calls: unknown[] = []
+    let nextId = 0
+    const byodQuery = 'Classify each ticket as urgent or routine using the message.'
+    const instance = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      datasets: new InMemoryDatasetSource([{
+        datasetId: 'tickets',
+        fixtureId: 'tickets',
+        sourceType: 'upload',
+        displayName: 'tickets.csv',
+        columns: ['message'],
+        rows: [{ message: 'one' }, { message: 'two' }, { message: 'three' }],
+        classes: ['urgent', 'routine'],
+      }]),
+      draftProvider: { async draft() { return { query: byodQuery, model: 'openrouter/test' } } } satisfies AnalysisDraftProvider,
+      classifier: {
+        async classify(input) {
+          calls.push(input)
+          return { model: 'jev-latest', selectedClass: 'urgent', probabilities: { urgent: 0.7, routine: 0.3 } }
+        },
+      } satisfies AnalysisClassifier,
+      idFactory: () => `byod-api-${++nextId}`,
+      now: () => 1_800_000_000_000,
+    })
+    const first: ResponseState = { headers: {} }
+    await createAnalysisRunHandler(instance)({
+      method: 'POST',
+      headers: {},
+      body: { datasetId: 'tickets', query: byodQuery, classes: ['urgent', 'routine'] },
+    }, response(first))
+    expect(first.code).toBe(202)
+    expect(calls).toHaveLength(3)
+    const analysisId = (first.body as { analysisId: string }).analysisId
+
+    const second: ResponseState = { headers: {} }
+    await createAnalysisRunHandler(instance)({
+      method: 'POST',
+      headers: {},
+      body: { datasetId: 'tickets', query: byodQuery, classes: ['routine', 'urgent'] },
+    }, response(second))
+    expect(second.code).toBe(200)
+    expect(second.body).toEqual(expect.objectContaining({ analysisId, status: 'complete' }))
+    expect(calls).toHaveLength(3)
   })
 })

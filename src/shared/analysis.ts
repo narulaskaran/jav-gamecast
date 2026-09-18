@@ -107,7 +107,7 @@ export interface AnalysisStorage {
   get(analysisId: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
   put(snapshot: AnalysisSnapshot): Promise<void> | void
   getPublic?(analysisId: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
-  findCompleteByContentKey?(contentKey: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
+  findCompleteByContentKey(contentKey: string): Promise<AnalysisSnapshot | undefined> | AnalysisSnapshot | undefined
   claim?(analysisId: string, ownerToken: string, nowMs: number, leaseMs: number): Promise<'claimed' | 'busy' | 'complete' | 'missing'> | 'claimed' | 'busy' | 'complete' | 'missing'
   release?(analysisId: string, ownerToken: string): Promise<void> | void
 }

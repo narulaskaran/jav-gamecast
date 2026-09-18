@@ -388,7 +388,8 @@ export class AnalysisService {
       if (existing) return this.resumeExisting(existing, dataset.datasetId, query)
     }
     if (input.forceNew !== true && (questionKind !== 'choice' || lookupClasses.length >= 2)) {
-      const cached = await this.options.store.findCompleteByContentKey?.(analysisContentKey({
+      // Same datasetId + canonical query is reused for every source (fixture and BYOD).
+      const cached = await this.options.store.findCompleteByContentKey(analysisContentKey({
         datasetId: dataset.datasetId,
         query,
         questionKind,

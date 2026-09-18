@@ -16,6 +16,27 @@ import {
 
 const query = 'Classify the most likely leading player from the visible first-half play inputs.'
 const choiceClasses = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie']
+const byodTicketQuery = 'Classify each ticket as urgent or routine using the message.'
+const ticketsDataset = {
+  datasetId: 'tickets',
+  fixtureId: 'tickets',
+  sourceType: 'upload' as const,
+  displayName: 'tickets.csv',
+  columns: ['message'],
+  rows: [{ message: 'one' }, { message: 'two' }, { message: 'three' }],
+  classes: ['urgent', 'routine'],
+}
+const invoicesDataset = {
+  ...ticketsDataset,
+  datasetId: 'invoices',
+  fixtureId: 'invoices',
+  displayName: 'invoices.csv',
+}
+const byodClassification = () => ({
+  model: 'jev-latest',
+  selectedClass: 'urgent',
+  probabilities: { urgent: 0.7, routine: 0.3 },
+})
 const classification = (selectedClass = 'K.Walker') => ({
   model: 'jev-latest',
   selectedClass,
@@ -217,19 +238,11 @@ describe('analysis domain contract', () => {
       store,
       classifier,
       draftProvider: makeDraftProvider([]),
-      datasets: new InMemoryDatasetSource([{
-        datasetId: 'tickets',
-        fixtureId: 'tickets',
-        sourceType: 'upload',
-        displayName: 'tickets.csv',
-        columns: ['message'],
-        rows: [{ message: 'one' }, { message: 'two' }, { message: 'three' }],
-        classes: ['urgent', 'routine'],
-      }]),
+      datasets: new InMemoryDatasetSource([ticketsDataset]),
       now: () => 1_800_000_000_000,
       idFactory: () => 'byod-1',
     })
-    const started = await service.start({ datasetId: 'tickets', query, classes: ['urgent', 'routine'] })
+    const started = await service.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
     expect(started.status).toBe('queued')
     expect(started.progress.totalRows).toBe(3)
     const completed = await service.run(started.analysisId)
@@ -348,6 +361,89 @@ describe('analysis domain contract', () => {
     expect(other.analysisId).not.toBe(started.analysisId)
     await second.run(other.analysisId)
     expect(calls).toHaveLength(142)
+  })
+
+  it('reuses a complete BYOD snapshot for the same datasetId and query without invoking the classifier', async () => {
+    const calls: unknown[] = []
+    const store = new InMemoryAnalysisStore()
+    const datasets = new InMemoryDatasetSource([ticketsDataset])
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        calls.push(input)
+        return byodClassification()
+      },
+    }
+    const first = new AnalysisService({
+      store,
+      classifier,
+      datasets,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'byod-a',
+      now: () => 1_800_000_000_000,
+    })
+    const second = new AnalysisService({
+      store,
+      classifier,
+      datasets,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'byod-b',
+      now: () => 1_800_000_000_000,
+    })
+    const started = await first.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
+    const completed = await first.run(started.analysisId)
+    expect(completed.status).toBe('complete')
+    expect(calls).toHaveLength(3)
+
+    const reused = await second.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['routine', 'urgent'] })
+    expect(reused.analysisId).toBe(started.analysisId)
+    expect(reused.status).toBe('complete')
+    expect(reused.resultRows).toHaveLength(3)
+    await expect(second.run(reused.analysisId)).resolves.toMatchObject({ analysisId: started.analysisId, status: 'complete' })
+    expect(calls).toHaveLength(3)
+    expect(store.get('byod-b')).toBeUndefined()
+  })
+
+  it('creates a new BYOD run when the query or datasetId differs', async () => {
+    const calls: unknown[] = []
+    const store = new InMemoryAnalysisStore()
+    const datasets = new InMemoryDatasetSource([ticketsDataset, invoicesDataset])
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        calls.push(input)
+        return byodClassification()
+      },
+    }
+    const make = (id: string) => new AnalysisService({
+      store,
+      classifier,
+      datasets,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => id,
+      now: () => 1_800_000_000_000,
+    })
+    const first = make('byod-a')
+    const started = await first.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
+    await first.run(started.analysisId)
+
+    const differentQuery = await make('byod-query').start({
+      datasetId: 'tickets',
+      query: 'Flag refund requests instead.',
+      classes: ['urgent', 'routine'],
+    })
+    expect(differentQuery.analysisId).toBe('byod-query')
+    expect(differentQuery.status).toBe('queued')
+    await make('byod-query').run(differentQuery.analysisId)
+
+    const differentDataset = await make('byod-dataset').start({
+      datasetId: 'invoices',
+      query: byodTicketQuery,
+      classes: ['urgent', 'routine'],
+    })
+    expect(differentDataset.analysisId).toBe('byod-dataset')
+    expect(differentDataset.status).toBe('queued')
+    await make('byod-dataset').run(differentDataset.analysisId)
+
+    expect(calls).toHaveLength(9)
   })
 
   it('does not reuse an errored snapshot and mints a new analysis for the next visitor', async () => {
