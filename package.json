@@ -21,13 +21,18 @@
     "fixture:validate": "node scripts/generate-football-fixture.mjs --validate"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@typesafe-ai/sdk": "^0.6.0",
     "@vercel/functions": "^3.9.8",
     "@vitejs/plugin-react": "^6.1.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "convex": "^1.46.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sqids": "^0.3.0",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.6.3",
     "vite": "^8.3.0"
   },

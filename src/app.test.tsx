@@ -72,7 +72,8 @@ describe('Jev playground flow', () => {
   it('renders the engineer playground landing without fetching providers', async () => {
     const api = makeApi()
     render(<App api={api} />)
-    expect(screen.getByText('Jev playground')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /jev playground home/i })).toBeInTheDocument()
+    expect(screen.getByText('Demo')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /run jev on a csv/i })).toBeInTheDocument()
     expect(screen.getByText(/this is an engineer playground for typesafe jev/i)).toBeInTheDocument()
     expect(screen.getByText(/try the sample run, or bring your own csv/i)).toBeInTheDocument()
@@ -98,7 +99,7 @@ describe('Jev playground flow', () => {
     expect(canConfirmJevRun({ query: '  ', starting: false })).toBe(false)
   })
 
-  it('does not fetch on sample task editing, and runs from the drafted Edit query', async () => {
+  it('does not fetch on sample task editing, and enables Run Jev after draft without a query edit', async () => {
     const api = makeApi()
     render(<App api={api} />)
     fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))

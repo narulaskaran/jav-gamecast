@@ -2,6 +2,11 @@ import { memo, useCallback, useDeferredValue, useRef } from 'react'
 import { ResultsChart } from './ResultsChart'
 import { ResultsTable } from './ResultsTable'
 import { RowRail } from './RowRail'
+import { Badge } from './ui/badge'
+import { Button } from './ui/button'
+import { Card, CardContent, CardHeader } from './ui/card'
+import { Progress as ProgressBar } from './ui/progress'
+import { Separator } from './ui/separator'
 import { useRunPlayhead } from '../runView/playhead'
 import { chartVisualFor, inferQuestionKind } from '../shared/questionKind'
 import type { AnalysisSnapshot, AnalysisStatus } from '../shared/analysis'
@@ -20,12 +25,18 @@ const statusCopy: Record<AnalysisStatus, string> = {
   error: 'The run stopped with a stable error code; partial rows remain readable.',
 }
 
+const statusVariant: Record<AnalysisStatus, 'queued' | 'running' | 'complete' | 'error'> = {
+  queued: 'queued',
+  running: 'running',
+  complete: 'complete',
+  error: 'error',
+}
+
 const StatusBadge = memo(function StatusBadge({ status }: { status: AnalysisStatus }) {
   return (
-    <span className={`analysis-status status-${status}`} role="status">
-      <span className="status-dot" aria-hidden="true" />
+    <Badge className={`analysis-status status-${status}`} variant={statusVariant[status]} role="status">
       {statusLabels[status]}
-    </span>
+    </Badge>
   )
 })
 
@@ -46,7 +57,7 @@ const Progress = memo(function Progress({
   return (
     <div className="progress-block" aria-label="Analysis progress">
       <div className="progress-line"><span>{completedRows} / {totalRows} rows</span><b>{ratio}%</b></div>
-      <div className="progress-track"><span style={{ width: `${ratio}%` }} /></div>
+      <ProgressBar value={ratio} />
       <p>{completedCalls} / {totalCalls} bounded Jev calls · {statusCopy[status]}</p>
     </div>
   )
@@ -76,58 +87,64 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   const chartKind = chartVisualFor(questionKind)
 
   return (
-    <section className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
-      <div className="analysis-head">
+    <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
+      <CardHeader className="analysis-head flex-row items-start justify-between space-y-0 p-6 pb-0">
         <div>
-          <p className="eyebrow">03 · Readback</p>
+          <p className="eyebrow">Readback</p>
           <h2 id="analysis-heading">Jev analysis run</h2>
         </div>
         <div className="analysis-actions">
           <StatusBadge status={snapshot.status} />
-          <button className="text-button" type="button" onClick={onCopyShare} disabled={!shareUrl} aria-label="Copy shareable public URL">↗ Share</button>
+          <Button variant="ghost" size="sm" type="button" onClick={onCopyShare} disabled={!shareUrl} aria-label="Copy shareable public URL">
+            Share
+          </Button>
         </div>
-      </div>
-      <p className="run-id">Run {snapshot.analysisId} · no provider credentials are exposed to the browser</p>
-      <Progress
-        completedRows={snapshot.progress.completedRows}
-        totalRows={snapshot.progress.totalRows}
-        completedCalls={snapshot.progress.completedCalls}
-        totalCalls={snapshot.progress.totalCalls}
-        status={snapshot.status}
-      />
-      {snapshot.error ? (
-        <div className="error-banner compact" role="alert">
-          <b>{snapshot.error.code}</b>
-          <span>{snapshot.error.retryable ? 'Retryable provider boundary error.' : 'This run is not retrying automatically.'}</span>
-        </div>
-      ) : null}
-      <div className="run-view">
-        <div className="run-view-main">
-          <ResultsChart
+      </CardHeader>
+      <CardContent>
+        <p className="run-id">Run {snapshot.analysisId} · no provider credentials are exposed to the browser</p>
+        <Separator className="mt-4" />
+        <Progress
+          completedRows={snapshot.progress.completedRows}
+          totalRows={snapshot.progress.totalRows}
+          completedCalls={snapshot.progress.completedCalls}
+          totalCalls={snapshot.progress.totalCalls}
+          status={snapshot.status}
+        />
+        {snapshot.error ? (
+          <div className="error-banner compact" role="alert">
+            <b>{snapshot.error.code}</b>
+            <span>{snapshot.error.retryable ? 'Retryable provider boundary error.' : 'This run is not retrying automatically.'}</span>
+          </div>
+        ) : null}
+        <div className="run-view">
+          <div className="run-view-main">
+            <ResultsChart
+              rows={rows}
+              playheadIndex={index}
+              classes={snapshot.classes}
+              totalRows={snapshot.progress.totalRows}
+              motion={motion}
+              questionKind={questionKind}
+              chartKind={chartKind}
+              onSeek={handleSeek}
+            />
+          </div>
+          <RowRail
             rows={rows}
+            totalRows={snapshot.progress.totalRows}
             playheadIndex={index}
             classes={snapshot.classes}
-            totalRows={snapshot.progress.totalRows}
-            motion={motion}
-            questionKind={questionKind}
             chartKind={chartKind}
-            onSeek={handleSeek}
+            onSelect={handleSeek}
           />
         </div>
-        <RowRail
-          rows={rows}
-          totalRows={snapshot.progress.totalRows}
-          playheadIndex={index}
-          classes={snapshot.classes}
-          chartKind={chartKind}
-          onSelect={handleSeek}
-        />
-      </div>
-      <ResultsTable rows={deferredRows} columns={columns} />
-      <div className="share-footer">
-        <span>{shareMessage || 'Public URL reads the same bounded snapshot without calling a provider.'}</span>
-        {shareUrl ? <a href={shareUrl} target="_blank" rel="noreferrer">Open public snapshot ↗</a> : null}
-      </div>
-    </section>
+        <ResultsTable rows={deferredRows} columns={columns} />
+        <Separator className="mt-4" />
+        <div className="share-footer">
+          <span>{shareMessage || 'Public URL reads the same bounded snapshot without calling a provider.'}</span>
+          {shareUrl ? <a href={shareUrl} target="_blank" rel="noreferrer">Open public snapshot</a> : null}
+        </div>
+      </CardContent>
+    </Card>
   )
 })
