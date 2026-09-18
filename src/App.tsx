@@ -9,7 +9,7 @@ import { Card, CardContent, CardFooter, CardHeader } from './components/ui/card'
 import { Label } from './components/ui/label'
 import { Textarea } from './components/ui/textarea'
 import { getSampleDatasetPreview, SAMPLE_DATASET_ID } from './dataset/sampleDataset'
-import { DatasetError, DATASET_ERROR_COPY, plainDatasetError } from './dataset/csvTypes'
+import { CSV_MAX_BYTES, DatasetError, DATASET_ERROR_COPY, plainDatasetError } from './dataset/csvTypes'
 import { validateCsvText } from './dataset/validateDataset'
 import type {
   AnalysisDraftResult,
@@ -41,6 +41,9 @@ export interface AnalysisApiClient {
 
 const apiError = async (response: Response): Promise<Error> => {
   if (response.ok) return new Error('')
+  if (response.status === 408 || response.status === 504) {
+    return new DatasetError('URL_TIMEOUT', DATASET_ERROR_COPY.URL_TIMEOUT, response.status)
+  }
   let code = 'REQUEST_FAILED'
   let failure: DatasetError['failure']
   let message = ''
@@ -56,10 +59,33 @@ const apiError = async (response: Response): Promise<Error> => {
   return new Error(message || code)
 }
 
+const INTAKE_CLIENT_TIMEOUT_MS = 20_000
+
+const isAbortError = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) return false
+  const record = error as { name?: unknown; code?: unknown }
+  return record.name === 'AbortError' || record.code === 20 || record.code === 'ABORT_ERR'
+}
+
 const json = async <T,>(url: string, init: RequestInit): Promise<T> => {
   const response = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) } })
   if (!response.ok) throw await apiError(response)
   return response.json() as Promise<T>
+}
+
+const intakeJson = async <T,>(url: string, init: RequestInit): Promise<T> => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), INTAKE_CLIENT_TIMEOUT_MS)
+  try {
+    return await json<T>(url, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) {
+      throw new DatasetError('URL_TIMEOUT', DATASET_ERROR_COPY.URL_TIMEOUT, 504)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export const defaultAnalysisApi: AnalysisApiClient = {
@@ -68,8 +94,8 @@ export const defaultAnalysisApi: AnalysisApiClient = {
   read: (analysisId) => json<AnalysisSnapshot>(`/api/analysis/${encodeURIComponent(analysisId)}`, { method: 'GET' }),
   share: (analysisId) => json<AnalysisSnapshot>(`/api/share/${encodeURIComponent(analysisId)}`, { method: 'GET' }),
   intakeStatus: () => json<DatasetIntakeStatus>('/api/datasets/status', { method: 'GET' }),
-  createFromCsv: (input) => json<DatasetPreview>('/api/datasets/from-csv', { method: 'POST', body: JSON.stringify(input) }),
-  createFromUrl: (input) => json<DatasetPreview>('/api/datasets/from-url', { method: 'POST', body: JSON.stringify(input) }),
+  createFromCsv: (input) => intakeJson<DatasetPreview>('/api/datasets/from-csv', { method: 'POST', body: JSON.stringify(input) }),
+  createFromUrl: (input) => intakeJson<DatasetPreview>('/api/datasets/from-url', { method: 'POST', body: JSON.stringify(input) }),
 }
 
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
@@ -283,6 +309,10 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   }
 
   const handleUpload = async (file: File) => {
+    if (file.size > CSV_MAX_BYTES) {
+      setIntakeError(DATASET_ERROR_COPY.CSV_TOO_LARGE)
+      return
+    }
     setIntakeBusy(true); setError(undefined); setIntakeError(undefined)
     try {
       const csvText = await readCsvText(file)
@@ -370,6 +400,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
             intakeError={intakeError}
             resetToken={intakeResetToken}
             disabled={intakeBusy}
+            busy={intakeBusy}
             onUploadFile={(file) => void handleUpload(file)}
             onSubmitUrl={(url) => void handleUrl(url)}
             onTrySample={handleSample}

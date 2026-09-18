@@ -6,6 +6,7 @@ import { asAnalysisRow } from './shared/dataset'
 import type { AnalysisDraftResult, AnalysisSnapshot } from './shared/analysis'
 import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY, INVALID_CLASSES_COPY } from './shared/questionKind'
 import { formatDraftQueryForEditor, parseJevQueryJson } from './shared/jevQuery'
+import { DatasetError } from './dataset/csvTypes'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
 
 const input = asAnalysisRow(getHalftimeModelInput()[0])
@@ -434,6 +435,51 @@ describe('Jev playground flow', () => {
     expect(api.createFromUrl).toHaveBeenCalledWith({ url: 'https://example.com/data.csv' })
   })
 
+  it('shows loading progress while a public CSV URL is in flight', async () => {
+    let finish: ((value: DatasetPreview) => void) | undefined
+    const pending = new Promise<DatasetPreview>((resolve) => { finish = resolve })
+    const api = makeApi({
+      createFromUrl: vi.fn(() => pending),
+    })
+    render(<App api={api} />)
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'https://data.cityofnewyork.us/api/v3/views/vfnx-vebw/query.csv' } })
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/loading csv/i)
+    expect(screen.getByRole('button', { name: /use public csv url/i })).toBeDisabled()
+    expect(document.querySelector('.intake-progress')).toBeTruthy()
+    finish?.({ ...uploaded, datasetId: 'dataset-url-nyc', sourceType: 'public_url', displayName: 'query.csv', acceptedRowCount: 3023 })
+    expect(await screen.findByRole('heading', { name: 'query.csv' })).toBeInTheDocument()
+    expect(screen.getByText('3023 rows')).toBeInTheDocument()
+    expect(screen.queryByText(/loading csv/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a clear timeout when a public CSV URL hangs', async () => {
+    const api = makeApi({
+      createFromUrl: vi.fn(async () => {
+        throw new DatasetError('URL_TIMEOUT', 'This CSV took too long to load. Try a smaller file.', 504)
+      }),
+    })
+    render(<App api={api} />)
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'https://example.com/slow.csv' } })
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/couldn't load dataset/i)
+    expect(alert).toHaveTextContent(/took too long to load/i)
+    expect(alert).not.toHaveTextContent(/timeout|504|maxduration|serverless/i)
+    expect(screen.queryByText(/loading csv/i)).not.toBeInTheDocument()
+  })
+
+  it('rejects an oversized upload before calling intake', async () => {
+    const api = makeApi()
+    render(<App api={api} />)
+    const file = new File(['too-big'], 'huge.csv', { type: 'text/csv' })
+    Object.defineProperty(file, 'size', { value: 5 * 1024 * 1024 + 1 })
+    fireEvent.change(screen.getByLabelText(/upload csv/i), { target: { files: [file] } })
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/too big/i)
+    expect(api.createFromCsv).not.toHaveBeenCalled()
+  })
+
   it('uses the same chart and row-rail shell for a BYOD run', async () => {
     const byod = snapshot({
       analysisId: 'analysis-upload-1',
@@ -617,6 +663,19 @@ describe('Jev playground flow', () => {
     try {
       await defaultAnalysisApi.share('analysis /1')
       expect(fetchMock).toHaveBeenCalledWith('/api/share/analysis%20%2F1', expect.objectContaining({ method: 'GET' }))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('maps a hung or gateway-killed CSV intake to a clear timeout', async () => {
+    const fetchMock = vi.fn(async () => new Response('<html>Gateway Timeout</html>', { status: 504, headers: { 'Content-Type': 'text/html' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await expect(defaultAnalysisApi.createFromUrl?.({ url: 'https://example.com/slow.csv' })).rejects.toMatchObject({
+        code: 'URL_TIMEOUT',
+        message: 'This CSV took too long to load. Try a smaller file.',
+      })
     } finally {
       vi.unstubAllGlobals()
     }

@@ -892,6 +892,44 @@ h3 {
   font-size: 12px;
 }
 
+.dataset-preview .preview-spacer td {
+  padding: 0;
+  border: 0;
+  line-height: 0;
+}
+
+.intake-loading {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.intake-loading .thinking {
+  margin: 0;
+}
+
+.intake-progress {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.intake-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 32%;
+  border-radius: inherit;
+  background: var(--run);
+  animation: intake-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes intake-progress {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
+}
+
 .dataset-preview .preview-disclosure {
   margin: 0;
   color: var(--muted-foreground);
@@ -981,6 +1019,7 @@ h3 {
   .rail-item,
   .rail-item.is-selected,
   .thinking-dot,
+  .intake-progress-fill,
   .stage-fold,
   .stage-fold.is-animate,
   .stage-fold-body,
@@ -990,4 +1029,5 @@ h3 {
     animation: none !important;
   }
   .thinking-dot { opacity: 0.7; }
+  .intake-progress-fill { transform: none; width: 40%; }
 }

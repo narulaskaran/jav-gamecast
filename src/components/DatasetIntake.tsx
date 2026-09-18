@@ -17,6 +17,7 @@ export const DatasetIntake = ({
   onSubmitUrl,
   onTrySample,
   disabled,
+  busy = false,
   resetToken = 0,
 }: {
   status?: DatasetIntakeStatus
@@ -25,6 +26,7 @@ export const DatasetIntake = ({
   onSubmitUrl: (url: string) => void
   onTrySample: () => void
   disabled?: boolean
+  busy?: boolean
   resetToken?: number
 }) => {
   const byodBlocked = status?.convex === false || status?.uploadThing === false
@@ -37,7 +39,7 @@ export const DatasetIntake = ({
   }, [resetToken])
 
   return (
-    <section className="intake-panel" aria-labelledby="intake-heading">
+    <section className="intake-panel" aria-labelledby="intake-heading" aria-busy={busy || undefined}>
       <h2 id="intake-heading">Choose a dataset</h2>
       <div className="intake-cards">
         <Card className="intake-card">
@@ -104,6 +106,17 @@ export const DatasetIntake = ({
           </CardContent>
         </Card>
       </div>
+      {busy ? (
+        <div className="intake-loading" role="status" aria-live="polite">
+          <p className="thinking">
+            <span className="thinking-dot" aria-hidden="true" />
+            Loading CSV…
+          </p>
+          <div className="intake-progress" aria-hidden="true">
+            <span className="intake-progress-fill" />
+          </div>
+        </div>
+      ) : null}
       {intakeError && (
         <div className="error-banner" role="alert">
           <b>{INTAKE_ERROR_HEADING}</b>

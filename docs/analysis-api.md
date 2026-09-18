@@ -30,7 +30,7 @@ BYOD upload uses the v7 server-side ingest path (`UTApi.uploadFiles`): the adapt
 {"url":"https://example.com/data.csv"}
 ```
 
-Public URLs must be HTTPS, have no credentials, return CSV directly, and must not target localhost/private/metadata addresses. Caps: 5 MB, 5,000 rows, 100 columns. Stable error codes include `CSV_TOO_LARGE`, `NOT_CSV`, `CSV_PARSE_FAILED`, `URL_NOT_PUBLIC`, `URL_NOT_HTTPS`, `URL_TIMEOUT`, `URL_NOT_FOUND`, `URL_FETCH_FAILED`, and `URL_UNSAFE`. After validation the server stores the original blob in UploadThing and dataset metadata plus immutable row refs in Convex.
+Public URLs must be HTTPS, have no credentials, return CSV directly, and must not target localhost/private/metadata addresses. Caps: 5 MB, 5,000 rows, 100 columns. Stable error codes include `CSV_TOO_LARGE`, `NOT_CSV`, `CSV_PARSE_FAILED`, `URL_NOT_PUBLIC`, `URL_NOT_HTTPS`, `URL_TIMEOUT`, `URL_NOT_FOUND`, `URL_FETCH_FAILED`, and `URL_UNSAFE`. The fetch path streams the body and stops at the byte cap; slow or oversized URLs fail with a clear timeout/size error rather than hanging. After validation the server stores the original blob in UploadThing and dataset metadata plus immutable row refs in Convex.
 
 `GET /api/datasets/<datasetId>` returns the sanitized table (all accepted rows and columns) for the playground preview. Durable Convex metadata still stores a short `previewRows` cap; row bodies live in `datasetRows`. `GET /api/browse` lists public dataset metadata only.
 

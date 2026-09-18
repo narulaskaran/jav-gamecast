@@ -92,7 +92,7 @@ export const DATASET_ERROR_COPY: Record<string, string> = {
   CSV_INVALID_HEADER: 'The CSV header is missing, duplicated, or invalid.',
   URL_NOT_PUBLIC: 'The URL is not a public HTTPS CSV link.',
   URL_NOT_HTTPS: 'Use an HTTPS CSV URL.',
-  URL_TIMEOUT: 'The CSV URL timed out.',
+  URL_TIMEOUT: 'This CSV took too long to load. Try a smaller file.',
   URL_NOT_FOUND: 'That CSV URL was not found.',
   URL_FETCH_FAILED: 'Could not fetch that CSV URL.',
   URL_UNSAFE: 'That URL is not a public CSV link.',
