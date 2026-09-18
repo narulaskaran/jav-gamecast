@@ -26,6 +26,7 @@ import {
   parseJevQueryJson,
 } from './shared/jevQuery'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
+import { useTheme } from './theme'
 import './styles.css'
 
 export interface AnalysisApiClient {
@@ -117,6 +118,30 @@ const Thinking = ({ children }: { children: string }) => (
     {children}
   </p>
 )
+
+const ThemeToggle = () => {
+  const { theme, toggleTheme } = useTheme()
+  const next = theme === 'dark' ? 'light' : 'dark'
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      aria-label={`Switch to ${next} theme`}
+      aria-pressed={theme === 'dark'}
+      onClick={toggleTheme}
+    >
+      {theme === 'dark' ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M12 5.2a.9.9 0 0 1 .9.9v1.2a.9.9 0 1 1-1.8 0V6.1a.9.9 0 0 1 .9-.9zm0 10.6a3.8 3.8 0 1 1 0-7.6 3.8 3.8 0 0 1 0 7.6zm6.7-4.7h1.2a.9.9 0 1 1 0 1.8h-1.2a.9.9 0 1 1 0-1.8zM4.1 11.1H5.3a.9.9 0 1 1 0 1.8H4.1a.9.9 0 1 1 0-1.8zm12.9 5.2.85.85a.9.9 0 1 1-1.27 1.27l-.85-.85a.9.9 0 1 1 1.27-1.27zM6.35 5.58l.85.85A.9.9 0 1 1 5.93 7.7l-.85-.85A.9.9 0 0 1 6.35 5.58zm10.9 0a.9.9 0 0 1 1.27 1.27l-.85.85A.9.9 0 1 1 16.4 6.43zM7.2 16.3a.9.9 0 0 1 1.27 1.27l-.85.85A.9.9 0 1 1 6.35 17.15zM12 16.7a.9.9 0 0 1 .9.9v1.2a.9.9 0 1 1-1.8 0v-1.2a.9.9 0 0 1 .9-.9z" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M13.2 3.2a.8.8 0 0 1 .86.98 7.2 7.2 0 1 0 5.76 5.76.8.8 0 0 1 1.5.54 8.8 8.8 0 1 1-7.64-7.64.8.8 0 0 1-.48.36z" />
+        </svg>
+      )}
+    </button>
+  )
+}
 
 const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const shareAnalysisId = sharePathId()
@@ -310,7 +335,10 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     <main className="analysis-shell" data-stage={isShareView ? 'share' : snapshot ? 'run' : draft ? 'query' : dataset ? 'task' : 'intake'}>
       <header className="site-header">
         <a className="brand" href="/" aria-label="Jev playground home">Jev</a>
-        {isShareView ? <Badge variant="secondary">Public snapshot</Badge> : null}
+        <div className="site-header-actions">
+          {isShareView ? <Badge variant="secondary">Public snapshot</Badge> : null}
+          <ThemeToggle />
+        </div>
       </header>
       <section className="hero" aria-labelledby="page-title">
         <h1 id="page-title">{isShareView ? 'Inspect a saved run.' : 'Run Jev on a CSV.'}</h1>

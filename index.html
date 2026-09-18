@@ -9,6 +9,20 @@
     <meta property="og:title" content="Run Jev on a CSV." />
     <meta property="og:description" content="Bring a dataset. Ask a question. See Jev classify every row." />
     <meta name="twitter:card" content="summary" />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('jev-theme')
+          var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          var theme = stored === 'light' || stored === 'dark' ? stored : (systemDark ? 'dark' : 'light')
+          var root = document.documentElement
+          root.classList.toggle('dark', theme === 'dark')
+          if (stored === 'light' || stored === 'dark') root.setAttribute('data-theme', stored)
+          else root.removeAttribute('data-theme')
+          root.style.colorScheme = theme
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

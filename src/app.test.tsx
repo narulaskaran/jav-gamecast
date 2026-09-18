@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, queryRunFooter, type AnalysisApiClient } from './App'
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballTimeline'
 import { asAnalysisRow } from './shared/dataset'
@@ -81,6 +81,12 @@ const startSampleRun = async (api: AnalysisApiClient) => {
 }
 
 describe('Jev playground flow', () => {
+  afterEach(() => {
+    window.localStorage.clear()
+    document.documentElement.classList.remove('dark')
+    delete document.documentElement.dataset.theme
+    document.documentElement.style.colorScheme = ''
+  })
   it('renders a quiet idle landing with sample and BYOD only', async () => {
     const api = makeApi()
     render(<App api={api} />)
@@ -247,7 +253,7 @@ describe('Jev playground flow', () => {
     expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: edited, classes: draft.metadata.classes, questionKind: 'choice' })
   })
 
-  it('renders progress, live chart, processed-row rail, secondary results, and share action', async () => {
+  it('renders progress, live chart, processed-row rail, and share action', async () => {
     const api = makeApi({ read: vi.fn(async () => snapshot({
       status: 'running',
       progress: { completedRows: 12, totalRows: 39, completedCalls: 12, totalCalls: 39 },
@@ -261,11 +267,12 @@ describe('Jev playground flow', () => {
     expect(screen.queryByRole('button', { name: /^play$/i })).not.toBeInTheDocument()
     const rail = screen.getByRole('complementary', { name: /processed rows/i })
     expect(within(rail).getByRole('button', { name: /row 1 of 39/i })).toBeInTheDocument()
-    expect(within(rail).getByRole('button', { name: /row 3 of 39/i })).toBeInTheDocument()
-    expect(within(rail).queryByText(String(input.play_id))).not.toBeInTheDocument()
+    expect(within(rail).getByRole('button', { name: new RegExp(`row 3 of 39 ${input.play_id} · Q${input.qtr} · K\\.Walker`, 'i') })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: /current row inspector/i })).not.toBeInTheDocument()
-    expect(await screen.findByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
+    expect(screen.queryByRole('table', { name: /incremental analysis results/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /incremental results/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /switch to (dark|light) theme/i })).toBeInTheDocument()
   })
 
   it('updates the class chart from incremental running predictions, not only terminal status', async () => {
@@ -382,13 +389,13 @@ describe('Jev playground flow', () => {
     await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '1'))
     fireEvent.click(within(rail).getByRole('button', { name: /row 1 of 39/i }))
     await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '0'))
-    expect(within(rail).queryByText(String(input.play_id))).not.toBeInTheDocument()
+    expect(within(rail).getByText(new RegExp(`${input.play_id}`))).toBeInTheDocument()
     await waitFor(() => expect(within(rail).getByRole('button', { name: /row 3 of 39/i })).toBeInTheDocument())
     expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '0')
     fireEvent.change(screen.getByRole('slider', { name: /chart playhead/i }), { target: { value: '2' } })
     fireEvent.pointerUp(screen.getByRole('slider', { name: /chart playhead/i }))
     await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '2'))
-    expect(await screen.findByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
+    expect(screen.queryByRole('table', { name: /incremental analysis results/i })).not.toBeInTheDocument()
   })
 
   it('loads upload and public URL datasets into the same draft → chart path', async () => {
@@ -478,11 +485,13 @@ describe('Jev playground flow', () => {
       expect(await screen.findByText('Jev analysis run')).toBeInTheDocument()
       expect(api.share).toHaveBeenCalledWith(analysisId)
       expect(screen.queryByText(/no provider credentials|bounded jev worker|engineer playground/i)).not.toBeInTheDocument()
-      expect(await screen.findByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
+      expect(screen.queryByRole('table', { name: /incremental analysis results/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: /incremental results/i })).not.toBeInTheDocument()
       expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /^play$/i })).toBeInTheDocument()
       expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
-      expect(screen.getByRole('complementary', { name: /processed rows/i })).toBeInTheDocument()
+      const rail = screen.getByRole('complementary', { name: /processed rows/i })
+      expect(within(rail).getByRole('button', { name: new RegExp(`row 1 of 39 ${input.play_id} · Q${input.qtr} · K\\.Walker`, 'i') })).toBeInTheDocument()
       expect(screen.queryByLabelText(/^Analysis task$/i)).not.toBeInTheDocument()
     } finally {
       window.history.pushState({}, '', '/')
@@ -498,6 +507,17 @@ describe('Jev playground flow', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it('persists a header theme toggle over the system color scheme', () => {
+    render(<App api={makeApi()} />)
+    const toggle = screen.getByRole('button', { name: /switch to (dark|light) theme/i })
+    const next = toggle.getAttribute('aria-label')?.includes('dark') ? 'dark' : 'light'
+    fireEvent.click(toggle)
+    expect(window.localStorage.getItem('jev-theme')).toBe(next)
+    expect(document.documentElement.classList.contains('dark')).toBe(next === 'dark')
+    expect(document.documentElement.dataset.theme).toBe(next)
+    expect(screen.getByRole('button', { name: next === 'dark' ? /switch to light theme/i : /switch to dark theme/i })).toBeInTheDocument()
   })
 
   it('renders stable API errors and empty results without exposing provider details', async () => {

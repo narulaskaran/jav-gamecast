@@ -1,5 +1,5 @@
 export const RAIL_VIRTUALIZE_AFTER = 100
-export const RAIL_ITEM_SIZE = 44
+export const RAIL_ITEM_SIZE = 56
 export const RAIL_OVERSCAN = 8
 
 export const railWindow = ({

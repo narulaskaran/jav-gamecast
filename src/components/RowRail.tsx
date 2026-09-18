@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { classColor } from '../runView/classColor'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { areRailPropsEqual } from '../runView/chartProps'
+import { railMetaLine } from '../runView/format'
 import { RAIL_ITEM_SIZE, railWindow } from '../runView/railWindow'
 import type { ChartVisualKind } from '../shared/questionKind'
 import type { AnalysisResultRow } from '../shared/analysis'
@@ -9,16 +9,14 @@ import { Progress } from './ui/progress'
 const RailItem = memo(function RailItem({
   index,
   label,
-  selectedClass,
+  meta,
   selected,
-  color,
   onSelect,
 }: {
   index: number
   label: string
-  selectedClass?: string
+  meta?: string
   selected: boolean
-  color: string
   onSelect: (index: number) => void
 }) {
   return (
@@ -27,15 +25,11 @@ const RailItem = memo(function RailItem({
         type="button"
         className={`rail-item${selected ? ' is-selected' : ''}`}
         aria-current={selected ? 'true' : undefined}
-        aria-label={selectedClass ? `${label} ${selectedClass}` : label}
+        aria-label={meta ? `${label} ${meta}` : label}
         onClick={() => onSelect(index)}
       >
         <span className="rail-index">{label}</span>
-        {selectedClass ? (
-          <span className="rail-chip" style={{ '--chip-color': color } as CSSProperties}>
-            {selectedClass}
-          </span>
-        ) : null}
+        {meta ? <span className="rail-meta">{meta}</span> : null}
       </button>
     </li>
   )
@@ -45,7 +39,6 @@ export const RowRail = memo(function RowRail({
   rows,
   totalRows,
   playheadIndex,
-  classes = [],
   chartKind = 'bars',
   onSelect,
 }: {
@@ -115,9 +108,8 @@ export const RowRail = memo(function RowRail({
               key={row.rowIndex}
               index={index}
               label={`Row ${row.rowIndex + 1} of ${totalRows}`}
-              selectedClass={chartKind === 'series' ? undefined : row.selectedClass}
+              meta={railMetaLine(row, chartKind) || undefined}
               selected={index === playheadIndex}
-              color={row.selectedClass ? classColor(row.selectedClass, classes) : ''}
               onSelect={onSelect}
             />
           )

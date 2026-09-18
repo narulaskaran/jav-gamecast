@@ -9,7 +9,7 @@ export const Progress = ({
   const clamped = Math.min(100, Math.max(0, value))
   return (
     <div
-      className={cn('relative h-2 w-full overflow-hidden rounded-full bg-zinc-200', className)}
+      className={cn('relative h-2 w-full overflow-hidden rounded-full bg-muted', className)}
       {...props}
     >
       <div

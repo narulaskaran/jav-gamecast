@@ -1,6 +1,5 @@
-import { memo, useCallback, useDeferredValue, useRef } from 'react'
+import { memo, useCallback, useRef } from 'react'
 import { ResultsChart } from './ResultsChart'
-import { ResultsTable } from './ResultsTable'
 import { RowRail } from './RowRail'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -60,7 +59,6 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   onCopyShare: () => void
 }) {
   const rows = snapshot.resultRows
-  const columns = snapshot.columns ?? []
   const playbackEnabled = snapshot.status === 'complete'
   const { index, motion, playing, seek, togglePlayback } = useRunPlayhead(rows.length, snapshot.analysisId)
   const seekRef = useRef(seek)
@@ -73,7 +71,6 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   const handleTogglePlayback = useCallback(() => {
     toggleRef.current()
   }, [])
-  const deferredRows = useDeferredValue(rows)
   const questionKind = inferQuestionKind(snapshot.query, snapshot.classes, snapshot.questionKind)
   const chartKind = chartVisualFor(questionKind)
 
@@ -127,7 +124,6 @@ export const AnalysisRunView = memo(function AnalysisRunView({
             onSelect={handleSeek}
           />
         </div>
-        <ResultsTable rows={deferredRows} columns={columns} />
         <div className="share-footer">
           <span>{shareMessage}</span>
           {shareUrl ? <a href={shareUrl} target="_blank" rel="noreferrer">Open public snapshot</a> : null}
