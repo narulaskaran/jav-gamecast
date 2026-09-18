@@ -121,7 +121,7 @@ The production runtime requires a valid `CONVEX_URL` (or Convex Vite alias `VITE
 
 `ConvexDatasetStore.put` sends only schema fields (no `publicDataWarning`, no `undefined` optional keys). The Convex action `datasets:authorizedPutDataset` authorizes with `CONVEX_WRITE_SECRET`, upserts metadata, then writes row documents in batches of 200.
 
-Vercel Production build command is `node scripts/vercel-build.mjs` (`vercel.json`). That runs `npx convex deploy --cmd 'npm run build'` when `VERCEL_ENV=production` and `CONVEX_DEPLOY_KEY` is set, then copies `CONVEX_WRITE_SECRET` onto the Convex deployment. A frontend-only `npm run build` does not update Convex; `POST /api/datasets/from-url` then fails with `CONVEX_PUT_FAILED` / Convex HTTP `Server Error`. Preview builds skip Convex deploy so they cannot push to prod.
+Vercel Production build command is `node scripts/vercel-build.mjs` (`vercel.json`). That runs `npx convex deploy --cmd 'npm run build'` when `VERCEL_ENV=production` and `CONVEX_DEPLOY_KEY` is set, then attempts to copy `CONVEX_WRITE_SECRET` onto the Convex deployment. A deploy key without `deployment:env:write` logs a warning and does not fail the Vercel build; Convex function deploy failures still fail the build. A frontend-only `npm run build` does not update Convex; `POST /api/datasets/from-url` then fails with `CONVEX_PUT_FAILED` / Convex HTTP `Server Error`. Preview builds skip Convex deploy so they cannot push to prod.
 
 ## Server boundary
 

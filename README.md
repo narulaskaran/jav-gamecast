@@ -78,7 +78,7 @@ UPLOADTHING_TOKEN=<UploadThing dashboard API Keys → V7 token>
 
 `VITE_CONVEX_URL` is accepted as an alias for `CONVEX_URL`. Keep the same Convex write secret in Convex and the server runtime. Import the repo into Vercel as a Vite project (Node 20+).
 
-Vercel Production uses `vercel.json` `buildCommand` `node scripts/vercel-build.mjs`. On `VERCEL_ENV=production` it requires `CONVEX_DEPLOY_KEY` and `CONVEX_WRITE_SECRET`, runs `npx convex deploy --cmd 'npm run build'`, then `npx convex env set CONVEX_WRITE_SECRET`. Preview and local Vercel builds skip Convex deploy so they cannot push to prod. A frontend-only `npm run build` leaves Convex on stale functions; BYOD then fails with Convex HTTP `[Request ID] Server Error`.
+Vercel Production uses `vercel.json` `buildCommand` `node scripts/vercel-build.mjs`. On `VERCEL_ENV=production` it requires `CONVEX_DEPLOY_KEY` and `CONVEX_WRITE_SECRET`, runs `npx convex deploy --cmd 'npm run build'`, then attempts `npx convex env set CONVEX_WRITE_SECRET`. If the deploy key lacks `deployment:env:write`, that env-set step logs a warning and the Vercel build still succeeds. Convex function deploy failures still fail the build. Set `SKIP_CONVEX_ENV_SYNC=1` to skip env-set. Preview and local Vercel builds skip Convex deploy so they cannot push to prod. A frontend-only `npm run build` leaves Convex on stale functions; BYOD then fails with Convex HTTP `[Request ID] Server Error`.
 
 Generate the deploy key in Convex dashboard → this production deployment → Settings → Generate Production Deploy Key (enable `deployment:deploy`). Attach it to Vercel **Production only**.
 
