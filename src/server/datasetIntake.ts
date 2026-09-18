@@ -2,6 +2,7 @@ import { DatasetError, PUBLIC_DATA_WARNING } from '../dataset/csvTypes.js'
 import { validateCsvBytes, validateCsvText } from '../dataset/validateDataset.js'
 import type { DatasetIntakeStatus, DatasetPreview } from '../shared/dataset.js'
 import { AnalysisError } from './analysis.js'
+import { wrapConvexPutError } from './convexDatasetPut.js'
 import { fetchPublicCsv, type DatasetFetchOptions } from './datasetFetch.js'
 import { analysisSourceFromDatasetStore, hashBytes, toDatasetPreview, toDatasetRecord, type DatasetStorage } from './datasetStore.js'
 import { UnconfiguredBlobStore, type CsvBlobStore } from './uploadthing.js'
@@ -115,8 +116,8 @@ export class DatasetIntakeService {
     try {
       await this.options.datasets.put(record, input.validated.rows)
     } catch (error) {
-      if (error instanceof DatasetError || error instanceof AnalysisError) throw error
-      throw new DatasetError('DATASET_INTAKE_UNAVAILABLE', 'CSV intake failed on this deployment.', 503, 'UNCAUGHT')
+      if (error instanceof AnalysisError) throw error
+      wrapConvexPutError(error)
     }
     return { ...toDatasetPreview(record), publicDataWarning: PUBLIC_DATA_WARNING }
   }

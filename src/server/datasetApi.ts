@@ -73,6 +73,8 @@ const redactLogText = (text: string): string => (
     .replace(/sk_[A-Za-z0-9]+/g, 'sk_[redacted]')
     .replace(/bearer\s+\S+/ig, 'bearer [redacted]')
     .replace(/hmac-sha256=[0-9a-f]+/ig, 'hmac-sha256=[redacted]')
+    .replace(/authToken["']?\s*[:=]\s*["']?[^"'\s,}]+/ig, 'authToken=[redacted]')
+    .replace(/CONVEX_WRITE_SECRET["']?\s*[:=]\s*["']?[^"'\s,}]+/g, 'CONVEX_WRITE_SECRET=[redacted]')
     .slice(0, 500)
 )
 
@@ -80,11 +82,13 @@ const logIntakeError = (error: unknown, shaped?: { code: string; failure?: strin
   const name = error instanceof Error ? error.name : typeof error
   const message = error instanceof Error ? redactLogText(error.message) : 'non-error'
   const stack = error instanceof Error ? error.stack?.split('\n').slice(0, 6).join('\n') : undefined
+  const cause = error instanceof DatasetError && error.cause instanceof Error ? redactLogText(error.cause.message) : undefined
   console.error('[datasets] intake failed', {
     error: shaped?.code ?? 'DATASET_UNAVAILABLE',
     failure: shaped?.failure ?? 'UNCAUGHT',
     name,
     message,
+    ...(cause ? { cause } : {}),
     ...(stack ? { stack } : {}),
   })
 }

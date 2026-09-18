@@ -72,26 +72,29 @@ export const toDatasetRecord = (input: {
   sourceUrl?: string
   fixtureKey?: string
   createdAt?: number
-}): DatasetRecord => ({
-  datasetId: input.datasetId ?? randomUUID(),
-  sourceType: input.sourceType,
-  displayName: input.displayName,
-  byteSize: input.validated.byteSize,
-  contentHash: input.contentHash,
-  encoding: 'utf-8',
-  delimiter: input.validated.delimiter,
-  columns: input.validated.columns,
-  acceptedRowCount: input.validated.acceptedRowCount,
-  previewRows: input.validated.previewRows,
-  validationWarnings: input.validated.validationWarnings,
-  publicDataWarning: PUBLIC_DATA_WARNING,
-  blobKey: input.blobKey,
-  sourceUrl: input.sourceUrl,
-  fixtureKey: input.fixtureKey,
-  visibility: 'published',
-  createdAt: input.createdAt ?? Date.now(),
-  publishedAt: input.createdAt ?? Date.now(),
-})
+}): DatasetRecord => {
+  const createdAt = input.createdAt ?? Date.now()
+  return {
+    datasetId: input.datasetId ?? randomUUID(),
+    sourceType: input.sourceType,
+    displayName: input.displayName,
+    byteSize: input.validated.byteSize,
+    contentHash: input.contentHash,
+    encoding: 'utf-8',
+    delimiter: input.validated.delimiter,
+    columns: input.validated.columns,
+    acceptedRowCount: input.validated.acceptedRowCount,
+    previewRows: input.validated.previewRows,
+    validationWarnings: input.validated.validationWarnings,
+    publicDataWarning: PUBLIC_DATA_WARNING,
+    visibility: 'published',
+    createdAt,
+    publishedAt: createdAt,
+    ...(input.blobKey === undefined ? {} : { blobKey: input.blobKey }),
+    ...(input.sourceUrl === undefined ? {} : { sourceUrl: input.sourceUrl }),
+    ...(input.fixtureKey === undefined ? {} : { fixtureKey: input.fixtureKey }),
+  }
+}
 
 export const toDatasetPreview = (dataset: DatasetRecord): DatasetPreview => ({
   datasetId: dataset.datasetId,
