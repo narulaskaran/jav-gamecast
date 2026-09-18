@@ -43,15 +43,23 @@ export interface DatasetValidationError {
   message: string
 }
 
+export type DatasetFailure =
+  | 'TOKEN_MISSING_APP_REGION'
+  | 'INGEST_HTTP'
+  | 'INGEST_RUNTIME'
+  | 'UNCAUGHT'
+
 export class DatasetError extends Error {
   readonly code: DatasetValidationError['code']
   readonly statusCode: number
+  readonly failure?: DatasetFailure
 
-  constructor(code: DatasetValidationError['code'], message: string, statusCode = 400) {
+  constructor(code: DatasetValidationError['code'], message: string, statusCode = 400, failure?: DatasetFailure) {
     super(message)
     this.name = 'DatasetError'
     this.code = code
     this.statusCode = statusCode
+    if (failure) this.failure = failure
   }
 }
 
@@ -79,6 +87,7 @@ export const DATASET_ERROR_COPY: Record<string, string> = {
   URL_UNSAFE: 'The URL is not a public HTTPS CSV link.',
   UPLOADTHING_NOT_CONFIGURED: 'CSV storage is not configured on this deployment.',
   UPLOADTHING_FAILED: 'CSV storage is configured, but UploadThing rejected the upload. Check the API token on this deployment.',
+  DATASET_UNAVAILABLE: 'CSV intake failed on this deployment.',
   ANALYSIS_STORAGE_NOT_CONFIGURED: 'Durable storage is not configured on this deployment.',
   DATASET_NOT_FOUND: 'That dataset was not found.',
   INVALID_DATASET: 'Choose a sample dataset, upload a CSV, or paste a public CSV URL.',

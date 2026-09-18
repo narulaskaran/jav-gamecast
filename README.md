@@ -88,7 +88,7 @@ BYOD CSV upload and public URL intake store the original blob on UploadThing. Sa
 1. In the UploadThing dashboard, open the app → **API Keys** → **V7** tab. Copy the token. It is a base64 JSON object `{ apiKey, appId, regions }` (optionally `ingestHost`). Do not use only the inner `sk_…` secret.
 2. Set `UPLOADTHING_TOKEN` (preferred) or `UPLOADTHING_SECRET` as a server-side Vercel env var. Never put it in a `VITE_*` variable.
 3. Redeploy. `GET /api/datasets/status` reports `uploadThing: true` when a usable `sk_…` key is present. A successful `POST /api/datasets/from-csv` or `/from-url` also needs `appId` and `regions` so the server can HMAC-sign `https://<region>.ingest.uploadthing.com/<fileKey>` and PUT the CSV (the same path as `UTApi.uploadFiles`).
-4. `POST https://api.uploadthing.com/v6/uploadFiles` is retired. A valid v7 app key calling it returns HTTP 400 `Unsupported operation`. Missing tokens return `UPLOADTHING_NOT_CONFIGURED`; present-but-unusable tokens or ingest rejections return `UPLOADTHING_FAILED`.
+4. `POST https://api.uploadthing.com/v6/uploadFiles` is retired. A valid v7 app key calling it returns HTTP 400 `Unsupported operation`. Missing tokens return `UPLOADTHING_NOT_CONFIGURED`; present-but-unusable tokens or ingest rejections return `UPLOADTHING_FAILED` with a `failure` code (`TOKEN_MISSING_APP_REGION`, `INGEST_HTTP`, or `INGEST_RUNTIME`). Uncaught handler throws return `DATASET_UNAVAILABLE` + `failure: "UNCAUGHT"` and are logged as `[datasets] intake failed`.
 
 ## Vercel deployment and live runbook (operator step)
 

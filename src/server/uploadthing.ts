@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto'
-import Sqids, { defaultOptions } from 'sqids'
-import { DatasetError } from '../dataset/csvTypes.js'
+import SqidsImport from 'sqids'
+import { DatasetError, type DatasetFailure } from '../dataset/csvTypes.js'
 
 export interface StoredCsvBlob {
   blobKey: string
@@ -67,6 +67,7 @@ const UPLOADTHING_LIST_FILES_URL = 'https://api.uploadthing.com/v6/listFiles'
 const DEFAULT_INGEST_HOST = 'ingest.uploadthing.com'
 const API_KEY_PREFIX = 'sk_'
 const SIGNATURE_PREFIX = 'hmac-sha256='
+const SQIDS_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 const SAFE_PROVIDER_ERROR = /^[A-Za-z0-9][A-Za-z0-9 .,_':()-]{0,160}$/
 
 const envValue = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
@@ -220,8 +221,25 @@ const readSafeProviderError = (payload: unknown): string | undefined => {
   return undefined
 }
 
-const uploadFailed = (reason: string, statusCode = 503): never => {
-  throw new DatasetError('UPLOADTHING_FAILED', reason, statusCode)
+const uploadFailed = (reason: string, statusCode = 503, failure: DatasetFailure = 'INGEST_RUNTIME'): never => {
+  throw new DatasetError('UPLOADTHING_FAILED', reason, statusCode, failure)
+}
+
+const isDatasetError = (error: unknown): error is DatasetError => {
+  if (error instanceof DatasetError) return true
+  if (typeof error !== 'object' || error === null) return false
+  const record = error as { name?: unknown; code?: unknown; statusCode?: unknown }
+  return record.name === 'DatasetError' && typeof record.code === 'string' && typeof record.statusCode === 'number'
+}
+
+const safeRuntimeName = (error: unknown): string => {
+  if (error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,40}$/.test(error.name)) return error.name
+  return 'Error'
+}
+
+const wrapUploadThrow = (error: unknown): never => {
+  if (isDatasetError(error)) throw error
+  return uploadFailed(`UploadThing ingest failed (${safeRuntimeName(error)}).`, 503, 'INGEST_RUNTIME')
 }
 
 const failureFromResponse = async (response: Response, action: string): Promise<never> => {
@@ -233,12 +251,16 @@ const failureFromResponse = async (response: Response, action: string): Promise<
       provider
         ? `UploadThing rejected the API key (HTTP ${response.status}): ${provider}`
         : `UploadThing rejected the API key (HTTP ${response.status}).`,
+      503,
+      'INGEST_HTTP',
     )
   }
   return uploadFailed(
     provider
       ? `UploadThing ${action} failed (HTTP ${response.status}): ${provider}`
       : `UploadThing ${action} failed (HTTP ${response.status}).`,
+    503,
+    'INGEST_HTTP',
   )
 }
 
@@ -264,15 +286,30 @@ const shuffleAlphabet = (alphabet: string, seed: string): string => {
   return chars.join('')
 }
 
+type SqidsConstructable = new (options?: { alphabet?: string; minLength?: number; blocklist?: Set<string> }) => { encode: (numbers: number[]) => string }
+
+const sqidsConstructor = (): SqidsConstructable => {
+  const mod = SqidsImport as unknown as SqidsConstructable | { default?: SqidsConstructable }
+  if (typeof mod === 'function') return mod
+  if (mod && typeof mod.default === 'function') return mod.default
+  return uploadFailed('UploadThing ingest helper failed to load (sqids).', 503, 'INGEST_RUNTIME')
+}
+
+const newSqids = (alphabet: string, minLength: number) => new (sqidsConstructor())({
+  alphabet,
+  minLength,
+  blocklist: new Set(),
+})
+
 export const uploadThingAppIdPrefix = (appId: string): string => {
-  const alphabet = shuffleAlphabet(defaultOptions.alphabet, appId)
-  return new Sqids({ alphabet, minLength: 12 }).encode([Math.abs(hashString(appId))])
+  const alphabet = shuffleAlphabet(SQIDS_ALPHABET, appId)
+  return newSqids(alphabet, 12).encode([Math.abs(hashString(appId))])
 }
 
 const generateFileKey = (appId: string, file: { name: string; size: number; type: string; lastModified: number }): string => {
-  const alphabet = shuffleAlphabet(defaultOptions.alphabet, appId)
+  const alphabet = shuffleAlphabet(SQIDS_ALPHABET, appId)
   const hashParts = JSON.stringify([file.name, file.size, file.type, file.lastModified, Date.now(), randomBytes(8).toString('hex')])
-  const encodedFileSeed = new Sqids({ alphabet, minLength: 36 }).encode([Math.abs(hashString(hashParts))])
+  const encodedFileSeed = newSqids(alphabet, 36).encode([Math.abs(hashString(hashParts))])
   return `${uploadThingAppIdPrefix(appId)}${encodedFileSeed}`
 }
 
@@ -339,9 +376,17 @@ export class UploadThingBlobStore implements CsvBlobStore {
   }
 
   async putCsv(input: { bytes: Uint8Array; filename: string; contentType?: string }): Promise<StoredCsvBlob> {
+    try {
+      return await this.putCsvUnsafe(input)
+    } catch (error) {
+      return wrapUploadThrow(error)
+    }
+  }
+
+  private async putCsvUnsafe(input: { bytes: Uint8Array; filename: string; contentType?: string }): Promise<StoredCsvBlob> {
     const credentials = this.credentials()
     if (!credentials) return notConfigured()
-    if (!canSignIngest(credentials)) return uploadFailed(V7_TOKEN_REQUIRED_COPY)
+    if (!canSignIngest(credentials)) return uploadFailed(V7_TOKEN_REQUIRED_COPY, 503, 'TOKEN_MISSING_APP_REGION')
 
     const filename = csvFilename(input.filename)
     const contentType = input.contentType ?? 'text/csv'
@@ -353,10 +398,12 @@ export class UploadThingBlobStore implements CsvBlobStore {
       type: contentType,
       lastModified,
     })
+    const region = credentials.regions[0]
+    if (!region) return uploadFailed(V7_TOKEN_REQUIRED_COPY, 503, 'TOKEN_MISSING_APP_REGION')
     const uploadUrl = signedIngestUrl({
       apiKey: credentials.apiKey,
       appId: credentials.appId,
-      region: credentials.regions[0],
+      region,
       ingestHost: credentials.ingestHost,
       fileKey,
       filename,
@@ -365,7 +412,7 @@ export class UploadThingBlobStore implements CsvBlobStore {
       expiresAtMs: lastModified + 60 * 60 * 1000,
     })
     const form = new FormData()
-    form.append('file', new File([bytes], filename, { type: contentType }))
+    form.append('file', new Blob([Buffer.from(bytes)], { type: contentType }), filename)
     const uploaded = await this.fetcher(uploadUrl, {
       method: 'PUT',
       headers: { Range: 'bytes=0-' },

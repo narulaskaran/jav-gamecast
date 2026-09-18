@@ -6,7 +6,14 @@ The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1`; it has 39 
 
 ## Dataset intake
 
-`GET /api/datasets/status` returns `{ convex, uploadThing, sampleAvailable }` with no secrets. `uploadThing: true` means the same token reader the upload path uses found a usable `UPLOADTHING_TOKEN` / `UPLOADTHING_SECRET` (raw `sk_…` or an UploadThing dashboard v7 token). Empty or invalid-format values are `false`. Upload and public URL fail closed (`UPLOADTHING_NOT_CONFIGURED` or `ANALYSIS_STORAGE_NOT_CONFIGURED`) when those flags are false. When storage is configured but the credential cannot upload (retired `/v6/uploadFiles`, missing app id/region, or an ingest rejection), the routes return `UPLOADTHING_FAILED` — never a false “not configured”.
+`GET /api/datasets/status` returns `{ convex, uploadThing, sampleAvailable }` with no secrets. `uploadThing: true` means the same token reader the upload path uses found a usable `UPLOADTHING_TOKEN` / `UPLOADTHING_SECRET` (raw `sk_…` or an UploadThing dashboard v7 token). Empty or invalid-format values are `false`. Upload and public URL fail closed (`UPLOADTHING_NOT_CONFIGURED` or `ANALYSIS_STORAGE_NOT_CONFIGURED`) when those flags are false. When storage is configured but the credential cannot upload (retired `/v6/uploadFiles`, missing app id/region, or an ingest rejection), the routes return `UPLOADTHING_FAILED` — never a false “not configured”. Responses include a secret-free `failure` discriminator:
+
+- `TOKEN_MISSING_APP_REGION` — token is present (`uploadThing: true`) but is a raw `sk_…` without dashboard `appId`/`regions`
+- `INGEST_HTTP` — UploadThing ingest rejected the signed PUT
+- `INGEST_RUNTIME` — upload threw before a shaped DatasetError (sqids/HMAC/Blob/fetch)
+- `UNCAUGHT` — handler catch-all; also logs `[datasets] intake failed` to Vercel runtime logs
+
+Do not treat HTTP 500 `{ "error": "DATASET_UNAVAILABLE" }` as “not configured”. That used to mean an unlogged throw; it should now include `failure`.
 
 BYOD upload uses the v7 server-side ingest path (`UTApi.uploadFiles`): the adapter HMAC-signs `https://<region>.ingest.uploadthing.com/<fileKey>` and PUTs the CSV. It does not call `POST /v6/uploadFiles` (UploadThing returns HTTP 400 `Unsupported operation` for that). A raw `sk_…` key is enough for `uploadThing: true`, but a successful upload needs the dashboard **API Keys → V7** token: base64 JSON `{ apiKey, appId, regions }`.
 
