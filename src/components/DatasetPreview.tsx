@@ -41,12 +41,6 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
             </tbody>
           </table>
         </div>
-        {dataset.attribution && (
-          <p className="preview-links">
-            <a href={dataset.attribution.sourceUrl} target="_blank" rel="noreferrer">Source</a>
-            <a href={dataset.attribution.licenseUrl} target="_blank" rel="noreferrer">License</a>
-          </p>
-        )}
       </CardContent>
       {onChange && (
         <CardFooter className="preview-actions">

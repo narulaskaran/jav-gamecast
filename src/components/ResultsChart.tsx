@@ -143,7 +143,7 @@ export const ResultsChart = memo(function ResultsChart({
           <p className="eyebrow">Live chart</p>
           <h3 id="distribution-heading">{heading}</h3>
         </div>
-        <span className="table-count">{latestLabel}{totalRows ? ` · ${totalRows} total` : ''}</span>
+        <span className="table-count">{latestLabel}</span>
       </div>
       <div
         className="chart-shell"
