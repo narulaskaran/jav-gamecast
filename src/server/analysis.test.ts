@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { footballFixture, getHalftimeModelInput, FOOTBALL_FIXTURE_ID, FOOTBALL_FIXTURE_SCHEMA } from '../fixtures/footballTimeline'
 import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
+import { parseJevQueryJson } from '../shared/jevQuery'
 import {
   ANALYSIS_MAX_CALLS,
   ANALYSIS_MAX_ROWS,
@@ -50,13 +51,16 @@ describe('analysis domain contract', () => {
     const draftCalls: unknown[] = []
     const service = serviceWith(makeClassifier(classifierCalls), makeDraftProvider(draftCalls))
 
-    await expect(service.draft({ fixtureId: FOOTBALL_FIXTURE_ID, task: 'Find a useful H1 classifier.' })).resolves.toEqual({
+    const drafted = await service.draft({ fixtureId: FOOTBALL_FIXTURE_ID, task: 'Find a useful H1 classifier.' })
+    expect(drafted).toEqual({
       fixtureId: FOOTBALL_FIXTURE_ID,
       datasetId: FOOTBALL_FIXTURE_ID,
       sourceType: 'fixture',
-      query,
+      query: expect.any(String),
       metadata: expect.objectContaining({ provider: 'openrouter', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2' }),
     })
+    expect(parseJevQueryJson(drafted.query)).toEqual(expect.objectContaining({ type: expect.stringMatching(/^(noul|score|choice)$/), instructions: query }))
+    expect(drafted.query.trim().startsWith('{')).toBe(true)
     expect(draftCalls).toHaveLength(1)
     expect(classifierCalls).toHaveLength(0)
   })
@@ -75,12 +79,22 @@ describe('analysis domain contract', () => {
       },
     })
     const drafted = await service.draft({ fixtureId: FOOTBALL_FIXTURE_ID, task: SAMPLE_WIN_LIKELIHOOD_TASK })
-    expect(drafted.query).toBe(SAMPLE_WIN_NOUL_QUERY)
+    expect(parseJevQueryJson(drafted.query)).toEqual({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY })
+    expect(drafted.query).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(drafted.metadata.questionKind).toBe('noul')
     expect(drafted.metadata.classes).toEqual([])
     expect(JSON.stringify(drafted)).not.toMatch(/K\.Walker|C\.Kupp|Smith-Njigba|Other\/Tie/)
     expect(draftCalls[0]?.task).toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(draftCalls[0]?.classes ?? []).toEqual([])
+  })
+
+  it('starts a Noul run from edited Jev query JSON', async () => {
+    const jsonQuery = JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }, null, 2)
+    const service = serviceWith(makeClassifier([]))
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: jsonQuery })
+    expect(started.questionKind).toBe('noul')
+    expect(started.classes).toEqual([])
+    expect(started.query).toBe(jsonQuery)
   })
 
   it('runs a Noul win-likelihood analysis from Jev values, not CSV wpa', async () => {

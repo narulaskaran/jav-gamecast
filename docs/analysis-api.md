@@ -1,6 +1,6 @@
 # Jev Data Analysis API contract
 
-The playground accepts three dataset sources: the checked-in sample fixture, a CSV file upload, and a public HTTPS CSV URL. All three use the same draft → edit query → run worker. Chart type follows the drafted query: Noul/Score render a live series; Choice renders class-distribution bars. The sample default task is win likelihood per play (Jev Noul). The browser never calls Jev, OpenRouter, UploadThing, or privileged Convex writes.
+The playground accepts three dataset sources: the checked-in sample fixture, a CSV file upload, and a public HTTPS CSV URL. All three use the same draft → edit Jev query JSON → run worker. Chart type follows the drafted query: Noul/Score render a live series; Choice renders class-distribution bars. The sample default task is win likelihood per play (Jev Noul). The browser never calls Jev, OpenRouter, UploadThing, or privileged Convex writes.
 
 The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1`; it has 39 H1 input rows and 32 H2 evaluation rows. H2 rows, labels, final scores, and postgame fields are never sent to Jev. Super Bowl copy is illustrative sample data only.
 
@@ -44,14 +44,14 @@ Request JSON (sample or BYOD):
 {"datasetId":"seahawks-super-bowl-2026-jev-v1","task":"Win likelihood of the game per play."}
 ```
 
-`fixtureId` remains accepted for the sample dataset. The route calls the server-only OpenRouter adapter using `OPENROUTER_KEY`. It returns an editable query and safe metadata. Draft honors the user task: a win-likelihood prompt is a Jev Noul, not leftover fixture player-yard classes.
+`fixtureId` remains accepted for the sample dataset. The route calls the server-only OpenRouter adapter using `OPENROUTER_KEY`. It returns an editable **Jev query JSON** object (Noul / Choice / Score) and safe metadata. Draft honors the user task: a win-likelihood prompt is a Jev Noul, not leftover fixture player-yard classes.
 
 ```json
 {
   "fixtureId":"seahawks-super-bowl-2026-jev-v1",
   "datasetId":"seahawks-super-bowl-2026-jev-v1",
   "sourceType":"fixture",
-  "query":"Will SEA win given this play state?",
+  "query":"{\n  \"type\": \"noul\",\n  \"instructions\": \"Will SEA win given this play state?\"\n}",
   "metadata":{
     "provider":"openrouter",
     "model":"openai/gpt-4o-mini",

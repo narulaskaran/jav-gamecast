@@ -1,3 +1,5 @@
+import { parseJevQueryJson } from './jevQuery.js'
+
 export const FIXTURE_PLAYER_CLASSES = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'] as const
 export const SAMPLE_WIN_LIKELIHOOD_TASK = 'Win likelihood of the game per play.'
 export const SAMPLE_WIN_NOUL_QUERY = 'Will SEA win given this play state?'
@@ -35,6 +37,8 @@ export const inferQuestionKind = (
   explicit?: JevQuestionKind,
 ): JevQuestionKind => {
   if (explicit) return explicit
+  const parsed = parseJevQueryJson(text)
+  if (parsed) return parsed.type
   if (looksLikeWinLikelihood(text)) return 'noul'
   if (classes.length >= 2) return 'choice'
   return 'choice'

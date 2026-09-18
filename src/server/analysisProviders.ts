@@ -18,6 +18,11 @@ import {
   type JevQuestionKind,
 } from '../shared/analysis.js'
 import { inferQuestionKind, parseQuestionKind } from '../shared/questionKind.js'
+import {
+  classesFromJevQuery,
+  parseJevQueryJson,
+  parseJevQueryRecord,
+} from '../shared/jevQuery.js'
 import { AnalysisError, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis.js'
 import { createTypeSafeSdkConfig, hasTypeSafeApiKey, JEV_MODEL } from './jev.js'
 
@@ -60,8 +65,24 @@ const parseDraftClasses = (value: unknown): string[] | undefined => {
 const contentDraft = (content: unknown): { query: string; classes?: string[]; questionKind?: JevQuestionKind } | undefined => {
   const fromRecord = (value: unknown): { query: string; classes?: string[]; questionKind?: JevQuestionKind } | undefined => {
     if (!isRecord(value)) return undefined
+    const jev = parseJevQueryRecord(value)
+    if (jev) {
+      return {
+        query: JSON.stringify(jev),
+        classes: classesFromJevQuery(jev),
+        questionKind: jev.type,
+      }
+    }
     const query = parseDraftQuery(value.query)
     if (!query) return undefined
+    const nested = parseJevQueryJson(query)
+    if (nested) {
+      return {
+        query: JSON.stringify(nested),
+        classes: classesFromJevQuery(nested),
+        questionKind: nested.type,
+      }
+    }
     const levels = parseDraftClasses(value.levels) ?? parseDraftClasses(value.classes)
     return { query, classes: levels, questionKind: parseQuestionKind(value.questionKind) }
   }
@@ -123,7 +144,7 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
           model: this.model,
           temperature: 0,
           messages: [
-            { role: 'system', content: 'Return JSON only: {"query":"...","questionKind":"noul"|"score"|"choice","classes":["..."]}. Honor the user task. Choose the Jev primitive that matches the answer: noul = yes/no probability 0-1 (for per-play win likelihood use "Will SEA win given this play state?"); score = ordered levels; choice = categorical labels the user asked for. Do not substitute a leftover demo player-yards classifier (K.Walker, C.Kupp, J.Smith-Njigba, Other). Do not treat CSV columns such as wpa or epa as the model output. Do not include credentials or executable code.' },
+            { role: 'system', content: 'Return JSON only: a Jev query object {"type":"noul"|"score"|"choice","instructions":"...","criteria":...}. Noul is {"type":"noul","instructions":"..."} (yes/no probability 0-1; for per-play win likelihood use "Will SEA win given this play state?"). Score is {"type":"score","instructions":"...","criteria":["Low","Medium","High"]}. Choice is {"type":"choice","instructions":"...","criteria":{"Label":"what this class means"}}. Honor the user task. Do not return a natural-language paraphrase of the task as the query. Do not substitute a leftover demo player-yards classifier (K.Walker, C.Kupp, J.Smith-Njigba, Other). Do not treat CSV columns such as wpa or epa as the model output. Do not include credentials or executable code.' },
             { role: 'user', content: JSON.stringify({
               fixtureId: input.fixtureId,
               datasetId: input.datasetId,
@@ -255,11 +276,17 @@ const scoreCriteriaFor = (classes: readonly string[]): ScoreCriteria => {
 }
 
 const questionFor = (input: Parameters<AnalysisClassifier['classify']>[0]) => {
-  const kind = inferQuestionKind(input.query, input.classes, input.questionKind)
-  if (kind === 'noul') return noul(input.query)
-  if (kind === 'score') return score(input.query, scoreCriteriaFor(input.classes))
+  const parsed = parseJevQueryJson(input.query)
+  const instructions = parsed?.instructions ?? input.query
+  const kind = parsed?.type ?? inferQuestionKind(input.query, input.classes, input.questionKind)
+  if (kind === 'noul') return noul(instructions)
+  if (kind === 'score') {
+    const levels = parsed?.type === 'score' ? parsed.criteria : input.classes
+    return score(instructions, scoreCriteriaFor(levels ?? []))
+  }
+  if (parsed?.type === 'choice') return choice(instructions, parsed.criteria)
   if (!input.classes || input.classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
-  return choice(input.query, classifierCriteriaFor(input.classes))
+  return choice(instructions, classifierCriteriaFor(input.classes))
 }
 
 export interface ClassifierClientBoundary {

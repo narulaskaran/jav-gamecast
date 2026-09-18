@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { AnalysisRunView } from './components/AnalysisRunView'
 import { DatasetIntake } from './components/DatasetIntake'
 import { DatasetPreviewCard } from './components/DatasetPreview'
+import { StageFold } from './components/StageFold'
 import { Badge } from './components/ui/badge'
 import { Button } from './components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from './components/ui/card'
 import { Label } from './components/ui/label'
 import { Textarea } from './components/ui/textarea'
 import { getSampleDatasetPreview, SAMPLE_DATASET_ID } from './dataset/sampleDataset'
-import { DatasetError, DATASET_ERROR_COPY, plainDatasetError, PUBLIC_DATA_WARNING } from './dataset/csvTypes'
+import { DatasetError, DATASET_ERROR_COPY, plainDatasetError } from './dataset/csvTypes'
 import { validateCsvText } from './dataset/validateDataset'
 import type {
   AnalysisDraftResult,
@@ -17,6 +18,13 @@ import type {
 import {
   SAMPLE_WIN_LIKELIHOOD_TASK,
 } from './shared/questionKind'
+import {
+  classesFromJevQuery,
+  formatDraftQueryForEditor,
+  jevQuerySummary,
+  looksLikeJevQueryJson,
+  parseJevQueryJson,
+} from './shared/jevQuery'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
 import './styles.css'
 
@@ -69,7 +77,7 @@ export const defaultAnalysisApi: AnalysisApiClient = {
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
 const SAMPLE_TASK = SAMPLE_WIN_LIKELIHOOD_TASK
 
-export const hasRunnableQuery = (query: string): boolean => query.trim().length > 0
+export const hasRunnableQuery = (query: string): boolean => looksLikeJevQueryJson(query)
 
 export const canConfirmJevRun = ({ query, starting }: { query: string; starting: boolean }): boolean =>
   hasRunnableQuery(query) && !starting
@@ -109,6 +117,13 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const [error, setError] = useState<string | undefined>()
   const [shareMessage, setShareMessage] = useState('')
   const [shareLoading, setShareLoading] = useState(false)
+  const [queryCopyMessage, setQueryCopyMessage] = useState('')
+  const [foldAnimate, setFoldAnimate] = useState(false)
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setFoldAnimate(true))
+    return () => window.cancelAnimationFrame(frame)
+  }, [])
 
   useEffect(() => {
     if (isShareView || !api.intakeStatus) return undefined
@@ -162,30 +177,38 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     setQuery('')
     setSnapshot(undefined)
     setShareMessage('')
+    setQueryCopyMessage('')
     setError(undefined)
   }
 
   const handleDraft = async () => {
     if (!datasetId) { setError('Choose a dataset first.'); return }
     if (!task.trim()) { setError('Enter a task before drafting a query.'); return }
-    setDrafting(true); setError(undefined); setDraft(undefined); setQuery('')
+    setDrafting(true); setError(undefined); setDraft(undefined); setQuery(''); setQueryCopyMessage('')
     try {
       const result = await api.draft({ datasetId, fixtureId: dataset?.sourceType === 'fixture' ? SAMPLE_DATASET_ID : undefined, task: task.trim() })
-      setDraft(result); setQuery(result.query)
+      setDraft(result)
+      setQuery(formatDraftQueryForEditor({
+        query: result.query,
+        questionKind: result.metadata.questionKind,
+        classes: result.metadata.classes,
+      }))
     } catch (draftError) { setError(shortError(draftError, 'Could not draft a Jev query'))
     } finally { setDrafting(false) }
   }
 
   const handleRun = async () => {
     if (!draft || !hasRunnableQuery(query) || !datasetId) return
+    const parsed = parseJevQueryJson(query)
+    if (!parsed) return
     setStarting(true); setError(undefined); setSnapshot(undefined); setShareMessage('')
     try {
       setSnapshot(await api.start({
         datasetId,
         fixtureId: dataset?.sourceType === 'fixture' ? SAMPLE_DATASET_ID : undefined,
         query: query.trim(),
-        classes: draft.metadata.classes,
-        questionKind: draft.metadata.questionKind,
+        classes: classesFromJevQuery(parsed),
+        questionKind: parsed.type,
       }))
     } catch (runError) { setError(shortError(runError, 'Could not start Jev analysis'))
     } finally { setStarting(false) }
@@ -237,50 +260,63 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
 
   const copyShareUrl = useCallback(async () => {
     if (!shareUrl) return
-    try { await navigator.clipboard?.writeText(shareUrl); setShareMessage('Share URL copied')
+    try { await navigator.clipboard?.writeText(shareUrl); setShareMessage('Copied')
     } catch { setShareMessage('Share URL ready') }
   }, [shareUrl])
 
-  const showLanding = !isShareView && !dataset
+  const copyQuery = useCallback(async () => {
+    if (!query.trim()) return
+    try {
+      await navigator.clipboard?.writeText(query)
+      setQueryCopyMessage('Copied')
+    } catch {
+      setQueryCopyMessage('Copy failed')
+    }
+  }, [query])
+
+  const showIntake = !isShareView && !dataset
+  const showTask = !isShareView && Boolean(dataset)
+  const showQuery = !isShareView && Boolean(draft)
+  const showRun = Boolean(snapshot)
   const canRun = Boolean(draft && datasetId && canConfirmJevRun({ query, starting }))
+  const parsedQuery = parseJevQueryJson(query)
+  const querySummary = parsedQuery ? jevQuerySummary(parsedQuery) : undefined
+  const queryInvalid = query.trim().length > 0 && !parsedQuery
 
   return (
-    <main className="analysis-shell">
+    <main className="analysis-shell" data-stage={isShareView ? 'share' : snapshot ? 'run' : draft ? 'query' : dataset ? 'task' : 'intake'}>
       <header className="site-header">
         <a className="brand" href="/" aria-label="Jev playground home">Jev</a>
-        <Badge variant="secondary">{isShareView ? 'Public snapshot' : 'Demo'}</Badge>
+        {isShareView ? <Badge variant="secondary">Public snapshot</Badge> : null}
       </header>
-      <section className="hero" aria-labelledby="page-title">
-        <p className="eyebrow">{isShareView ? 'A persisted public readback' : 'Demo playground'}</p>
+      <section className={`hero${showIntake || isShareView ? '' : ' is-compact'}`} aria-labelledby="page-title">
         <h1 id="page-title">{isShareView ? 'Inspect a saved run.' : 'Run Jev on a CSV.'}</h1>
-        <p className="hero-copy">
-          {isShareView
-            ? 'A read-only snapshot of one bounded Jev analysis, including its persisted progress, live chart, and deterministic replay.'
-            : 'This is an engineer playground for TypeSafe Jev. Try the sample run, or bring your own CSV — the chart updates as each row is classified.'}
-        </p>
+        {showIntake || isShareView ? (
+          <p className="hero-copy">
+            {isShareView ? 'A saved Jev run, replayed from stored predictions.' : 'Bring a dataset. Ask a question. See Jev classify every row.'}
+          </p>
+        ) : null}
       </section>
-      <div className="workspace-grid">
-        <div className="primary-column">
-          {showLanding && (
-            <DatasetIntake
-              status={intakeStatus}
-              intakeError={error}
-              disabled={intakeBusy}
-              onUploadFile={(file) => void handleUpload(file)}
-              onSubmitUrl={(url) => void handleUrl(url)}
-              onTrySample={handleSample}
-            />
-          )}
-          {dataset && !isShareView && (
-            <DatasetPreviewCard dataset={dataset} onChange={() => { setDataset(undefined); resetRunState() }} />
-          )}
-          {!isShareView && dataset && (
-            <>
+      <div className="workspace">
+        <StageFold open={showIntake} animate={foldAnimate}>
+          <DatasetIntake
+            status={intakeStatus}
+            intakeError={error}
+            disabled={intakeBusy}
+            onUploadFile={(file) => void handleUpload(file)}
+            onSubmitUrl={(url) => void handleUrl(url)}
+            onTrySample={handleSample}
+          />
+        </StageFold>
+        <StageFold open={showTask} animate={foldAnimate}>
+          {dataset ? (
+            <div className="stage-stack">
+              <DatasetPreviewCard dataset={dataset} onChange={() => { setDataset(undefined); resetRunState() }} />
               <Card className="task-card" aria-labelledby="task-heading">
                 <CardHeader className="section-heading flex-row items-start justify-between space-y-0">
                   <div>
                     <p className="eyebrow">Prompt</p>
-                    <h2 id="task-heading">Describe the analysis task</h2>
+                    <h2 id="task-heading">What should Jev answer?</h2>
                   </div>
                   {drafting ? <Badge variant="running">Drafting</Badge> : <Badge variant="secondary">Draft</Badge>}
                 </CardHeader>
@@ -298,101 +334,87 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
                   {drafting ? <Thinking>Drafting query…</Thinking> : null}
                 </CardContent>
                 <CardFooter className="form-footer">
-                  <span>Task is sent only when you choose Draft task.</span>
+                  <span />
                   <Button type="button" onClick={() => void handleDraft()} disabled={drafting}>
                     {drafting ? 'Drafting…' : 'Draft task'}
                   </Button>
                 </CardFooter>
               </Card>
-              {draft && (
-                <Card className="query-card" aria-labelledby="query-heading">
-                  <CardHeader className="section-heading flex-row items-start justify-between space-y-0">
-                    <div>
-                      <p className="eyebrow">Query</p>
-                      <h2 id="query-heading">Jev query</h2>
-                    </div>
-                    <Badge variant="secondary">Editable</Badge>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-2">
-                      <Label htmlFor="jev-query">Generated query</Label>
-                      <Textarea
-                        id="jev-query"
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        rows={5}
-                      />
-                    </div>
-                    <div className="query-meta">
-                      <span>{draft.metadata.rowCount} rows · {draft.metadata.questionKind ?? 'query'}{draft.metadata.classes.length ? ` · ${draft.metadata.classes.length} classes` : ''} · {draft.metadata.model}</span>
-                      <span>Provider: {draft.metadata.provider}</span>
-                    </div>
-                    {starting ? <Thinking>Starting run…</Thinking> : null}
-                  </CardContent>
-                  <CardFooter className="form-footer">
-                    <span>{hasRunnableQuery(query) ? 'Review the query, then confirm Run Jev.' : 'Enter a query before running Jev.'}</span>
-                    <Button
-                      className="run-button"
-                      variant="run"
-                      type="button"
-                      onClick={() => void handleRun()}
-                      disabled={!canRun}
-                    >
-                      {starting ? 'Starting…' : 'Run Jev'}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              )}
-              {error && (
-                <div className="error-banner" role="alert">
-                  <b>Action needs attention</b>
-                  <span>{error}</span>
-                </div>
-              )}
-            </>
-          )}
-          {isShareView && shareLoading && <p className="empty-copy" role="status">Loading public snapshot…</p>}
-          {isShareView && error && (
-            <div className="error-banner" role="alert">
-              <b>Public snapshot unavailable</b>
-              <span>{error}</span>
             </div>
-          )}
-          {snapshot && (
+          ) : null}
+        </StageFold>
+        <StageFold open={showQuery} animate={foldAnimate}>
+          {draft ? (
+            <Card className="query-card">
+              <CardHeader className="section-heading flex-row items-start justify-between space-y-0">
+                <div>
+                    <p className="eyebrow">Query</p>
+                    <h2 id="query-heading">Jev query</h2>
+                </div>
+                <Badge variant="secondary">{draft.metadata.questionKind ?? 'query'}</Badge>
+              </CardHeader>
+              <CardContent>
+                {querySummary ? <p className="query-summary">{querySummary}</p> : null}
+                <div className="grid gap-2 min-w-0">
+                  <div className="query-editor-head">
+                    <Label htmlFor="jev-query">Jev query JSON</Label>
+                    <Button variant="ghost" size="sm" type="button" onClick={() => void copyQuery()} disabled={!query.trim()}>
+                      {queryCopyMessage || 'Copy'}
+                    </Button>
+                  </div>
+                  <Textarea
+                    id="jev-query"
+                    className="query-json"
+                    value={query}
+                    onChange={(event) => { setQuery(event.target.value); setQueryCopyMessage('') }}
+                    rows={10}
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    aria-invalid={queryInvalid || undefined}
+                  />
+                </div>
+                {starting ? <Thinking>Starting run…</Thinking> : null}
+              </CardContent>
+              <CardFooter className="form-footer">
+                <span>{canRun ? '' : queryInvalid ? 'Valid Jev JSON required.' : 'Enter Jev query JSON before running.'}</span>
+                <Button
+                  className="run-button"
+                  variant="run"
+                  type="button"
+                  onClick={() => void handleRun()}
+                  disabled={!canRun}
+                >
+                  {starting ? 'Starting…' : 'Run Jev'}
+                </Button>
+              </CardFooter>
+            </Card>
+          ) : null}
+        </StageFold>
+        {!isShareView && error && (dataset || !showIntake) && (
+          <div className="error-banner" role="alert">
+            <b>Action needs attention</b>
+            <span>{error}</span>
+          </div>
+        )}
+        {isShareView && shareLoading && <p className="empty-copy" role="status">Loading public snapshot…</p>}
+        {isShareView && error && (
+          <div className="error-banner" role="alert">
+            <b>Public snapshot unavailable</b>
+            <span>{error}</span>
+          </div>
+        )}
+        <StageFold open={showRun} animate={foldAnimate}>
+          {snapshot ? (
             <AnalysisRunView
               snapshot={snapshot}
               shareUrl={shareUrl}
               shareMessage={shareMessage}
               onCopyShare={copyShareUrl}
             />
-          )}
-        </div>
-        <aside className="side-column">
-          <Card className="boundary-card">
-            <CardHeader>
-              <p className="eyebrow">Playground limits</p>
-              <h2>A technical demo, not production analytics.</h2>
-            </CardHeader>
-            <CardContent>
-              <ul>
-                <li><b>5 MB</b> CSV maximum</li>
-                <li><b>5,000</b> max rows / Jev calls</li>
-                <li><b>HTTPS</b> public CSV URLs only</li>
-              </ul>
-              <p className="text-sm text-muted-foreground leading-relaxed">{PUBLIC_DATA_WARNING} The browser never calls Jev, OpenRouter, or UploadThing credentials.</p>
-            </CardContent>
-          </Card>
-          <Card className="about-card">
-            <CardHeader>
-              <p className="eyebrow">How a run works</p>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground leading-relaxed">Draft an editable query, confirm Run Jev, then watch the live chart tick as each row is persisted. Share and replay use stored predictions only.</p>
-            </CardContent>
-          </Card>
-        </aside>
+          ) : null}
+        </StageFold>
       </div>
-      <footer className="site-footer">Demo playground · engineer demo</footer>
     </main>
   )
 }

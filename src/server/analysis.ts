@@ -26,6 +26,12 @@ import {
   isFixturePlayerClassList,
   resolveDraftedQuery,
 } from '../shared/questionKind.js'
+import {
+  buildJevQuery,
+  classesFromJevQuery,
+  parseJevQueryJson,
+  stringifyJevQuery,
+} from '../shared/jevQuery.js'
 import { asAnalysisRow } from '../shared/dataset.js'
 import {
   FOOTBALL_FIXTURE_ID,
@@ -285,11 +291,12 @@ export class AnalysisService {
     if (!validText(draft.query, ANALYSIS_MAX_QUERY_LENGTH) || typeof draft.model !== 'string' || !draft.model.trim()) {
       throw new AnalysisError('MALFORMED_DRAFT', 'OpenRouter returned an invalid classifier query', 502)
     }
+    const parsedDraft = parseJevQueryJson(draft.query)
     const resolved = resolveDraftedQuery({
       task,
-      query: draft.query,
-      questionKind: draft.questionKind ?? questionKindHint,
-      classes: draft.classes,
+      query: parsedDraft?.instructions ?? draft.query,
+      questionKind: parsedDraft?.type ?? draft.questionKind ?? questionKindHint,
+      classes: parsedDraft && parsedDraft.type !== 'noul' ? classesFromJevQuery(parsedDraft) : draft.classes,
     })
     const classes = resolved.questionKind === 'choice' || resolved.questionKind === 'score'
       ? normalizeClasses(resolved.classes, [])
@@ -298,7 +305,12 @@ export class AnalysisService {
       fixtureId: dataset.fixtureId,
       datasetId: dataset.datasetId,
       sourceType: dataset.sourceType,
-      query: resolved.query,
+      query: stringifyJevQuery(buildJevQuery({
+        type: resolved.questionKind,
+        instructions: resolved.query,
+        classes,
+        criteria: parsedDraft?.type === resolved.questionKind ? parsedDraft : undefined,
+      })),
       metadata: {
         provider: 'openrouter',
         model: draft.model.trim().slice(0, 200),
@@ -338,8 +350,9 @@ export class AnalysisService {
       }
       return cloneAnalysisSnapshot(normalized)
     }
-    const questionKind = inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
-    const classes = questionKind === 'noul' ? [] : normalizeClasses(input.classes, dataset.classes ?? [])
+    const parsedQuery = parseJevQueryJson(query)
+    const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
+    const classes = questionKind === 'noul' ? [] : normalizeClasses(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes, dataset.classes ?? [])
     if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
     if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
     this.options.classifier.assertConfigured?.()

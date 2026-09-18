@@ -1,4 +1,4 @@
-import { PUBLIC_DATA_WARNING, plainDatasetError } from '../dataset/csvTypes'
+import { plainDatasetError } from '../dataset/csvTypes'
 import type { DatasetIntakeStatus } from '../shared/dataset'
 import { Button } from './ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
@@ -25,13 +25,12 @@ export const DatasetIntake = ({
   return (
     <section className="intake-panel" aria-labelledby="intake-heading">
       <h2 id="intake-heading" className="visually-hidden">Choose a dataset</h2>
-      <p className="intake-disclosure">{PUBLIC_DATA_WARNING}</p>
       <div className="intake-cards">
         <Card className="intake-card">
           <CardHeader>
             <p className="eyebrow">Try sample</p>
             <CardTitle>Super Bowl Seahawks demo</CardTitle>
-            <CardDescription>A thin on-ramp that shows the live row chart. Football is the sample, not the product.</CardDescription>
+            <CardDescription>Football is the sample, not the product.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button type="button" onClick={onTrySample} disabled={disabled}>Try sample</Button>
@@ -41,7 +40,7 @@ export const DatasetIntake = ({
           <CardHeader>
             <p className="eyebrow">Bring your own</p>
             <CardTitle>Upload .csv or public HTTPS CSV URL</CardTitle>
-            <CardDescription>Same run UX as the sample. The chart updates as each row is classified.</CardDescription>
+            <CardDescription>Same live chart as the sample.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="byod-file">
@@ -75,7 +74,7 @@ export const DatasetIntake = ({
           </CardContent>
         </Card>
       </div>
-      {missing && <p className="intake-missing" role="status">{missing} Sample still works; upload and public URL stay fail-closed.</p>}
+      {missing && <p className="intake-missing" role="status">{missing} Sample still works.</p>}
       {intakeError && (
         <div className="error-banner" role="alert">
           <b>Dataset needs attention</b>

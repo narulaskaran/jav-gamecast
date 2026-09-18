@@ -5,6 +5,7 @@ import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballT
 import { asAnalysisRow } from './shared/dataset'
 import type { AnalysisDraftResult, AnalysisSnapshot } from './shared/analysis'
 import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from './shared/questionKind'
+import { formatDraftQueryForEditor, parseJevQueryJson } from './shared/jevQuery'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
 
 const input = asAnalysisRow(getHalftimeModelInput()[0])
@@ -26,12 +27,23 @@ const snapshot = (overrides: Partial<AnalysisSnapshot> = {}): AnalysisSnapshot =
   ...overrides,
 })
 
+const draftQueryJson = formatDraftQueryForEditor({
+  query: 'Classify each row using the visible columns.',
+  questionKind: 'choice',
+  classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'],
+})
+const noulQueryJson = formatDraftQueryForEditor({
+  query: SAMPLE_WIN_NOUL_QUERY,
+  questionKind: 'noul',
+  classes: [],
+})
+
 const draft: AnalysisDraftResult = {
   fixtureId: FOOTBALL_FIXTURE_ID,
   datasetId: FOOTBALL_FIXTURE_ID,
   sourceType: 'fixture',
-  query: 'Classify each row using the visible columns.',
-  metadata: { provider: 'openrouter', model: 'openai/gpt-4o-mini', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2', classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'], columns: ['play_id'], displayName: 'Super Bowl Seahawks demo' },
+  query: draftQueryJson,
+  metadata: { provider: 'openrouter', model: 'openai/gpt-4o-mini', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2', questionKind: 'choice', classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'], columns: ['play_id'], displayName: 'Super Bowl Seahawks demo' },
 }
 
 const uploaded: DatasetPreview = {
@@ -64,26 +76,27 @@ const startSampleRun = async (api: AnalysisApiClient) => {
   render(<App api={api} />)
   fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
   fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
-  await screen.findByDisplayValue(draft.query)
+  await screen.findByLabelText(/^Jev query JSON$/i)
   fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
 }
 
 describe('Jev playground flow', () => {
-  it('renders the engineer playground landing without fetching providers', async () => {
+  it('renders a quiet idle landing with sample and BYOD only', async () => {
     const api = makeApi()
     render(<App api={api} />)
     expect(screen.getByRole('link', { name: /jev playground home/i })).toBeInTheDocument()
-    expect(screen.getByText('Demo')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /run jev on a csv/i })).toBeInTheDocument()
-    expect(screen.getByText(/this is an engineer playground for typesafe jev/i)).toBeInTheDocument()
-    expect(screen.getByText(/try the sample run, or bring your own csv/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/demo playground/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/bring a dataset\. ask a question\. see jev classify every row/i)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /super bowl seahawks demo/i })).toBeInTheDocument()
     expect(screen.getByText(/football is the sample, not the product/i)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /upload \.csv or public https csv url/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/upload csv/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /use public csv url/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^try sample$/i })).toBeInTheDocument()
+    expect(document.querySelector('[data-stage="intake"]')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: /analysis task/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: /jev query json/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/playground limits|5 mb|5,000|engineer playground|how a run works|demo playground/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/espn|gamecast|ask a football question|analyze your business/i)).not.toBeInTheDocument()
     expect(api.draft).not.toHaveBeenCalled()
     expect(api.start).not.toHaveBeenCalled()
@@ -97,28 +110,81 @@ describe('Jev playground flow', () => {
     expect(canConfirmJevRun({ query: draft.query, starting: false })).toBe(true)
     expect(canConfirmJevRun({ query: draft.query, starting: true })).toBe(false)
     expect(canConfirmJevRun({ query: '  ', starting: false })).toBe(false)
+    expect(canConfirmJevRun({ query: '{not-json', starting: false })).toBe(false)
+    expect(canConfirmJevRun({ query: SAMPLE_WIN_LIKELIHOOD_TASK, starting: false })).toBe(false)
   })
 
   it('does not fetch on sample task editing, and enables Run Jev after draft without a query edit', async () => {
     const api = makeApi()
     render(<App api={api} />)
     fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    expect(document.querySelector('[data-stage="task"]')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^try sample$/i })).not.toBeInTheDocument()
     expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(api.draft).not.toHaveBeenCalled()
     expect(api.start).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/^Analysis task$/i), { target: { value: 'Find a first-half signal.' } })
     expect(api.draft).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
-    await screen.findByDisplayValue(draft.query)
+    const editor = await screen.findByLabelText(/^Jev query JSON$/i)
+    expect(document.querySelector('[data-stage="query"]')).toBeTruthy()
+    expect((editor as HTMLTextAreaElement).value).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
+    expect(screen.queryByLabelText(/^Generated query$/i)).not.toBeInTheDocument()
     expect(api.draft).toHaveBeenCalledTimes(1)
     expect(api.start).not.toHaveBeenCalled()
     const runButton = screen.getByRole('button', { name: /run jev/i })
     expect(runButton).toBeEnabled()
-    expect(screen.getByText(/review the query, then confirm run jev/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^copy$/i })).toBeInTheDocument()
+    expect(document.querySelector('[data-stage="query"]')).toBeTruthy()
     fireEvent.click(runButton)
     await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1))
-    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: draft.query, classes: draft.metadata.classes, questionKind: draft.metadata.questionKind })
+    expect(document.querySelector('[data-stage="run"]')).toBeTruthy()
+    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: draftQueryJson, classes: draft.metadata.classes, questionKind: 'choice' })
     expect(api.draft).toHaveBeenCalledTimes(1)
+  })
+
+  it('drafts the Jev query JSON into the editor, not a prose paraphrase of the task', async () => {
+    const api = makeApi()
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    const editor = await screen.findByLabelText(/^Jev query JSON$/i)
+    const parsed = parseJevQueryJson((editor as HTMLTextAreaElement).value)
+    expect(parsed?.type).toMatch(/^(noul|score|choice)$/)
+    expect((editor as HTMLTextAreaElement).value).toBe(JSON.stringify(parsed, null, 2))
+    expect((editor as HTMLTextAreaElement).value.trim().startsWith('{')).toBe(true)
+    expect((editor as HTMLTextAreaElement).value).toMatch(/"type"\s*:/)
+    expect((editor as HTMLTextAreaElement).value).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
+    expect(screen.queryByLabelText(/^Generated query$/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^jev query$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    fireEvent.click(screen.getByRole('button', { name: /^copy$/i }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith((editor as HTMLTextAreaElement).value))
+  })
+
+  it('runs after the user edits the Jev query JSON', async () => {
+    const api = makeApi()
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    await screen.findByLabelText(/^Jev query JSON$/i)
+    const edited = formatDraftQueryForEditor({
+      query: 'Will SEA cover given this play state?',
+      questionKind: 'noul',
+      classes: [],
+    })
+    fireEvent.change(screen.getByLabelText(/^Jev query JSON$/i), { target: { value: edited } })
+    expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
+    await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1))
+    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({
+      query: edited,
+      questionKind: 'noul',
+      classes: [],
+    }))
   })
 
   it('keeps Run Jev disabled when Edit query text is cleared, and still accepts a manual edit', async () => {
@@ -126,15 +192,23 @@ describe('Jev playground flow', () => {
     render(<App api={api} />)
     fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
     fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
-    await screen.findByDisplayValue(draft.query)
-    fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: '   ' } })
+    await screen.findByLabelText(/^Jev query JSON$/i)
+    fireEvent.change(screen.getByLabelText(/^Jev query JSON$/i), { target: { value: '   ' } })
     expect(screen.getByRole('button', { name: /run jev/i })).toBeDisabled()
-    expect(screen.getByText(/enter a query before running jev/i)).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: 'Use only visible columns.' } })
+    expect(screen.getByText(/enter jev query json before running/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/^Jev query JSON$/i), { target: { value: '{not-json' } })
+    expect(screen.getByRole('button', { name: /run jev/i })).toBeDisabled()
+    expect(screen.getByText(/valid jev json required/i)).toBeInTheDocument()
+    const edited = formatDraftQueryForEditor({
+      query: 'Use only visible columns.',
+      questionKind: 'choice',
+      classes: draft.metadata.classes,
+    })
+    fireEvent.change(screen.getByLabelText(/^Jev query JSON$/i), { target: { value: edited } })
     expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
     await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1))
-    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: 'Use only visible columns.', classes: draft.metadata.classes, questionKind: draft.metadata.questionKind })
+    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: edited, classes: draft.metadata.classes, questionKind: 'choice' })
   })
 
   it('renders progress, live chart, processed-row rail, secondary results, and share action', async () => {
@@ -144,8 +218,8 @@ describe('Jev playground flow', () => {
       resultRows: Array.from({ length: 3 }, (_, rowIndex) => ({ rowIndex, input, model: 'jev-latest', selectedClass: 'K.Walker', probabilities: { 'K.Walker': 0.72, 'C.Kupp': 0.1, 'J.Smith-Njigba': 0.12, 'Other/Tie': 0.06 }, confidence: 0.72 })),
     })) })
     await startSampleRun(api)
-    expect(await screen.findByText(/running/i)).toBeInTheDocument()
-    expect(screen.getByText('12 / 39 rows')).toBeInTheDocument()
+    expect(await screen.findByText('12 / 39 rows')).toBeInTheDocument()
+    expect(screen.getByText('Running')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
     expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
     const rail = screen.getByRole('complementary', { name: /processed rows/i })
@@ -191,11 +265,11 @@ describe('Jev playground flow', () => {
   it('charts a Noul win-probability series instead of leftover player-class bars', async () => {
     const noulDraft: AnalysisDraftResult = {
       ...draft,
-      query: SAMPLE_WIN_NOUL_QUERY,
+      query: noulQueryJson,
       metadata: { ...draft.metadata, questionKind: 'noul', classes: [] },
     }
     const noulRun = snapshot({
-      query: SAMPLE_WIN_NOUL_QUERY,
+      query: noulQueryJson,
       questionKind: 'noul',
       classes: [],
       status: 'running',
@@ -217,7 +291,11 @@ describe('Jev playground flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
     expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
     fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
-    await screen.findByDisplayValue(SAMPLE_WIN_NOUL_QUERY)
+    const editor = await screen.findByLabelText(/^Jev query JSON$/i)
+    expect(parseJevQueryJson((editor as HTMLTextAreaElement).value)).toEqual({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY })
+    expect(screen.getByText(/noul · yes\/no probability 0–1/i)).toBeInTheDocument()
+    expect((editor as HTMLTextAreaElement).value.trim().startsWith('{')).toBe(true)
+    expect((editor as HTMLTextAreaElement).value).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
     expect(await screen.findByRole('img', { name: /win probability over play index/i })).toBeInTheDocument()
     expect(document.querySelector('[data-chart-kind="series"]')).toBeTruthy()
@@ -229,7 +307,7 @@ describe('Jev playground flow', () => {
     expect(within(rail).getByRole('button', { name: /row 1 of 39/i })).toBeInTheDocument()
     expect(within(rail).queryByText('K.Walker')).not.toBeInTheDocument()
     expect(api.draft).toHaveBeenCalledWith(expect.objectContaining({ task: SAMPLE_WIN_LIKELIHOOD_TASK }))
-    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul', classes: [] }))
+    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ query: noulQueryJson, questionKind: 'noul', classes: [] }))
   })
 
   it('follows the live edge until the user scrubs back, then seeks from the row rail', async () => {
@@ -296,13 +374,19 @@ describe('Jev playground flow', () => {
       progress: { completedRows: 1, totalRows: 2, completedCalls: 1, totalCalls: 2 },
       resultRows: [{ rowIndex: 0, input: { message: 'hello', tier: 'gold' }, model: 'jev-latest', selectedClass: 'gold', confidence: 0.9 }],
     })
+    const ticketsQueryJson = formatDraftQueryForEditor({
+      query: 'Classify each row using the visible columns.',
+      questionKind: 'choice',
+      classes: ['gold', 'silver'],
+    })
     const api = makeApi({
       draft: vi.fn(async () => ({
         ...draft,
         datasetId: uploaded.datasetId,
         fixtureId: uploaded.datasetId,
         sourceType: 'upload' as const,
-        metadata: { ...draft.metadata, displayName: 'tickets.csv', rowCount: 2, classes: ['gold', 'silver'], columns: ['message'] },
+        query: ticketsQueryJson,
+        metadata: { ...draft.metadata, displayName: 'tickets.csv', rowCount: 2, questionKind: 'choice' as const, classes: ['gold', 'silver'], columns: ['message'] },
       })),
       start: vi.fn(async () => byod),
       read: vi.fn(async () => byod),
@@ -312,14 +396,15 @@ describe('Jev playground flow', () => {
     fireEvent.change(screen.getByLabelText(/upload csv/i), { target: { files: [file] } })
     expect(await screen.findByRole('heading', { name: 'tickets.csv' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
-    await screen.findByDisplayValue(draft.query)
+    await screen.findByLabelText(/^Jev query JSON$/i)
     expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
     await waitFor(() => expect(api.start).toHaveBeenCalledWith({
       datasetId: uploaded.datasetId,
       fixtureId: undefined,
-      query: draft.query,
+      query: ticketsQueryJson,
       classes: ['gold', 'silver'],
+      questionKind: 'choice',
     }))
     expect(await screen.findByText('1 / 2 rows')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
@@ -349,7 +434,7 @@ describe('Jev playground flow', () => {
       render(<App api={api} />)
       expect(await screen.findByText('Jev analysis run')).toBeInTheDocument()
       expect(api.share).toHaveBeenCalledWith(analysisId)
-      expect(screen.getByText(`Run ${analysisId} · no provider credentials are exposed to the browser`)).toBeInTheDocument()
+      expect(screen.queryByText(/no provider credentials|bounded jev worker|engineer playground/i)).not.toBeInTheDocument()
       expect(await screen.findByRole('table', { name: /incremental analysis results/i })).toBeInTheDocument()
       expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
       expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()

@@ -6,7 +6,6 @@ import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader } from './ui/card'
 import { Progress as ProgressBar } from './ui/progress'
-import { Separator } from './ui/separator'
 import { useRunPlayhead } from '../runView/playhead'
 import { chartVisualFor, inferQuestionKind } from '../shared/questionKind'
 import type { AnalysisSnapshot, AnalysisStatus } from '../shared/analysis'
@@ -16,13 +15,6 @@ const statusLabels: Record<AnalysisStatus, string> = {
   running: 'Running',
   complete: 'Complete',
   error: 'Error',
-}
-
-const statusCopy: Record<AnalysisStatus, string> = {
-  queued: 'Run accepted. Waiting for the bounded Jev worker.',
-  running: 'Each persisted row prediction updates the chart.',
-  complete: 'All accepted rows have a bounded classification result.',
-  error: 'The run stopped with a stable error code; partial rows remain readable.',
 }
 
 const statusVariant: Record<AnalysisStatus, 'queued' | 'running' | 'complete' | 'error'> = {
@@ -43,22 +35,15 @@ const StatusBadge = memo(function StatusBadge({ status }: { status: AnalysisStat
 const Progress = memo(function Progress({
   completedRows,
   totalRows,
-  completedCalls,
-  totalCalls,
-  status,
 }: {
   completedRows: number
   totalRows: number
-  completedCalls: number
-  totalCalls: number
-  status: AnalysisStatus
 }) {
   const ratio = totalRows ? Math.min(100, Math.round((completedRows / totalRows) * 100)) : 0
   return (
     <div className="progress-block" aria-label="Analysis progress">
       <div className="progress-line"><span>{completedRows} / {totalRows} rows</span><b>{ratio}%</b></div>
       <ProgressBar value={ratio} />
-      <p>{completedCalls} / {totalCalls} bounded Jev calls · {statusCopy[status]}</p>
     </div>
   )
 })
@@ -90,7 +75,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
       <CardHeader className="analysis-head flex-row items-start justify-between space-y-0 p-6 pb-0">
         <div>
-          <p className="eyebrow">Readback</p>
+          <p className="eyebrow">Run</p>
           <h2 id="analysis-heading">Jev analysis run</h2>
         </div>
         <div className="analysis-actions">
@@ -101,19 +86,14 @@ export const AnalysisRunView = memo(function AnalysisRunView({
         </div>
       </CardHeader>
       <CardContent>
-        <p className="run-id">Run {snapshot.analysisId} · no provider credentials are exposed to the browser</p>
-        <Separator className="mt-4" />
         <Progress
           completedRows={snapshot.progress.completedRows}
           totalRows={snapshot.progress.totalRows}
-          completedCalls={snapshot.progress.completedCalls}
-          totalCalls={snapshot.progress.totalCalls}
-          status={snapshot.status}
         />
         {snapshot.error ? (
           <div className="error-banner compact" role="alert">
             <b>{snapshot.error.code}</b>
-            <span>{snapshot.error.retryable ? 'Retryable provider boundary error.' : 'This run is not retrying automatically.'}</span>
+            <span>{snapshot.error.retryable ? 'Retryable.' : 'Stopped.'}</span>
           </div>
         ) : null}
         <div className="run-view">
@@ -139,9 +119,8 @@ export const AnalysisRunView = memo(function AnalysisRunView({
           />
         </div>
         <ResultsTable rows={deferredRows} columns={columns} />
-        <Separator className="mt-4" />
         <div className="share-footer">
-          <span>{shareMessage || 'Public URL reads the same bounded snapshot without calling a provider.'}</span>
+          <span>{shareMessage}</span>
           {shareUrl ? <a href={shareUrl} target="_blank" rel="noreferrer">Open public snapshot</a> : null}
         </div>
       </CardContent>

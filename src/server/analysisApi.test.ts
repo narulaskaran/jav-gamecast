@@ -32,7 +32,8 @@ describe('analysis API contract', () => {
     const state: ResponseState = { headers: {} }
     await createAnalysisDraftHandler(service())({ method: 'POST', headers: {}, body: { fixtureId: FOOTBALL_FIXTURE_ID, task: 'draft' } }, response(state))
     expect(state.code).toBe(200)
-    expect(state.body).toEqual(expect.objectContaining({ fixtureId: FOOTBALL_FIXTURE_ID, query, metadata: expect.objectContaining({ inputHalf: 'H1', labelHalf: 'H2' }) }))
+    expect(state.body).toEqual(expect.objectContaining({ fixtureId: FOOTBALL_FIXTURE_ID, metadata: expect.objectContaining({ inputHalf: 'H1', labelHalf: 'H2' }) }))
+    expect(JSON.parse((state.body as { query: string }).query)).toEqual(expect.objectContaining({ type: expect.any(String), instructions: query }))
   })
 
   it('starts a run with queued status and reads it without starting another provider call', async () => {

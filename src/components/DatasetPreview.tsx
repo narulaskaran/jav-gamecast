@@ -43,7 +43,6 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
             </tbody>
           </table>
         </div>
-        <p className="preview-disclosure">{dataset.publicDataWarning}</p>
         {dataset.attribution && (
           <div className="preview-links">
             <a href={dataset.attribution.sourceUrl} target="_blank" rel="noreferrer">Sample source</a>
