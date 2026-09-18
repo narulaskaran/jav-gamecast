@@ -377,20 +377,22 @@ export class AnalysisService {
     const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
     if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
-    const classes = questionKind === 'noul' ? [] : normalizeClasses(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes, dataset.classes ?? [])
-    if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
-    if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
+    const lookupClasses = questionKind === 'noul'
+      ? []
+      : [...(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes ?? dataset.classes ?? [])]
+        .map((item) => typeof item === 'string' ? item.trim() : '')
+        .filter(Boolean)
     if (requestedAnalysisId) {
       if (!validText(requestedAnalysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
       const existing = await this.options.store.get(requestedAnalysisId)
       if (existing) return this.resumeExisting(existing, dataset.datasetId, query)
     }
-    if (input.forceNew !== true) {
+    if (input.forceNew !== true && (questionKind !== 'choice' || lookupClasses.length >= 2)) {
       const cached = await this.options.store.findCompleteByContentKey?.(analysisContentKey({
         datasetId: dataset.datasetId,
         query,
         questionKind,
-        classes,
+        classes: lookupClasses,
       }))
       if (cached?.status === 'complete') return cloneAnalysisSnapshot(normalizeSnapshot(cached))
     }
@@ -398,6 +400,9 @@ export class AnalysisService {
     if (!validText(analysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const existing = await this.options.store.get(analysisId)
     if (existing) return this.resumeExisting(existing, dataset.datasetId, query)
+    const classes = questionKind === 'noul' ? [] : normalizeClasses(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes, dataset.classes ?? [])
+    if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
+    if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
     this.options.classifier.assertConfigured?.()
     const timestamp = nowIso(this.now)
     const snapshot: AnalysisSnapshot = {
