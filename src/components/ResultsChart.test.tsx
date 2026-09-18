@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ResultsChart } from './ResultsChart'
 import { AnalysisRunView } from './AnalysisRunView'
-import { useRunPlayhead } from '../runView/playhead'
+import { PLAYBACK_INTERVAL_MS, useRunPlayhead } from '../runView/playhead'
 import type { AnalysisResultRow, AnalysisSnapshot } from '../shared/analysis'
 
 const row = (rowIndex: number, selectedClass: string): AnalysisResultRow => ({
@@ -242,5 +242,55 @@ describe('AnalysisRunView tick isolation', () => {
     fireEvent.change(slider, { target: { value: '11' } })
     fireEvent.pointerUp(slider)
     expect(screen.getByRole('heading', { name: 'Row 12 of 71' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^play$/i })).not.toBeInTheDocument()
+  })
+
+  it('plays a completed run from the transport beside the scrubber and stays synced with Row X of Y', () => {
+    vi.useFakeTimers()
+    try {
+      const complete: AnalysisSnapshot = {
+        ...snapshot(5),
+        status: 'complete',
+        progress: { completedRows: 5, totalRows: 5, completedCalls: 5, totalCalls: 5 },
+        resultRows: Array.from({ length: 5 }, (_, rowIndex) => row(rowIndex, rowIndex === 1 ? 'silver' : 'gold')),
+      }
+      render(<AnalysisRunView snapshot={complete} shareUrl="" shareMessage="" onCopyShare={() => undefined} />)
+      expect(screen.getByRole('heading', { name: 'Row 5 of 5' })).toBeInTheDocument()
+      const play = screen.getByRole('button', { name: /^play$/i })
+      expect(play).toHaveAttribute('aria-pressed', 'false')
+      expect(play).toBeEnabled()
+      fireEvent.click(play)
+      expect(screen.getByRole('button', { name: /^pause$/i })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByRole('heading', { name: 'Row 1 of 5' })).toBeInTheDocument()
+      expect(screen.getByRole('slider', { name: /chart playhead/i })).toHaveAttribute('aria-valuetext', 'Row 1 of 5')
+      expect(document.querySelector('[data-class="gold"]')).toHaveAttribute('data-count', '1')
+      act(() => { vi.advanceTimersByTime(PLAYBACK_INTERVAL_MS) })
+      expect(screen.getByRole('heading', { name: 'Row 2 of 5' })).toBeInTheDocument()
+      expect(screen.getByRole('slider', { name: /chart playhead/i })).toHaveAttribute('aria-valuetext', 'Row 2 of 5')
+      expect(document.querySelector('[data-class="silver"]')).toHaveAttribute('data-count', '1')
+      fireEvent.click(screen.getByRole('button', { name: /^pause$/i }))
+      act(() => { vi.advanceTimersByTime(PLAYBACK_INTERVAL_MS * 3) })
+      expect(screen.getByRole('heading', { name: 'Row 2 of 5' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /^play$/i }))
+      fireEvent.change(screen.getByRole('slider', { name: /chart playhead/i }), { target: { value: '0' } })
+      expect(screen.getByRole('button', { name: /^play$/i })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Row 1 of 5' })).toBeInTheDocument()
+      act(() => { vi.advanceTimersByTime(PLAYBACK_INTERVAL_MS * 3) })
+      expect(screen.getByRole('heading', { name: 'Row 1 of 5' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /^play$/i }))
+      fireEvent.click(screen.getByRole('button', { name: /row 3 of 5/i }))
+      expect(screen.getByRole('button', { name: /^play$/i })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Row 3 of 5' })).toBeInTheDocument()
+      act(() => { vi.advanceTimersByTime(PLAYBACK_INTERVAL_MS * 3) })
+      expect(screen.getByRole('heading', { name: 'Row 3 of 5' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /^play$/i }))
+      act(() => { vi.advanceTimersByTime(PLAYBACK_INTERVAL_MS * 2) })
+      expect(screen.getByRole('heading', { name: 'Row 5 of 5' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /^play$/i })).toBeInTheDocument()
+      act(() => { vi.advanceTimersByTime(PLAYBACK_INTERVAL_MS * 3) })
+      expect(screen.getByRole('heading', { name: 'Row 5 of 5' })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -61,11 +61,17 @@ export const AnalysisRunView = memo(function AnalysisRunView({
 }) {
   const rows = snapshot.resultRows
   const columns = snapshot.columns ?? []
-  const { index, motion, seek } = useRunPlayhead(rows.length, snapshot.analysisId)
+  const playbackEnabled = snapshot.status === 'complete'
+  const { index, motion, playing, seek, togglePlayback } = useRunPlayhead(rows.length, snapshot.analysisId)
   const seekRef = useRef(seek)
+  const toggleRef = useRef(togglePlayback)
   seekRef.current = seek
+  toggleRef.current = togglePlayback
   const handleSeek = useCallback((next: number, phase: 'scrub' | 'release' = 'release') => {
     seekRef.current(next, phase)
+  }, [])
+  const handleTogglePlayback = useCallback(() => {
+    toggleRef.current()
   }, [])
   const deferredRows = useDeferredValue(rows)
   const questionKind = inferQuestionKind(snapshot.query, snapshot.classes, snapshot.questionKind)
@@ -106,7 +112,10 @@ export const AnalysisRunView = memo(function AnalysisRunView({
               motion={motion}
               questionKind={questionKind}
               chartKind={chartKind}
+              playing={playing}
+              playbackEnabled={playbackEnabled}
               onSeek={handleSeek}
+              onTogglePlayback={handleTogglePlayback}
             />
           </div>
           <RowRail

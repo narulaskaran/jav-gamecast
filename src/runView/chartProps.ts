@@ -19,11 +19,15 @@ type ChartVisual = {
   motion?: PlayheadMotion
   questionKind?: JevQuestionKind
   chartKind?: ChartVisualKind
+  playing?: boolean
+  playbackEnabled?: boolean
 }
 
 export const areChartPropsEqual = (prev: ChartVisual, next: ChartVisual): boolean => (
   prev.playheadIndex === next.playheadIndex
   && prev.motion === next.motion
+  && prev.playing === next.playing
+  && prev.playbackEnabled === next.playbackEnabled
   && prev.totalRows === next.totalRows
   && prev.rows.length === next.rows.length
   && prev.questionKind === next.questionKind

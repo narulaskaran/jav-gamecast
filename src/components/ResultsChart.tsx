@@ -6,6 +6,7 @@ import { clampPlayhead, playDomainCount, playIndexFromRatio, type PlayheadMotion
 import { areaPath, formatPercentTick, jevSeriesPoints, linePath, seriesX } from '../runView/seriesPath'
 import { chartVisualFor, inferQuestionKind, type ChartVisualKind, type JevQuestionKind } from '../shared/questionKind'
 import type { AnalysisResultRow } from '../shared/analysis'
+import { Button } from './ui/button'
 
 const EMPTY_CLASSES: readonly string[] = []
 
@@ -46,7 +47,10 @@ export const ResultsChart = memo(function ResultsChart({
   motion = 'tick',
   questionKind,
   chartKind,
+  playing = false,
+  playbackEnabled = false,
   onSeek,
+  onTogglePlayback,
 }: {
   rows: readonly AnalysisResultRow[]
   playheadIndex: number
@@ -55,7 +59,10 @@ export const ResultsChart = memo(function ResultsChart({
   motion?: PlayheadMotion
   questionKind?: JevQuestionKind
   chartKind?: ChartVisualKind
+  playing?: boolean
+  playbackEnabled?: boolean
   onSeek: (index: number, phase?: 'scrub' | 'release') => void
+  onTogglePlayback?: () => void
 }) {
   const plotRef = useRef<HTMLDivElement>(null)
   const completedCount = rows.length
@@ -187,25 +194,40 @@ export const ResultsChart = memo(function ResultsChart({
             </div>
           ) : null}
         </div>
-        <label className="chart-scrubber">
-          <span className="visually-hidden">Chart playhead</span>
-          <input
-            aria-label="Chart playhead"
-            aria-valuetext={completedCount ? `Row ${playheadIndex + 1} of ${totalRows || completedCount}` : 'Waiting'}
-            type="range"
-            min={0}
-            max={completedCount ? Math.max(0, domainCount - 1) : 0}
-            value={completedCount ? playheadIndex : 0}
-            disabled={!completedCount}
-            onChange={handleRange}
-            onPointerDown={(event) => {
-              if (!completedCount) return
-              emitSeek(Number(event.currentTarget.value), 'scrub')
-            }}
-            onPointerUp={handleRangeCommit}
-            onKeyUp={handleRangeCommit}
-          />
-        </label>
+        <div className="chart-transport">
+          {playbackEnabled ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="chart-transport-toggle"
+              aria-label={playing ? 'Pause' : 'Play'}
+              aria-pressed={playing}
+              disabled={completedCount < 2}
+              onClick={onTogglePlayback}
+            >
+              {playing ? 'Pause' : 'Play'}
+            </Button>
+          ) : null}
+          <label className="chart-scrubber">
+            <span className="visually-hidden">Chart playhead</span>
+            <input
+              aria-label="Chart playhead"
+              aria-valuetext={completedCount ? `Row ${playheadIndex + 1} of ${totalRows || completedCount}` : 'Waiting'}
+              type="range"
+              min={0}
+              max={completedCount ? Math.max(0, domainCount - 1) : 0}
+              value={completedCount ? playheadIndex : 0}
+              disabled={!completedCount}
+              onChange={handleRange}
+              onPointerDown={(event) => {
+                if (!completedCount) return
+                emitSeek(Number(event.currentTarget.value), 'scrub')
+              }}
+              onPointerUp={handleRangeCommit}
+              onKeyUp={handleRangeCommit}
+            />
+          </label>
+        </div>
       </div>
     </section>
   )

@@ -22,6 +22,7 @@ describe('chart visual compare', () => {
     const next = { ...prev, rows: [...rows] }
     expect(areChartPropsEqual(prev, next)).toBe(true)
     expect(areChartPropsEqual(prev, { ...next, rows: [...rows, row(1, 'gold')], playheadIndex: 1 })).toBe(false)
+    expect(areChartPropsEqual({ ...prev, playing: false, playbackEnabled: true }, { ...prev, playing: true, playbackEnabled: true })).toBe(false)
   })
 
   it('lets the rail skip when only the snapshot object identity changed', () => {
