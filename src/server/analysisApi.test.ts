@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FOOTBALL_FIXTURE_ID } from '../fixtures/footballTimeline'
+import { SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
 import { AnalysisService, InMemoryAnalysisStore, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis'
 import { createAnalysisDraftHandler, createAnalysisReadHandler, createAnalysisRunHandler } from './analysisApi'
 
@@ -71,5 +72,77 @@ describe('analysis API contract', () => {
     const postState: ResponseState = { headers: {} }
     await createAnalysisReadHandler(instance, { share: true })({ method: 'POST', headers: {}, query: { analysisId } }, response(postState))
     expect(postState.code).toBe(405)
+  })
+
+  it('returns an existing complete sample snapshot without invoking the classifier', async () => {
+    const calls: unknown[] = []
+    let nextId = 0
+    const instance = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      draftProvider: { async draft() { return { query: SAMPLE_WIN_NOUL_QUERY, model: 'openrouter/test' } } } satisfies AnalysisDraftProvider,
+      classifier: {
+        async classify(input) {
+          calls.push(input)
+          return { model: 'jev-latest', questionKind: 'noul', value: 0.41 }
+        },
+      } satisfies AnalysisClassifier,
+      idFactory: () => `analysis-api-${++nextId}`,
+      now: () => 1_800_000_000_000,
+    })
+    const first: ResponseState = { headers: {} }
+    await createAnalysisRunHandler(instance)({
+      method: 'POST',
+      headers: {},
+      body: { fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' },
+    }, response(first))
+    expect(first.code).toBe(202)
+    expect(calls).toHaveLength(71)
+    const analysisId = (first.body as { analysisId: string }).analysisId
+
+    const second: ResponseState = { headers: {} }
+    await createAnalysisRunHandler(instance)({
+      method: 'POST',
+      headers: {},
+      body: {
+        fixtureId: FOOTBALL_FIXTURE_ID,
+        query: JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }, null, 2),
+        questionKind: 'noul',
+      },
+    }, response(second))
+    expect(second.code).toBe(200)
+    expect(second.body).toEqual(expect.objectContaining({ analysisId, status: 'complete' }))
+    expect(calls).toHaveLength(71)
+  })
+
+  it('starts a new run when the sample query differs', async () => {
+    const calls: unknown[] = []
+    let nextId = 0
+    const instance = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      draftProvider: { async draft() { return { query: SAMPLE_WIN_NOUL_QUERY, model: 'openrouter/test' } } } satisfies AnalysisDraftProvider,
+      classifier: {
+        async classify(input) {
+          calls.push(input)
+          return { model: 'jev-latest', questionKind: 'noul', value: 0.41 }
+        },
+      } satisfies AnalysisClassifier,
+      idFactory: () => `analysis-api-${++nextId}`,
+      now: () => 1_800_000_000_000,
+    })
+    const first: ResponseState = { headers: {} }
+    await createAnalysisRunHandler(instance)({
+      method: 'POST',
+      headers: {},
+      body: { fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' },
+    }, response(first))
+    const second: ResponseState = { headers: {} }
+    await createAnalysisRunHandler(instance)({
+      method: 'POST',
+      headers: {},
+      body: { fixtureId: FOOTBALL_FIXTURE_ID, query: 'Will the away team cover the spread?', questionKind: 'noul' },
+    }, response(second))
+    expect(second.code).toBe(202)
+    expect((second.body as { analysisId: string }).analysisId).not.toBe((first.body as { analysisId: string }).analysisId)
+    expect(calls).toHaveLength(142)
   })
 })

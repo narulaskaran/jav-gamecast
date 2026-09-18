@@ -98,7 +98,9 @@ export default defineSchema({
     error: v.optional(analysisErrorValidator),
     runOwnerToken: v.optional(v.string()),
     runLeaseExpiresAt: v.optional(v.number()),
-  }).index('by_analysis_id', ['analysisId']),
+    contentKey: v.optional(v.string()),
+  }).index('by_analysis_id', ['analysisId'])
+    .index('by_content_key_status', ['contentKey', 'status']),
   analysisRows: defineTable({
     analysisId: v.string(),
     rowIndex: v.number(),

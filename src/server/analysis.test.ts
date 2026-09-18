@@ -88,9 +88,8 @@ describe('analysis domain contract', () => {
     expect(drafted.metadata.labelHalf).toBeUndefined()
     expect(drafted.metadata.columns).toEqual(expect.arrayContaining(['posteam_score', 'defteam_score', 'score_differential']))
     expect(JSON.stringify(drafted)).not.toMatch(/K\.Walker|C\.Kupp|Smith-Njigba|Other\/Tie/)
-    expect(draftCalls[0]?.task).toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
-    expect(draftCalls[0]?.classes ?? []).toEqual([])
-    expect(draftCalls[0]?.sampleRows?.[0]).toEqual(expect.objectContaining({ posteam_score: expect.any(Number), defteam_score: expect.any(Number), score_differential: expect.any(Number) }))
+    expect(drafted.metadata.model).toBe('cached-sample-noul')
+    expect(draftCalls).toHaveLength(0)
   })
 
   it('starts a Noul run from edited Jev query JSON', async () => {
@@ -275,6 +274,108 @@ describe('analysis domain contract', () => {
     const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses })
     store.put({ ...started, status: 'running', updatedAt: new Date(1_800_000_000_000 - 16 * 60_000).toISOString(), progress: { ...started.progress, completedRows: 2, completedCalls: 2 }, resultRows: [{ ...classification(), rowIndex: 0, input: getHalftimeModelInput(footballFixture)[0] }, { ...classification(), rowIndex: 1, input: getHalftimeModelInput(footballFixture)[1] }] })
     await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })).resolves.toMatchObject({ status: 'queued', progress: { completedRows: 2 }, resultRows: expect.any(Array) })
+  })
+
+  it('reuses a complete sample snapshot for the same dataset and query without invoking the classifier', async () => {
+    const calls: unknown[] = []
+    const store = new InMemoryAnalysisStore()
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        calls.push(input)
+        return { model: 'jev-latest', questionKind: 'noul', value: 0.41 }
+      },
+    }
+    const first = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-a',
+      now: () => 1_800_000_000_000,
+    })
+    const second = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-b',
+      now: () => 1_800_000_000_000,
+    })
+    const jsonQuery = JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }, null, 2)
+    const started = await first.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: jsonQuery, questionKind: 'noul' })
+    const completed = await first.run(started.analysisId)
+    expect(completed.status).toBe('complete')
+    expect(calls).toHaveLength(71)
+
+    const reused = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
+    expect(reused.analysisId).toBe(started.analysisId)
+    expect(reused.status).toBe('complete')
+    expect(reused.resultRows).toHaveLength(71)
+    await expect(second.run(reused.analysisId)).resolves.toMatchObject({ analysisId: started.analysisId, status: 'complete' })
+    expect(calls).toHaveLength(71)
+    expect(store.get('analysis-b')).toBeUndefined()
+    const forced = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul', forceNew: true })
+    expect(forced).toMatchObject({ analysisId: 'analysis-b', status: 'queued' })
+    expect(calls).toHaveLength(71)
+  })
+
+  it('creates a new run when the sample query differs', async () => {
+    const calls: unknown[] = []
+    const store = new InMemoryAnalysisStore()
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        calls.push(input)
+        return { model: 'jev-latest', questionKind: 'noul', value: 0.41 }
+      },
+    }
+    const first = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-a',
+      now: () => 1_800_000_000_000,
+    })
+    const second = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-b',
+      now: () => 1_800_000_000_000,
+    })
+    const started = await first.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
+    await first.run(started.analysisId)
+    const other = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: 'Will the away team cover the spread?', questionKind: 'noul' })
+    expect(other.analysisId).toBe('analysis-b')
+    expect(other.status).toBe('queued')
+    expect(other.analysisId).not.toBe(started.analysisId)
+    await second.run(other.analysisId)
+    expect(calls).toHaveLength(142)
+  })
+
+  it('does not reuse an errored snapshot and mints a new analysis for the next visitor', async () => {
+    const store = new InMemoryAnalysisStore()
+    const classifier: AnalysisClassifier = {
+      async classify() {
+        throw new AnalysisError('JEV_TIMEOUT', 'timeout', 504, false)
+      },
+    }
+    const first = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-error-1',
+      now: () => 1_800_000_000_000,
+    })
+    const started = await first.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
+    await expect(first.run(started.analysisId)).resolves.toMatchObject({ status: 'error' })
+    const second = new AnalysisService({
+      store,
+      classifier: { async classify() { return { model: 'jev-latest', questionKind: 'noul', value: 0.5 } } },
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => 'analysis-error-2',
+      now: () => 1_800_000_000_000,
+    })
+    const retry = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })
+    expect(retry.analysisId).toBe('analysis-error-2')
+    expect(retry.status).toBe('queued')
   })
 
   it('suppresses duplicate execution across independent service instances with a durable claim', async () => {

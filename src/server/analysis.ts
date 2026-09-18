@@ -25,9 +25,13 @@ import {
   fixtureAnalysisSliceFor,
   inferQuestionKind,
   isFixturePlayerClassList,
+  looksLikeWinLikelihood,
   resolveDraftedQuery,
+  SAMPLE_WIN_NOUL_QUERY,
+  userAskedForFixturePlayers,
   type FixtureAnalysisSlice,
 } from '../shared/questionKind.js'
+import { analysisContentKey, analysisContentKeyFromSnapshot } from './analysisContentKey.js'
 import {
   buildJevQuery,
   classesFromJevQuery,
@@ -113,6 +117,16 @@ export class InMemoryAnalysisStore implements AnalysisStorage {
 
   put(snapshot: AnalysisSnapshot): void {
     this.snapshots.set(snapshot.analysisId, cloneAnalysisSnapshot(normalizeSnapshot(snapshot)))
+  }
+
+  findCompleteByContentKey(contentKey: string): AnalysisSnapshot | undefined {
+    let latest: AnalysisSnapshot | undefined
+    for (const snapshot of this.snapshots.values()) {
+      if (snapshot.status !== 'complete') continue
+      if (analysisContentKeyFromSnapshot(snapshot) !== contentKey) continue
+      if (!latest || snapshot.updatedAt > latest.updatedAt) latest = snapshot
+    }
+    return latest ? cloneAnalysisSnapshot(normalizeSnapshot(latest)) : undefined
   }
 
   getPublic(analysisId: string): AnalysisSnapshot | undefined {
@@ -284,6 +298,23 @@ export class AnalysisService {
     const task = input.task.trim()
     const datasetClasses = datasetDraftClasses(dataset)
     const questionKindHint = inferQuestionKind(task, datasetClasses)
+    if (dataset.sourceType === 'fixture' && looksLikeWinLikelihood(task) && !userAskedForFixturePlayers(task)) {
+      return {
+        fixtureId: dataset.fixtureId,
+        datasetId: dataset.datasetId,
+        sourceType: dataset.sourceType,
+        query: stringifyJevQuery(buildJevQuery({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY })),
+        metadata: {
+          provider: 'openrouter',
+          model: 'cached-sample-noul',
+          rowCount: dataset.rows.length,
+          classes: [],
+          columns: [...dataset.columns],
+          displayName: dataset.displayName,
+          questionKind: 'noul',
+        },
+      }
+    }
     const draft = await this.options.draftProvider.draft({
       fixtureId: dataset.fixtureId,
       datasetId: dataset.datasetId,
@@ -345,31 +376,28 @@ export class AnalysisService {
     })
     const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
     if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
-    const analysisId = requestedAnalysisId || this.idFactory()
-    if (!validText(analysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
-    const existing = await this.options.store.get(analysisId)
-    if (existing) {
-      const normalized = normalizeSnapshot(existing)
-      if (normalized.datasetId !== dataset.datasetId || normalized.query !== query) throw new AnalysisError('ANALYSIS_ID_CONFLICT', 'Analysis ID is already used for another analysis', 409)
-      const stale = normalized.status === 'running' && this.now() - Date.parse(normalized.updatedAt) > ANALYSIS_STALE_AFTER_MS
-      const retryableFailure = normalized.status === 'error' && normalized.error?.retryable === true
-      if (stale || retryableFailure) {
-        const recovered: AnalysisSnapshot = {
-          ...normalized,
-          status: 'queued',
-          currentFixtureRow: undefined,
-          updatedAt: nowIso(this.now),
-          error: undefined,
-        }
-        await this.options.store.put(recovered)
-        return cloneAnalysisSnapshot(recovered)
-      }
-      return cloneAnalysisSnapshot(normalized)
-    }
     const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
     const classes = questionKind === 'noul' ? [] : normalizeClasses(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes, dataset.classes ?? [])
     if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
     if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
+    if (requestedAnalysisId) {
+      if (!validText(requestedAnalysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
+      const existing = await this.options.store.get(requestedAnalysisId)
+      if (existing) return this.resumeExisting(existing, dataset.datasetId, query)
+    }
+    if (input.forceNew !== true) {
+      const cached = await this.options.store.findCompleteByContentKey?.(analysisContentKey({
+        datasetId: dataset.datasetId,
+        query,
+        questionKind,
+        classes,
+      }))
+      if (cached?.status === 'complete') return cloneAnalysisSnapshot(normalizeSnapshot(cached))
+    }
+    const analysisId = requestedAnalysisId || this.idFactory()
+    if (!validText(analysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
+    const existing = await this.options.store.get(analysisId)
+    if (existing) return this.resumeExisting(existing, dataset.datasetId, query)
     this.options.classifier.assertConfigured?.()
     const timestamp = nowIso(this.now)
     const snapshot: AnalysisSnapshot = {
@@ -476,6 +504,25 @@ export class AnalysisService {
     } finally {
       await this.options.store.release?.(analysisId, ownerToken)
     }
+  }
+
+  private async resumeExisting(existing: AnalysisSnapshot, datasetId: string, query: string): Promise<AnalysisSnapshot> {
+    const normalized = normalizeSnapshot(existing)
+    if (normalized.datasetId !== datasetId || normalized.query !== query) throw new AnalysisError('ANALYSIS_ID_CONFLICT', 'Analysis ID is already used for another analysis', 409)
+    const stale = normalized.status === 'running' && this.now() - Date.parse(normalized.updatedAt) > ANALYSIS_STALE_AFTER_MS
+    const retryableFailure = normalized.status === 'error' && normalized.error?.retryable === true
+    if (stale || retryableFailure) {
+      const recovered: AnalysisSnapshot = {
+        ...normalized,
+        status: 'queued',
+        currentFixtureRow: undefined,
+        updatedAt: nowIso(this.now),
+        error: undefined,
+      }
+      await this.options.store.put(recovered)
+      return cloneAnalysisSnapshot(recovered)
+    }
+    return cloneAnalysisSnapshot(normalized)
   }
 
   private async requireDataset(input: {

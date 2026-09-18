@@ -48,6 +48,7 @@ type DurableSnapshot = {
   currentFixtureRow?: unknown
   error?: { code: string; retryable: boolean }
   resultRows: unknown[]
+  contentKey?: string
 }
 
 const authorizeWrite = (authToken: string): void => {
@@ -82,6 +83,7 @@ const validateSnapshot: (snapshot: unknown) => asserts snapshot is DurableSnapsh
   }
   if (snapshot.currentFixtureRow !== undefined && !isRecord(snapshot.currentFixtureRow)) throw new Error('Invalid current analysis row')
   if (snapshot.error !== undefined && (!isRecord(snapshot.error) || typeof snapshot.error.code !== 'string' || !/^[A-Z0-9_]+$/.test(snapshot.error.code) || typeof snapshot.error.retryable !== 'boolean')) throw new Error('Invalid analysis error')
+  if (snapshot.contentKey !== undefined && (typeof snapshot.contentKey !== 'string' || !/^[a-f0-9]{64}$/.test(snapshot.contentKey))) throw new Error('Invalid analysis content key')
   if (JSON.stringify(snapshot).length > 900_000) throw new Error('Analysis snapshot is too large')
 }
 
@@ -100,6 +102,7 @@ const snapshotDocument = (snapshot: {
   columns?: string[]
   currentFixtureRow?: unknown
   error?: { code: string; retryable: boolean }
+  contentKey?: string
 }) => ({
   analysisId: snapshot.analysisId,
   fixtureId: snapshot.fixtureId,
@@ -115,6 +118,7 @@ const snapshotDocument = (snapshot: {
   ...(snapshot.columns === undefined ? {} : { columns: snapshot.columns }),
   ...(snapshot.currentFixtureRow === undefined ? {} : { currentFixtureRow: snapshot.currentFixtureRow }),
   ...(snapshot.error === undefined ? {} : { error: snapshot.error }),
+  ...(snapshot.contentKey === undefined ? {} : { contentKey: snapshot.contentKey }),
 })
 
 const publicSnapshot = (document: Record<string, unknown>, rows: unknown[]) => ({
@@ -157,6 +161,17 @@ export const getAnalysisShareSnapshot = query({
   handler: async (ctx, { analysisId }) => await readSnapshot(ctx, analysisId),
 })
 
+export const getCompleteAnalysisByContentKeyInternal = internalQuery({
+  args: { contentKey: v.string() },
+  handler: async (ctx, { contentKey }) => {
+    if (!/^[a-f0-9]{64}$/.test(contentKey)) return null
+    const documents = await ctx.db.query('analyses').withIndex('by_content_key_status', (q: any) => q.eq('contentKey', contentKey).eq('status', 'complete')).order('desc').take(1)
+    const document = documents[0]
+    if (!document) return null
+    return await readSnapshot(ctx, document.analysisId)
+  },
+})
+
 export const putAnalysisSnapshotInternal = internalMutation({
   args: { snapshot: v.any() },
   handler: async (ctx, { snapshot }) => {
@@ -166,7 +181,14 @@ export const putAnalysisSnapshotInternal = internalMutation({
       ...(existing.runOwnerToken === undefined ? {} : { runOwnerToken: existing.runOwnerToken }),
       ...(existing.runLeaseExpiresAt === undefined ? {} : { runLeaseExpiresAt: existing.runLeaseExpiresAt }),
     } : {}
-    const document = { ...snapshotDocument(snapshot), ...currentClaims }
+    const contentKey = typeof snapshot.contentKey === 'string' ? snapshot.contentKey : existing?.contentKey
+    const document = {
+      ...snapshotDocument({
+        ...snapshot,
+        ...(typeof contentKey === 'string' ? { contentKey } : {}),
+      }),
+      ...currentClaims,
+    }
     if (existing) await ctx.db.replace(existing._id, document)
     else await ctx.db.insert('analyses', document)
 
@@ -207,6 +229,14 @@ export const authorizedGetAnalysis = action({
   handler: async (ctx: any, { authToken, analysisId }: { authToken: string; analysisId: string }): Promise<unknown> => {
     authorizeWrite(authToken)
     return await ctx.runQuery(internal.analyses.getAnalysisInternal, { analysisId })
+  },
+})
+
+export const authorizedGetCompleteAnalysisByContentKey = action({
+  args: { authToken: v.string(), contentKey: v.string() },
+  handler: async (ctx: any, { authToken, contentKey }: { authToken: string; contentKey: string }): Promise<unknown> => {
+    authorizeWrite(authToken)
+    return await ctx.runQuery(internal.analyses.getCompleteAnalysisByContentKeyInternal, { contentKey })
   },
 })
 

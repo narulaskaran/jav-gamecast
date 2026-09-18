@@ -50,4 +50,34 @@ describe('durable Convex analysis functions', () => {
     await expect(t.action(api.analyses.authorizedClaimAnalysis, { authToken: writeSecret, analysisId: baseSnapshot.analysisId, ownerToken: 'owner-b', nowMs: 301_001, leaseMs: 300_000 })).resolves.toBe('claimed')
     await expect(t.action(api.analyses.authorizedReleaseAnalysis, { authToken: writeSecret, analysisId: baseSnapshot.analysisId, ownerToken: 'owner-b' })).resolves.toBeNull()
   })
+
+  it('looks up a complete snapshot by content key and ignores incomplete runs', async () => {
+    const t = convexTest(schema, modules)
+    const contentKey = 'a'.repeat(64)
+    await t.action(api.analyses.authorizedPutAnalysisSnapshot, {
+      authToken: writeSecret,
+      snapshot: { ...baseSnapshot, analysisId: 'queued-same-content', contentKey, status: 'queued' },
+    })
+    await expect(t.action(api.analyses.authorizedGetCompleteAnalysisByContentKey, { authToken: writeSecret, contentKey })).resolves.toBeNull()
+
+    const complete = {
+      ...baseSnapshot,
+      analysisId: 'complete-same-content',
+      contentKey,
+      status: 'complete' as const,
+      progress: { completedRows: 2, totalRows: 2, completedCalls: 2, totalCalls: 2 },
+      resultRows: [resultRow(0), resultRow(1)],
+    }
+    await t.action(api.analyses.authorizedPutAnalysisSnapshot, { authToken: writeSecret, snapshot: complete })
+    await expect(t.action(api.analyses.authorizedGetCompleteAnalysisByContentKey, { authToken: writeSecret, contentKey })).resolves.toMatchObject({
+      analysisId: 'complete-same-content',
+      status: 'complete',
+      resultRows: [expect.objectContaining({ rowIndex: 0 }), expect.objectContaining({ rowIndex: 1 })],
+    })
+    await expect(t.query(api.analyses.getAnalysisShareSnapshot, { analysisId: 'complete-same-content' })).resolves.toMatchObject({
+      analysisId: 'complete-same-content',
+      status: 'complete',
+    })
+    await expect(t.action(api.analyses.authorizedGetCompleteAnalysisByContentKey, { authToken: 'wrong', contentKey })).rejects.toThrow(/unauthorized/i)
+  })
 })

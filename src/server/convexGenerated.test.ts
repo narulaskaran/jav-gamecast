@@ -10,6 +10,7 @@ describe('convex generated API boundary', () => {
     expect(source).toMatch(/export const api = anyApi/)
     expect(source).not.toMatch(/createRequire\(/)
     expect(getFunctionName(api.analyses.authorizedGetAnalysis)).toBe('analyses:authorizedGetAnalysis')
+    expect(getFunctionName(api.analyses.authorizedGetCompleteAnalysisByContentKey)).toBe('analyses:authorizedGetCompleteAnalysisByContentKey')
     expect(getFunctionName(api.datasets.authorizedPutDataset)).toBe('datasets:authorizedPutDataset')
   })
 })

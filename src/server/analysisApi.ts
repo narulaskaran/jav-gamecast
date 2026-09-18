@@ -99,7 +99,12 @@ export const createAnalysisRunHandler = (service: AnalysisService, options: { sc
       analysisId: body.analysisId as string | undefined,
       classes: Array.isArray(body.classes) ? body.classes as string[] : undefined,
       questionKind: body.questionKind === 'noul' || body.questionKind === 'score' || body.questionKind === 'choice' ? body.questionKind : undefined,
+      forceNew: body.forceNew === true,
     })
+    if (snapshot.status === 'complete') {
+      response.status(200).json(snapshotBody(snapshot))
+      return
+    }
     const execution = service.run(snapshot.analysisId)
     if (options.schedule) {
       try {

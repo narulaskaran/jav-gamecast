@@ -10,6 +10,7 @@ import {
 } from '../shared/analysis.js'
 import type { DatasetRecord } from '../shared/dataset.js'
 import { toConvexDatasetPutArgs, wrapConvexPutError } from './convexDatasetPut.js'
+import { analysisContentKeyFromSnapshot } from './analysisContentKey.js'
 import { type DatasetStorage } from './datasetStore.js'
 
 /**
@@ -41,8 +42,16 @@ export class ConvexAnalysisStore implements AnalysisStorage {
     return snapshot ? cloneAnalysisSnapshot(normalizeSnapshot(snapshot)) : undefined
   }
 
+  async findCompleteByContentKey(contentKey: string): Promise<AnalysisSnapshot | undefined> {
+    const snapshot = await this.client.action(api.analyses.authorizedGetCompleteAnalysisByContentKey, { authToken: this.authToken(), contentKey }) as AnalysisSnapshot | null
+    return snapshot ? cloneAnalysisSnapshot(normalizeSnapshot(snapshot)) : undefined
+  }
+
   async put(snapshot: AnalysisSnapshot): Promise<void> {
-    await this.client.action(api.analyses.authorizedPutAnalysisSnapshot, { authToken: this.authToken(), snapshot })
+    await this.client.action(api.analyses.authorizedPutAnalysisSnapshot, {
+      authToken: this.authToken(),
+      snapshot: { ...snapshot, contentKey: analysisContentKeyFromSnapshot(snapshot) },
+    })
   }
 
   async claim(analysisId: string, ownerToken: string, nowMs: number, leaseMs: number): Promise<'claimed' | 'busy' | 'complete' | 'missing'> {
