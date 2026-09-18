@@ -1,7 +1,10 @@
-import type { FootballModelInput } from '../fixtures/footballTimeline'
+import type { FootballModelInput } from '../fixtures/footballTimeline.js'
+import type { AnalysisRowInput, DatasetSourceType } from './dataset.js'
 
 export const ANALYSIS_MAX_CALLS = 5_000
 export const ANALYSIS_MAX_ROWS = 5_000
+export const ANALYSIS_MAX_CLASSES = 32
+export const ANALYSIS_MAX_CLASS_LENGTH = 80
 export const ANALYSIS_MAX_QUERY_LENGTH = 20_000
 export const ANALYSIS_MAX_TASK_LENGTH = 2_000
 export const ANALYSIS_RUN_LEASE_MS = 5 * 60_000
@@ -10,6 +13,7 @@ export const ANALYSIS_CLASS_NAMES = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Ot
 
 export type AnalysisClassName = typeof ANALYSIS_CLASS_NAMES[number]
 export type AnalysisStatus = 'queued' | 'running' | 'complete' | 'error'
+export type { AnalysisRowInput, DatasetSourceType }
 
 export interface AnalysisProgress {
   completedRows: number
@@ -27,7 +31,7 @@ export interface AnalysisClassification {
 
 export interface AnalysisResultRow {
   rowIndex: number
-  input: FootballModelInput
+  input: AnalysisRowInput
   model: string
   selectedClass?: string
   probabilities?: Record<string, number>
@@ -38,38 +42,49 @@ export interface AnalysisResultRow {
 export interface AnalysisSnapshot {
   analysisId: string
   fixtureId: string
+  datasetId: string
+  sourceType: DatasetSourceType
   query: string
   status: AnalysisStatus
   createdAt: string
   updatedAt: string
   progress: AnalysisProgress
-  currentFixtureRow?: { rowIndex: number; input: FootballModelInput }
+  classes: readonly string[]
+  columns: readonly string[]
+  currentFixtureRow?: { rowIndex: number; input: AnalysisRowInput }
   resultRows: readonly AnalysisResultRow[]
   error?: { code: string; retryable: boolean }
 }
 
 export interface AnalysisDraftInput {
-  fixtureId: string
+  fixtureId?: string
+  datasetId?: string
   task: string
 }
 
 export interface AnalysisDraftResult {
   fixtureId: string
+  datasetId: string
+  sourceType: DatasetSourceType
   query: string
   metadata: {
     provider: string
     model: string
     rowCount: number
-    inputHalf: 'H1'
-    labelHalf: 'H2'
     classes: readonly string[]
+    columns: readonly string[]
+    displayName: string
+    inputHalf?: 'H1'
+    labelHalf?: 'H2'
   }
 }
 
 export interface AnalysisStartInput {
-  fixtureId: string
+  fixtureId?: string
+  datasetId?: string
   query: string
   analysisId?: string
+  classes?: readonly string[]
 }
 
 export interface AnalysisStorage {
@@ -86,3 +101,17 @@ export const cloneAnalysisSnapshot = (snapshot: AnalysisSnapshot): AnalysisSnaps
 })) as AnalysisSnapshot
 
 export const serializeAnalysisSnapshot = (snapshot: AnalysisSnapshot): string => JSON.stringify(cloneAnalysisSnapshot(snapshot))
+
+export const normalizeSnapshot = (snapshot: AnalysisSnapshot): AnalysisSnapshot => {
+  const datasetId = snapshot.datasetId || snapshot.fixtureId
+  return {
+    ...snapshot,
+    datasetId,
+    fixtureId: snapshot.fixtureId || datasetId,
+    sourceType: snapshot.sourceType ?? 'fixture',
+    classes: snapshot.classes && snapshot.classes.length > 0 ? snapshot.classes : [...ANALYSIS_CLASS_NAMES],
+    columns: snapshot.columns ?? [],
+  }
+}
+
+export type { FootballModelInput }

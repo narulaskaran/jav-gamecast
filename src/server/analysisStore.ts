@@ -1,10 +1,14 @@
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '../../convex/_generated/api'
+import { api } from './convexGenerated.js'
 import {
   cloneAnalysisSnapshot,
+  normalizeSnapshot,
+  type AnalysisRowInput,
   type AnalysisSnapshot,
   type AnalysisStorage,
-} from '../shared/analysis'
+} from '../shared/analysis.js'
+import type { DatasetRecord } from '../shared/dataset.js'
+import { hashRow, type DatasetStorage } from './datasetStore.js'
 
 /**
  * Server-only durable analysis boundary. Authenticated actions are used for
@@ -27,12 +31,12 @@ export class ConvexAnalysisStore implements AnalysisStorage {
 
   async get(analysisId: string): Promise<AnalysisSnapshot | undefined> {
     const snapshot = await this.client.action(api.analyses.authorizedGetAnalysis, { authToken: this.authToken(), analysisId }) as AnalysisSnapshot | null
-    return snapshot ? cloneAnalysisSnapshot(snapshot) : undefined
+    return snapshot ? cloneAnalysisSnapshot(normalizeSnapshot(snapshot)) : undefined
   }
 
   async getPublic(analysisId: string): Promise<AnalysisSnapshot | undefined> {
     const snapshot = await this.client.query(api.analyses.getAnalysisShareSnapshot, { analysisId }) as AnalysisSnapshot | null
-    return snapshot ? cloneAnalysisSnapshot(snapshot) : undefined
+    return snapshot ? cloneAnalysisSnapshot(normalizeSnapshot(snapshot)) : undefined
   }
 
   async put(snapshot: AnalysisSnapshot): Promise<void> {
@@ -45,5 +49,58 @@ export class ConvexAnalysisStore implements AnalysisStorage {
 
   async release(analysisId: string, ownerToken: string): Promise<void> {
     await this.client.action(api.analyses.authorizedReleaseAnalysis, { authToken: this.authToken(), analysisId, ownerToken })
+  }
+}
+
+export class ConvexDatasetStore implements DatasetStorage {
+  readonly client: ConvexHttpClient
+  private readonly writeSecret?: string
+
+  constructor(convexUrl: string, writeSecret?: string, client = new ConvexHttpClient(convexUrl)) {
+    this.client = client
+    this.writeSecret = writeSecret?.trim() || undefined
+  }
+
+  private authToken(): string {
+    if (!this.writeSecret) throw new Error('Convex write authorization is not configured')
+    return this.writeSecret
+  }
+
+  async get(datasetId: string): Promise<DatasetRecord | undefined> {
+    const dataset = await this.client.action(api.datasets.authorizedGetDataset, { authToken: this.authToken(), datasetId }) as DatasetRecord | null
+    return dataset ?? undefined
+  }
+
+  async put(dataset: DatasetRecord, rows: readonly AnalysisRowInput[]): Promise<void> {
+    await this.client.action(api.datasets.authorizedPutDataset, {
+      authToken: this.authToken(),
+      dataset,
+      rows: rows.map((values, rowIndex) => ({ rowIndex, rowHash: hashRow(values), values })),
+    })
+  }
+
+  async getRows(datasetId: string): Promise<readonly AnalysisRowInput[]> {
+    const rows = await this.client.action(api.datasets.authorizedGetDatasetRows, { authToken: this.authToken(), datasetId }) as AnalysisRowInput[] | null
+    return rows ?? []
+  }
+
+  async listPublic(): Promise<readonly DatasetRecord[]> {
+    const items = await this.client.query(api.datasets.listPublicDatasets, {}) as Array<Pick<DatasetRecord, 'datasetId' | 'displayName' | 'sourceType' | 'acceptedRowCount' | 'createdAt'>>
+    return items.map((item) => ({
+      datasetId: item.datasetId,
+      sourceType: item.sourceType,
+      displayName: item.displayName,
+      byteSize: 0,
+      contentHash: '',
+      encoding: 'utf-8',
+      delimiter: ',',
+      columns: [],
+      acceptedRowCount: item.acceptedRowCount,
+      previewRows: [],
+      validationWarnings: [],
+      publicDataWarning: 'This playground publishes datasets and results. Do not upload secrets or personal data.',
+      visibility: 'published',
+      createdAt: item.createdAt,
+    }))
   }
 }

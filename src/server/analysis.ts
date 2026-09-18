@@ -2,32 +2,60 @@ import { randomUUID } from 'node:crypto'
 import {
   ANALYSIS_CLASS_NAMES,
   ANALYSIS_MAX_CALLS,
+  ANALYSIS_MAX_CLASSES,
+  ANALYSIS_MAX_CLASS_LENGTH,
   ANALYSIS_MAX_QUERY_LENGTH,
   ANALYSIS_MAX_ROWS,
   ANALYSIS_MAX_TASK_LENGTH,
   ANALYSIS_RUN_LEASE_MS,
   ANALYSIS_STALE_AFTER_MS,
   cloneAnalysisSnapshot,
+  normalizeSnapshot,
   type AnalysisClassification,
   type AnalysisDraftInput,
   type AnalysisDraftResult,
+  type AnalysisRowInput,
   type AnalysisResultRow,
   type AnalysisSnapshot,
   type AnalysisStartInput,
   type AnalysisStorage,
-} from '../shared/analysis'
+  type DatasetSourceType,
+} from '../shared/analysis.js'
+import { asAnalysisRow } from '../shared/dataset.js'
 import {
   FOOTBALL_FIXTURE_ID,
   footballFixture,
+  footballFixtureModelInputFields,
   getHalftimeModelInput,
-  type FootballModelInput,
-} from '../fixtures/footballTimeline'
+} from '../fixtures/footballTimeline.js'
 
-export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis'
-export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, ANALYSIS_MAX_ROWS, ANALYSIS_MAX_TASK_LENGTH } from '../shared/analysis'
+export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis.js'
+export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, ANALYSIS_MAX_ROWS, ANALYSIS_MAX_TASK_LENGTH } from '../shared/analysis.js'
+
+export interface ResolvedAnalysisDataset {
+  datasetId: string
+  fixtureId: string
+  sourceType: DatasetSourceType
+  displayName: string
+  columns: readonly string[]
+  rows: readonly AnalysisRowInput[]
+  classes?: readonly string[]
+}
+
+export interface AnalysisDatasetSource {
+  get(datasetId: string): Promise<ResolvedAnalysisDataset | undefined> | ResolvedAnalysisDataset | undefined
+}
 
 export interface AnalysisDraftProvider {
-  draft(input: { fixtureId: string; task: string; classes: readonly string[] }): Promise<{ query: string; model: string }>
+  draft(input: {
+    fixtureId: string
+    datasetId: string
+    task: string
+    classes: readonly string[]
+    columns?: readonly string[]
+    sampleRows?: AnalysisRowInput[]
+    sourceType?: DatasetSourceType
+  }): Promise<{ query: string; model: string; classes?: readonly string[] }>
 }
 
 export interface AnalysisClassifier {
@@ -35,9 +63,11 @@ export interface AnalysisClassifier {
   classify(input: {
     analysisId: string
     fixtureId: string
+    datasetId: string
     query: string
     rowIndex: number
-    row: FootballModelInput
+    row: AnalysisRowInput
+    classes: readonly string[]
   }): Promise<AnalysisClassification>
 }
 
@@ -61,11 +91,11 @@ export class InMemoryAnalysisStore implements AnalysisStorage {
 
   get(analysisId: string): AnalysisSnapshot | undefined {
     const snapshot = this.snapshots.get(analysisId)
-    return snapshot ? cloneAnalysisSnapshot(snapshot) : undefined
+    return snapshot ? cloneAnalysisSnapshot(normalizeSnapshot(snapshot)) : undefined
   }
 
   put(snapshot: AnalysisSnapshot): void {
-    this.snapshots.set(snapshot.analysisId, cloneAnalysisSnapshot(snapshot))
+    this.snapshots.set(snapshot.analysisId, cloneAnalysisSnapshot(normalizeSnapshot(snapshot)))
   }
 
   getPublic(analysisId: string): AnalysisSnapshot | undefined {
@@ -87,10 +117,41 @@ export class InMemoryAnalysisStore implements AnalysisStorage {
   }
 }
 
+export const fixtureAnalysisDataset = (): ResolvedAnalysisDataset => {
+  const rows = getHalftimeModelInput(footballFixture).map((row) => asAnalysisRow(row))
+  return {
+    datasetId: FOOTBALL_FIXTURE_ID,
+    fixtureId: FOOTBALL_FIXTURE_ID,
+    sourceType: 'fixture',
+    displayName: 'Super Bowl Seahawks demo',
+    columns: [...footballFixtureModelInputFields],
+    rows,
+    classes: [...ANALYSIS_CLASS_NAMES],
+  }
+}
+
+export class InMemoryDatasetSource implements AnalysisDatasetSource {
+  private readonly datasets = new Map<string, ResolvedAnalysisDataset>()
+
+  constructor(seed: readonly ResolvedAnalysisDataset[] = []) {
+    for (const dataset of seed) this.datasets.set(dataset.datasetId, dataset)
+  }
+
+  put(dataset: ResolvedAnalysisDataset): void {
+    this.datasets.set(dataset.datasetId, dataset)
+  }
+
+  get(datasetId: string): ResolvedAnalysisDataset | undefined {
+    if (datasetId === FOOTBALL_FIXTURE_ID) return fixtureAnalysisDataset()
+    return this.datasets.get(datasetId)
+  }
+}
+
 export interface AnalysisServiceOptions {
   store: AnalysisStorage
   classifier: AnalysisClassifier
   draftProvider: AnalysisDraftProvider
+  datasets?: AnalysisDatasetSource
   now?: () => number
   idFactory?: () => string
 }
@@ -107,26 +168,36 @@ const safeProviderError = (error: unknown): { code: string; retryable: boolean }
   return { code: 'ANALYSIS_PROVIDER_ERROR', retryable: false }
 }
 
-const normalizeClassification = (value: AnalysisClassification): AnalysisClassification => {
+export const normalizeClasses = (value: unknown, fallback: readonly string[] = ANALYSIS_CLASS_NAMES): string[] => {
+  const source = Array.isArray(value) ? value : fallback
+  const classes = [...new Set(source.map((item) => typeof item === 'string' ? item.trim() : '').filter((item) => item.length > 0 && item.length <= ANALYSIS_MAX_CLASS_LENGTH && !item.includes('\u0000')))]
+  if (classes.length < 2 || classes.length > ANALYSIS_MAX_CLASSES) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
+  return classes
+}
+
+const normalizeClassification = (value: AnalysisClassification, classes: readonly string[]): AnalysisClassification => {
   if (!isRecord(value) || typeof value.model !== 'string' || !value.model.trim() || typeof value.selectedClass !== 'string' || !value.selectedClass.trim()) {
     throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned an invalid classification', 502)
   }
   if (!isRecord(value.probabilities)) throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned no class probabilities', 502)
   const entries = Object.entries(value.probabilities)
-  if (entries.length < 2 || entries.length > ANALYSIS_CLASS_NAMES.length || entries.some(([key, probability]) => !key || typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1)) {
+  if (entries.length < 2 || entries.length > ANALYSIS_MAX_CLASSES || entries.some(([key, probability]) => !key || typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1)) {
     throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned invalid class probabilities', 502)
   }
   const total = entries.reduce((sum, [, probability]) => sum + probability, 0)
   if (Math.abs(total - 1) > 1e-6 || !Object.prototype.hasOwnProperty.call(value.probabilities, value.selectedClass)) {
     throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider class probabilities are inconsistent', 502)
   }
+  if (classes.length >= 2 && !classes.includes(value.selectedClass)) {
+    throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned a class outside the query', 502)
+  }
   if (value.confidence !== undefined && (typeof value.confidence !== 'number' || !Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1)) {
     throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned invalid confidence', 502)
   }
   return {
     model: value.model.trim().slice(0, 200),
-    selectedClass: value.selectedClass.trim().slice(0, 200),
-    probabilities: Object.fromEntries(entries.map(([key, probability]) => [key.slice(0, 200), probability])),
+    selectedClass: value.selectedClass.trim().slice(0, ANALYSIS_MAX_CLASS_LENGTH),
+    probabilities: Object.fromEntries(entries.map(([key, probability]) => [key.slice(0, ANALYSIS_MAX_CLASS_LENGTH), probability])),
     ...(value.confidence === undefined ? {} : { confidence: value.confidence }),
   }
 }
@@ -134,52 +205,67 @@ const normalizeClassification = (value: AnalysisClassification): AnalysisClassif
 export class AnalysisService {
   private readonly now: () => number
   private readonly idFactory: () => string
+  private readonly datasets: AnalysisDatasetSource
   private readonly inFlight = new Map<string, Promise<AnalysisSnapshot>>()
 
   constructor(private readonly options: AnalysisServiceOptions) {
     this.now = options.now ?? Date.now
     this.idFactory = options.idFactory ?? randomUUID
+    this.datasets = options.datasets ?? new InMemoryDatasetSource()
   }
 
   async draft(input: AnalysisDraftInput): Promise<AnalysisDraftResult> {
-    this.requireFixture(input.fixtureId)
+    const dataset = await this.requireDataset(input)
     if (!validText(input.task, ANALYSIS_MAX_TASK_LENGTH)) throw new AnalysisError('INVALID_TASK', 'Task must be non-empty and within the size limit')
-    const rows = getHalftimeModelInput(footballFixture)
-    const draft = await this.options.draftProvider.draft({ fixtureId: FOOTBALL_FIXTURE_ID, task: input.task.trim(), classes: ANALYSIS_CLASS_NAMES })
+    const defaultClasses = dataset.classes && dataset.classes.length >= 2 ? dataset.classes : [...ANALYSIS_CLASS_NAMES]
+    const draft = await this.options.draftProvider.draft({
+      fixtureId: dataset.fixtureId,
+      datasetId: dataset.datasetId,
+      task: input.task.trim(),
+      classes: defaultClasses,
+      columns: [...dataset.columns],
+      sampleRows: dataset.rows.slice(0, 5).map((row) => ({ ...row })),
+      sourceType: dataset.sourceType,
+    })
     if (!validText(draft.query, ANALYSIS_MAX_QUERY_LENGTH) || typeof draft.model !== 'string' || !draft.model.trim()) {
       throw new AnalysisError('MALFORMED_DRAFT', 'OpenRouter returned an invalid classifier query', 502)
     }
+    const classes = draft.classes && draft.classes.length >= 2 ? normalizeClasses(draft.classes, defaultClasses) : [...defaultClasses]
     return {
-      fixtureId: FOOTBALL_FIXTURE_ID,
+      fixtureId: dataset.fixtureId,
+      datasetId: dataset.datasetId,
+      sourceType: dataset.sourceType,
       query: draft.query.trim(),
       metadata: {
         provider: 'openrouter',
         model: draft.model.trim().slice(0, 200),
-        rowCount: rows.length,
-        inputHalf: 'H1',
-        labelHalf: 'H2',
-        classes: [...ANALYSIS_CLASS_NAMES],
+        rowCount: dataset.rows.length,
+        classes,
+        columns: [...dataset.columns],
+        displayName: dataset.displayName,
+        ...(dataset.sourceType === 'fixture' ? { inputHalf: 'H1' as const, labelHalf: 'H2' as const } : {}),
       },
     }
   }
 
   async start(input: AnalysisStartInput): Promise<AnalysisSnapshot> {
-    this.requireFixture(input.fixtureId)
+    const dataset = await this.requireDataset(input)
     const query = this.requireQuery(input.query)
-    const rows = getHalftimeModelInput(footballFixture)
-    if (rows.length > ANALYSIS_MAX_ROWS || rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Fixture exceeds analysis bounds', 413)
+    const classes = normalizeClasses(input.classes, dataset.classes ?? ANALYSIS_CLASS_NAMES)
+    if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
     const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
     if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const analysisId = requestedAnalysisId || this.idFactory()
     if (!validText(analysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const existing = await this.options.store.get(analysisId)
     if (existing) {
-      if (existing.fixtureId !== input.fixtureId || existing.query !== query) throw new AnalysisError('ANALYSIS_ID_CONFLICT', 'Analysis ID is already used for another analysis', 409)
-      const stale = existing.status === 'running' && this.now() - Date.parse(existing.updatedAt) > ANALYSIS_STALE_AFTER_MS
-      const retryableFailure = existing.status === 'error' && existing.error?.retryable === true
+      const normalized = normalizeSnapshot(existing)
+      if (normalized.datasetId !== dataset.datasetId || normalized.query !== query) throw new AnalysisError('ANALYSIS_ID_CONFLICT', 'Analysis ID is already used for another analysis', 409)
+      const stale = normalized.status === 'running' && this.now() - Date.parse(normalized.updatedAt) > ANALYSIS_STALE_AFTER_MS
+      const retryableFailure = normalized.status === 'error' && normalized.error?.retryable === true
       if (stale || retryableFailure) {
         const recovered: AnalysisSnapshot = {
-          ...existing,
+          ...normalized,
           status: 'queued',
           currentFixtureRow: undefined,
           updatedAt: nowIso(this.now),
@@ -188,18 +274,22 @@ export class AnalysisService {
         await this.options.store.put(recovered)
         return cloneAnalysisSnapshot(recovered)
       }
-      return cloneAnalysisSnapshot(existing)
+      return cloneAnalysisSnapshot(normalized)
     }
     this.options.classifier.assertConfigured?.()
     const timestamp = nowIso(this.now)
     const snapshot: AnalysisSnapshot = {
       analysisId,
-      fixtureId: FOOTBALL_FIXTURE_ID,
+      fixtureId: dataset.fixtureId,
+      datasetId: dataset.datasetId,
+      sourceType: dataset.sourceType,
       query,
       status: 'queued',
       createdAt: timestamp,
       updatedAt: timestamp,
-      progress: { completedRows: 0, totalRows: rows.length, completedCalls: 0, totalCalls: rows.length },
+      progress: { completedRows: 0, totalRows: dataset.rows.length, completedCalls: 0, totalCalls: dataset.rows.length },
+      classes,
+      columns: [...dataset.columns],
       resultRows: [],
     }
     await this.options.store.put(snapshot)
@@ -221,13 +311,13 @@ export class AnalysisService {
   async get(analysisId: string): Promise<AnalysisSnapshot> {
     const snapshot = await this.options.store.get(analysisId)
     if (!snapshot) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
-    return cloneAnalysisSnapshot(snapshot)
+    return cloneAnalysisSnapshot(normalizeSnapshot(snapshot))
   }
 
   async share(analysisId: string): Promise<AnalysisSnapshot> {
     const snapshot = await (this.options.store.getPublic?.(analysisId) ?? this.options.store.get(analysisId))
     if (!snapshot) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
-    return cloneAnalysisSnapshot(snapshot)
+    return cloneAnalysisSnapshot(normalizeSnapshot(snapshot))
   }
 
   private async execute(analysisId: string): Promise<AnalysisSnapshot> {
@@ -237,32 +327,43 @@ export class AnalysisService {
     if (claimed === 'complete' || claimed === 'busy') return this.get(analysisId)
     const initial = await this.options.store.get(analysisId)
     if (!initial) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
-    if (initial.status === 'complete' || initial.status === 'error') return cloneAnalysisSnapshot(initial)
-    const rows = getHalftimeModelInput(footballFixture)
-    let snapshot: AnalysisSnapshot = { ...initial, status: 'running', updatedAt: nowIso(this.now), resultRows: [...initial.resultRows] }
+    const snapshot0 = normalizeSnapshot(initial)
+    if (snapshot0.status === 'complete' || snapshot0.status === 'error') return cloneAnalysisSnapshot(snapshot0)
+    const dataset = await this.requireDataset({ fixtureId: snapshot0.fixtureId, datasetId: snapshot0.datasetId })
+    const rows = dataset.rows
+    const classes = snapshot0.classes.length >= 2 ? snapshot0.classes : (dataset.classes ?? ANALYSIS_CLASS_NAMES)
+    let snapshot: AnalysisSnapshot = { ...snapshot0, status: 'running', updatedAt: nowIso(this.now), resultRows: [...snapshot0.resultRows] }
     await this.options.store.put(snapshot)
     try {
       for (let rowIndex = snapshot.progress.completedRows; rowIndex < rows.length; rowIndex += 1) {
-      const row = rows[rowIndex]
-      snapshot = { ...snapshot, currentFixtureRow: { rowIndex, input: row }, updatedAt: nowIso(this.now) }
-      await this.options.store.put(snapshot)
-      try {
-        const classification = normalizeClassification(await this.options.classifier.classify({ analysisId, fixtureId: FOOTBALL_FIXTURE_ID, query: snapshot.query, rowIndex, row }))
-        const resultRow: AnalysisResultRow = { rowIndex, input: row, model: classification.model, selectedClass: classification.selectedClass, probabilities: { ...classification.probabilities }, ...(classification.confidence === undefined ? {} : { confidence: classification.confidence }) }
-        const resultRows = [...snapshot.resultRows.filter((item) => item.rowIndex !== rowIndex), resultRow].sort((left, right) => left.rowIndex - right.rowIndex)
-        snapshot = {
-          ...snapshot,
-          status: 'running',
-          currentFixtureRow: rowIndex + 1 < rows.length ? { rowIndex: rowIndex + 1, input: rows[rowIndex + 1] } : undefined,
-          updatedAt: nowIso(this.now),
-          progress: { completedRows: rowIndex + 1, totalRows: rows.length, completedCalls: rowIndex + 1, totalCalls: rows.length },
-          resultRows,
-          error: undefined,
-        }
+        const row = rows[rowIndex]
+        snapshot = { ...snapshot, currentFixtureRow: { rowIndex, input: row }, updatedAt: nowIso(this.now) }
         await this.options.store.put(snapshot)
+        try {
+          const classification = normalizeClassification(await this.options.classifier.classify({
+            analysisId,
+            fixtureId: snapshot.fixtureId,
+            datasetId: snapshot.datasetId,
+            query: snapshot.query,
+            rowIndex,
+            row,
+            classes,
+          }), classes)
+          const resultRow: AnalysisResultRow = { rowIndex, input: row, model: classification.model, selectedClass: classification.selectedClass, probabilities: { ...classification.probabilities }, ...(classification.confidence === undefined ? {} : { confidence: classification.confidence }) }
+          const resultRows = [...snapshot.resultRows.filter((item) => item.rowIndex !== rowIndex), resultRow].sort((left, right) => left.rowIndex - right.rowIndex)
+          snapshot = {
+            ...snapshot,
+            status: 'running',
+            currentFixtureRow: rowIndex + 1 < rows.length ? { rowIndex: rowIndex + 1, input: rows[rowIndex + 1] } : undefined,
+            updatedAt: nowIso(this.now),
+            progress: { completedRows: rowIndex + 1, totalRows: rows.length, completedCalls: rowIndex + 1, totalCalls: rows.length },
+            resultRows,
+            error: undefined,
+          }
+          await this.options.store.put(snapshot)
         } catch (error) {
-        snapshot = { ...snapshot, status: 'error', currentFixtureRow: undefined, updatedAt: nowIso(this.now), error: safeProviderError(error) }
-        await this.options.store.put(snapshot)
+          snapshot = { ...snapshot, status: 'error', currentFixtureRow: undefined, updatedAt: nowIso(this.now), error: safeProviderError(error) }
+          await this.options.store.put(snapshot)
           return cloneAnalysisSnapshot(snapshot)
         }
       }
@@ -274,8 +375,14 @@ export class AnalysisService {
     }
   }
 
-  private requireFixture(fixtureId: string): void {
-    if (typeof fixtureId !== 'string' || fixtureId.trim() !== FOOTBALL_FIXTURE_ID) throw new AnalysisError('INVALID_FIXTURE', 'Only the pinned analysis fixture is supported')
+  private async requireDataset(input: { fixtureId?: string; datasetId?: string }): Promise<ResolvedAnalysisDataset> {
+    const datasetId = typeof input.datasetId === 'string' && input.datasetId.trim() ? input.datasetId.trim() : typeof input.fixtureId === 'string' && input.fixtureId.trim() ? input.fixtureId.trim() : ''
+    if (!datasetId) throw new AnalysisError('INVALID_DATASET', 'Choose a sample dataset, upload a CSV, or paste a public CSV URL')
+    if (datasetId === FOOTBALL_FIXTURE_ID || input.fixtureId === FOOTBALL_FIXTURE_ID) return fixtureAnalysisDataset()
+    const dataset = await this.datasets.get(datasetId)
+    if (!dataset) throw new AnalysisError('DATASET_NOT_FOUND', 'Dataset was not found', 404)
+    if (dataset.rows.length < 1) throw new AnalysisError('CSV_EMPTY', 'The CSV has no data rows')
+    return dataset
   }
 
   private requireQuery(query: string): string {

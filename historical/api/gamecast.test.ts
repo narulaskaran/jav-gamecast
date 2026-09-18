@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = vi.hoisted(() => ({ record: undefined as Record<string, unknown> | undefined, records: [] as Record<string, unknown>[] }))
 
-vi.mock('../src/server/liveConfig', () => ({
+vi.mock('../../src/server/liveConfig', () => ({
   readPublicRuntimeConfig: () => ({ convexUrl: 'https://demo.convex.cloud', featuredGameId: 'featured' }),
 }))
-vi.mock('../src/server/convexStore', () => ({
+vi.mock('../../src/server/convexStore', () => ({
   ConvexForecastStore: class {
     async getForecastByIdempotencyKey() { return testState.record }
     async listForecastsByGame() { return testState.records }

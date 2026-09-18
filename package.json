@@ -10,6 +10,7 @@
     "test:convex": "vitest run convex/*.test.ts",
     "typecheck": "tsc -b",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
+    "typecheck:functions": "tsc -p tsconfig.functions.json --noEmit",
     "typecheck:convex": "tsc -p convex/tsconfig.json --noEmit",
     "audit": "npm audit --audit-level=high",
     "test:watch": "vitest",

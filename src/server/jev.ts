@@ -11,7 +11,7 @@ import {
   type SystemOneRequest,
   type TypeSafeClientConfig,
 } from '@typesafe-ai/sdk'
-import { normalizeCurrentForecastState, type CurrentForecastState } from './forecastState'
+import { normalizeCurrentForecastState, type CurrentForecastState } from './forecastState.js'
 
 export const TYPESAFE_SYSTEM_ONE_ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 export const TYPESAFE_BASE_URL = 'https://api.typesafe.ai'
@@ -21,7 +21,7 @@ export const JEV_INSTRUCTIONS = 'Who is most likely to win this game from the cu
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 export type TypeSafeState = Exclude<EntryType, null>
-export type { CurrentForecastState } from './forecastState'
+export type { CurrentForecastState } from './forecastState.js'
 export type ChoiceLabel = 'home' | 'away' | 'tie'
 
 export interface ChoiceAnswer {

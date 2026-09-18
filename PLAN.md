@@ -4,9 +4,9 @@
 
 > **For Hermes:** Use the Kanban workflow and independent review/QA gates. P0 product decisions below are recorded. Implementation is already in progress on `origin/main`; continue from the current workbench rather than Stage 0 scaffolding.
 
-**Status:** Pivot recorded. A fixture-first analysis workbench is on `origin/main`. Remaining work is pause/cancel, browse/share completeness, BYOD intake (Stage 5), abuse/cost controls, and production/release gates. Stage 0 provider-contract confirmation is still pending before paid live Jev.
+**Status:** Pivot recorded. Fixture-first analysis plus Stage 5 BYOD intake (CSV upload, public HTTPS CSV URL, sample on-ramp) and a scrubbable live class-distribution run view (sample and BYOD share the same shell) is on the working branch. Remaining work is pause/cancel, browse/share completeness, abuse/cost controls, and production/release gates. Stage 0 provider-contract confirmation is still pending before paid live Jev.
 
-**Last updated:** 2026-09-17 23:05:00 UTC
+**Last updated:** 2026-09-17 23:35:00 UTC
 
 **Goal:** Let a user bring a small CSV dataset, describe an analysis in natural language, review/edit the generated Jev classifier query, run a bounded row-by-row Jev analysis, watch results arrive live, and share/replay the completed analysis at a unique URL.
 
@@ -25,13 +25,13 @@
 
 Treat these as landed starting points, not future tasks:
 
-- Fixture-first analysis UI in `src/App.tsx`: sample football dataset, query draft/edit, explicit run, progress, current-row inspector, results, and share/replay readback.
+- Fixture-first analysis UI in `src/App.tsx`: sample football dataset, query draft/edit, explicit run, progress, scrubbable live class chart, processed-row rail, secondary results table, and share/replay readback.
 - Server analysis API: `POST /api/analysis/draft`, `POST /api/analysis/run`, `GET /api/analysis/<id>`, `GET /api/share/<id>` (`docs/analysis-api.md`).
 - Checked-in Seahawks Super Bowl fixture with H1 model inputs and H2 evaluation labels (`src/fixtures/footballTimeline.ts`).
 - Server-only OpenRouter draft adapter and Jev classifier adapter; browser bundles must stay free of credentials and provider SDKs.
 - Convex analysis snapshot persistence plus leftover Gamecast forecast tables/cron. Gamecast ESPN routes are historical; do not extend them as the product.
 
-Gaps versus this plan: no pause/cancel status, no BYOD CSV/UploadThing, no public dataset/analysis browse listing, leftover Gamecast forecast/ESPN operator copy remains in README, and paid live Jev remains fail-closed until operator provisioning and provider-contract confirmation.
+Gaps versus this plan: pause/cancel status is still incomplete, leftover Gamecast forecast/ESPN operator copy remains in README, paid live Jev remains fail-closed until operator provisioning and provider-contract confirmation, and UploadThing/Convex production secrets are operator-provisioned (BYOD fails closed without them).
 
 ---
 
@@ -54,7 +54,7 @@ landing page
   → user reviews/edits query
   → explicit Run Jev confirmation
   → bounded row-by-row execution
-  → realtime result visualization + current-row inspector
+  → realtime result visualization (scrubbable class chart + processed-row rail)
   → durable replay/share page
 ```
 
@@ -95,7 +95,8 @@ These questions materially change the data model, abuse controls, and UI. Record
 2. **Execution cap — DECIDED:** Maximum 5,000 accepted rows and 5,000 Jev calls per analysis. This is a hard server-side ceiling, not a promise that every user may run 5,000 calls without additional global throttling or budget approval. The run confirmation must show the maximum call count; concurrency, retry policy, and global quota remain enforced server-side.
 3. **Jev classifier contract — DECIDED:** Each row produces a selected class, per-class probabilities, and confidence when Jev provides it; no free-form explanation by default. The implementation must generalize the existing typed `Choice` adapter from hard-coded football outcomes to dynamic user-defined classes, subject to the confirmed Jev API contract.
 4. **CSV URLs — DECIDED:** Accept public HTTPS URLs that directly return CSV. No cookies, authorization headers, authenticated/private links, or arbitrary URL fetches.
-5. **Result visualization — DECIDED:** Live results table plus class-distribution bar chart, current-row inspector, and replay scrubber.
+5. **Result visualization — DECIDED:** Live class-distribution chart is the run-view hero for sample and BYOD. It ticks on every persisted row, is scrubbable (range under the chart; mid-run snaps to completed rows; playhead follows the live edge unless the user scrubs back). Right rail (~280px; stacks under the chart on ≤900px) lists processed rows as `Row X of Y` only. Progress `N / M rows` sits above. Results table is secondary / below the fold. Empty: chart axes + “Waiting for the first row…”; rail empty until row 1.
+6. **Sample dataset — DECIDED:** Seahawks fixture stays as the site demo sample (try-it path). BYOD upload + public HTTPS CSV URL also ships. Two equal first-screen cards: Try sample (Super Bowl Seahawks demo; football is the sample, not the product) and Bring your own. Same live class-distribution chart for both. Do not drop the fixture while adding BYOD.
 
 ### Working defaults pending provider-contract confirmation
 
@@ -171,8 +172,8 @@ The analysis page has a stable URL before, during, and after execution. It conta
 
 - analysis title and explicit `RUNNING`, `PAUSED`, `COMPLETE`, `CANCELLED`, or `ERROR` state;
 - progress count and bounded estimate, never fabricated completion;
-- live class-distribution chart and result table;
-- current row inspector showing only the row currently being processed;
+- live class-distribution chart (hero, scrubbable) and a secondary result table;
+- processed-row rail listing `Row X of Y` only (no CSV cell dump);
 - current prediction, confidence/probabilities, latency, attempt, and error state when available;
 - recent result list and latest update timestamp;
 - pause/cancel control with durable state transition;
@@ -401,10 +402,9 @@ src/
     QueryComposer.tsx
     RunConfirmation.tsx
     AnalysisProgress.tsx
-    CurrentRowInspector.tsx
     ResultsChart.tsx
+    RowRail.tsx
     ResultsTable.tsx
-    ReplayControls.tsx
     BrowseCards.tsx
   App.tsx
   styles.css
@@ -496,7 +496,7 @@ Modify existing shared server/browser boundaries only after checking all current
 
 **Owner:** coder; visual reviewer; bug-basher
 
-- Build stable analysis route with progress, current-row inspector, results table, class-distribution visualization, error/partial states, and pause/cancel controls.
+- Build stable analysis route with progress, scrubbable class-distribution chart, processed-row rail, secondary results table, error/partial states, and pause/cancel controls.
 - Add Convex realtime subscription and reconnect/catch-up behavior.
 - Add durable replay using stored predictions only; replay must never call Jev.
 - Verify 320px, 390px, desktop, keyboard, reduced-motion, no-overflow, long-label, empty-result, and partial-run behavior.
@@ -635,4 +635,4 @@ At minimum test 320×844, 390×844, and 1440×900:
 - [ ] Production QA explicitly passes the exact deployed artifact.
 - [ ] Any live Jev run is separately labeled and backed by real provider evidence.
 
-**Current next gate:** harden the existing fixture-first workbench (pause/cancel, public browse/share completeness, abuse/cost controls, provider-contract confirmation) before Stage 5 BYOD CSV intake. Canonical remote is `origin` (`jev-data-questions`); product/Vercel name remains `jev-data-analysis`. Do not dispatch implementation against the old live-ESPN gamecast plan.
+**Current next gate:** operator-provision UploadThing + Convex for BYOD, then harden pause/cancel, public browse/share completeness, abuse/cost controls, and provider-contract confirmation before Stage 6. Canonical remote is `origin` (`jev-data-questions`); product/Vercel name remains `jev-data-analysis`. Do not dispatch implementation against the old live-ESPN gamecast plan.

@@ -13,10 +13,9 @@ import {
   ANALYSIS_CLASS_NAMES,
   ANALYSIS_MAX_QUERY_LENGTH,
   type AnalysisClassification,
-} from '../shared/analysis'
-import { FOOTBALL_FIXTURE_ID } from '../fixtures/footballTimeline'
-import { AnalysisError, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis'
-import { createTypeSafeSdkConfig, hasTypeSafeApiKey, JEV_MODEL } from './jev'
+} from '../shared/analysis.js'
+import { AnalysisError, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis.js'
+import { createTypeSafeSdkConfig, hasTypeSafeApiKey, JEV_MODEL } from './jev.js'
 
 export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 export const OPENROUTER_MODEL = 'openai/gpt-4o-mini'
@@ -48,17 +47,28 @@ const parseDraftQuery = (value: unknown): string | undefined => {
   return trimmed
 }
 
-const contentQuery = (content: unknown): string | undefined => {
-  if (isRecord(content)) return parseDraftQuery(content.query)
+const parseDraftClasses = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined
+  const classes = value.map((item) => typeof item === 'string' ? item.trim() : '').filter((item) => item.length > 0 && item.length <= 80)
+  return classes.length >= 2 ? classes : undefined
+}
+
+const contentDraft = (content: unknown): { query: string; classes?: string[] } | undefined => {
+  const fromRecord = (value: unknown): { query: string; classes?: string[] } | undefined => {
+    if (!isRecord(value)) return undefined
+    const query = parseDraftQuery(value.query)
+    if (!query) return undefined
+    return { query, classes: parseDraftClasses(value.classes) }
+  }
+  if (isRecord(content)) return fromRecord(content)
   if (typeof content !== 'string') return undefined
   const stripped = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
   try {
-    const parsed: unknown = JSON.parse(stripped)
-    if (isRecord(parsed)) return parseDraftQuery(parsed.query)
+    return fromRecord(JSON.parse(stripped)) ?? (parseDraftQuery(stripped) ? { query: parseDraftQuery(stripped)! } : undefined)
   } catch {
-    return parseDraftQuery(stripped)
+    const query = parseDraftQuery(stripped)
+    return query ? { query } : undefined
   }
-  return undefined
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -87,7 +97,7 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
     this.fetcher = options.fetch ?? globalThis.fetch
   }
 
-  async draft(input: { fixtureId: string; task: string; classes: readonly string[] }): Promise<{ query: string; model: string }> {
+  async draft(input: { fixtureId: string; datasetId: string; task: string; classes: readonly string[]; columns?: readonly string[]; sampleRows?: Array<Record<string, unknown>>; sourceType?: string }): Promise<{ query: string; model: string; classes?: string[] }> {
     if (!this.apiKey) throw new OpenRouterConfigurationError()
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
@@ -99,8 +109,8 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
           model: this.model,
           temperature: 0,
           messages: [
-            { role: 'system', content: 'Return JSON only: {"query":"..."}. Draft a concise editable Jev classifier query. Do not include provider credentials, future rows, labels, or results.' },
-            { role: 'user', content: JSON.stringify({ fixtureId: input.fixtureId, task: input.task, classes: input.classes }) },
+            { role: 'system', content: 'Return JSON only: {"query":"...","classes":["..."]}. Draft a concise editable Jev classifier query and 2-32 class labels. Do not include provider credentials, raw secrets, or executable code.' },
+            { role: 'user', content: JSON.stringify({ fixtureId: input.fixtureId, datasetId: input.datasetId, task: input.task, classes: input.classes, columns: input.columns, sampleRows: input.sampleRows, sourceType: input.sourceType }) },
           ],
         }),
         signal: controller.signal,
@@ -114,10 +124,10 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
       const choices = isRecord(body) && Array.isArray(body.choices) ? body.choices : []
       const first = choices[0]
       const message = isRecord(first) && isRecord(first.message) ? first.message.content : undefined
-      const query = contentQuery(message)
-      if (!query) throw new OpenRouterProviderError('OPENROUTER_MALFORMED', 502, false)
+      const draft = contentDraft(message)
+      if (!draft?.query) throw new OpenRouterProviderError('OPENROUTER_MALFORMED', 502, false)
       const model = isRecord(body) && typeof body.model === 'string' && body.model.trim() ? body.model.trim() : this.model
-      return { query, model }
+      return { query: draft.query, model, ...(draft.classes ? { classes: draft.classes } : {}) }
     } catch (error) {
       if (error instanceof AnalysisError) throw error
       if (isAbortError(error)) throw new OpenRouterProviderError('OPENROUTER_TIMEOUT', 504, true)
@@ -130,12 +140,10 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
 
 const isAbortError = (error: unknown): boolean => isRecord(error) && error.name === 'AbortError'
 
-const classifierCriteria = {
-  'K.Walker': 'the K.Walker class',
-  'C.Kupp': 'the C.Kupp class',
-  'J.Smith-Njigba': 'the J.Smith-Njigba class',
-  'Other/Tie': 'Other or a tie',
-} as const
+const classifierCriteriaFor = (classes: readonly string[]): Record<string, string> => {
+  const names = classes.length >= 2 ? classes : ANALYSIS_CLASS_NAMES
+  return Object.fromEntries(names.map((name) => [name, `the ${name} class`]))
+}
 
 export interface ClassifierClientBoundary {
   systemOne(request: SystemOneRequest, options?: RequestOptions): Promise<unknown>
@@ -174,14 +182,15 @@ export class TypeSafeClassifierProvider implements AnalysisClassifier {
       timeoutMs: this.options.timeoutMs,
       fetch: this.options.fetch,
     }))))
+    const classes = input.classes && input.classes.length >= 2 ? input.classes : ANALYSIS_CLASS_NAMES
     const request: SystemOneRequest = {
       model: JEV_MODEL,
-      state: { fixtureId: FOOTBALL_FIXTURE_ID, rowIndex: input.rowIndex, input: input.row } as unknown as EntryType,
-      questions: { classification: choice(input.query, classifierCriteria) },
+      state: { fixtureId: input.fixtureId, datasetId: input.datasetId, rowIndex: input.rowIndex, input: input.row } as unknown as EntryType,
+      questions: { classification: choice(input.query, classifierCriteriaFor(classes)) },
     }
     try {
       const response = await client.systemOne(request, { headers: { 'Idempotency-Key': `analysis:${input.analysisId}:${input.rowIndex}` } })
-      return parseClassifierResponse(response)
+      return parseClassifierResponse(response, classes)
     } catch (error) {
       if (error instanceof AnalysisError) throw error
       if (error instanceof APITimeoutError) throw new AnalysisError('JEV_TIMEOUT', 'Jev request timed out', 504, true)
@@ -195,12 +204,13 @@ export class TypeSafeClassifierProvider implements AnalysisClassifier {
   }
 }
 
-export const parseClassifierResponse = (value: unknown): AnalysisClassification => {
+export const parseClassifierResponse = (value: unknown, classes: readonly string[] = ANALYSIS_CLASS_NAMES): AnalysisClassification => {
   if (!isRecord(value) || !isRecord(value.answers) || !isRecord(value.answers.classification)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
   const answer = value.answers.classification
-  if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !ANALYSIS_CLASS_NAMES.includes(answer.choice as typeof ANALYSIS_CLASS_NAMES[number]) || !isRecord(answer.probabilities)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
+  const allowed = classes.length >= 2 ? classes : ANALYSIS_CLASS_NAMES
+  if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !allowed.includes(answer.choice) || !isRecord(answer.probabilities)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
   const probabilities: Record<string, number> = {}
-  for (const className of ANALYSIS_CLASS_NAMES) {
+  for (const className of allowed) {
     const probability = answer.probabilities[className]
     if (typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned invalid class probabilities', 502)
     probabilities[className] = probability

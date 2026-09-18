@@ -6,6 +6,7 @@ import {
   AnalysisError,
   AnalysisService,
   InMemoryAnalysisStore,
+  InMemoryDatasetSource,
   type AnalysisClassifier,
   type AnalysisDraftProvider,
   type AnalysisSnapshot,
@@ -49,8 +50,10 @@ describe('analysis domain contract', () => {
 
     await expect(service.draft({ fixtureId: FOOTBALL_FIXTURE_ID, task: 'Find a useful H1 classifier.' })).resolves.toEqual({
       fixtureId: FOOTBALL_FIXTURE_ID,
+      datasetId: FOOTBALL_FIXTURE_ID,
+      sourceType: 'fixture',
       query,
-      metadata: expect.objectContaining({ provider: 'openrouter', rowCount: 39 }),
+      metadata: expect.objectContaining({ provider: 'openrouter', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2' }),
     })
     expect(draftCalls).toHaveLength(1)
     expect(classifierCalls).toHaveLength(0)
@@ -103,7 +106,7 @@ describe('analysis domain contract', () => {
   it('rejects an invalid fixture and invalid query before any provider call', async () => {
     const calls: unknown[] = []
     const service = serviceWith(makeClassifier(calls))
-    await expect(service.start({ fixtureId: 'not-the-fixture', query })).rejects.toMatchObject({ code: 'INVALID_FIXTURE', statusCode: 400 })
+    await expect(service.start({ fixtureId: 'not-the-fixture', query })).rejects.toMatchObject({ code: 'DATASET_NOT_FOUND', statusCode: 404 })
     await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: '  ' })).rejects.toMatchObject({ code: 'INVALID_QUERY', statusCode: 400 })
     await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: 'x'.repeat(20_001) })).rejects.toMatchObject({ code: 'INVALID_QUERY', statusCode: 400 })
     expect(calls).toHaveLength(0)
@@ -117,6 +120,40 @@ describe('analysis domain contract', () => {
     expect(shared).toEqual(expect.objectContaining({ analysisId: started.analysisId, fixtureId: FOOTBALL_FIXTURE_ID, status: 'queued' }))
     expect(JSON.stringify(shared)).not.toContain('OPENROUTER_KEY')
     expect(calls).toHaveLength(0)
+  })
+
+  it('persists each BYOD row prediction before the next classify call', async () => {
+    const store = new InMemoryAnalysisStore()
+    const seenCounts: number[] = []
+    const classifier: AnalysisClassifier = {
+      async classify() {
+        seenCounts.push(store.get('byod-1')?.resultRows.length ?? 0)
+        return { model: 'jev-latest', selectedClass: 'urgent', probabilities: { urgent: 0.7, routine: 0.3 } }
+      },
+    }
+    const service = new AnalysisService({
+      store,
+      classifier,
+      draftProvider: makeDraftProvider([]),
+      datasets: new InMemoryDatasetSource([{
+        datasetId: 'tickets',
+        fixtureId: 'tickets',
+        sourceType: 'upload',
+        displayName: 'tickets.csv',
+        columns: ['message'],
+        rows: [{ message: 'one' }, { message: 'two' }, { message: 'three' }],
+        classes: ['urgent', 'routine'],
+      }]),
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'byod-1',
+    })
+    const started = await service.start({ datasetId: 'tickets', query, classes: ['urgent', 'routine'] })
+    expect(started.status).toBe('queued')
+    expect(started.progress.totalRows).toBe(3)
+    const completed = await service.run(started.analysisId)
+    expect(completed.status).toBe('complete')
+    expect(completed.resultRows).toHaveLength(3)
+    expect(seenCounts).toEqual([0, 1, 2])
   })
 
   it('keeps bounds explicit for future fixtures', () => {
