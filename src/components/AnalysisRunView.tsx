@@ -8,8 +8,9 @@ import { Progress as ProgressBar } from './ui/progress'
 import {
   resumeRunLabel,
   runErrorCopy,
+  runProgressCount,
+  runProgressPercent,
   runSubsetCopy,
-  runViewHeading,
 } from '../runView/format'
 import { downloadTextFile, resultsCsv, resultsCsvFilename } from '../runView/resultsCsv'
 import { useRunPlayhead } from '../runView/playhead'
@@ -48,15 +49,16 @@ const formatElapsed = (ms: number): string => {
 const Progress = memo(function Progress({
   completedRows,
   totalRows,
+  percent,
 }: {
   completedRows: number
   totalRows: number
+  percent: number
 }) {
-  const ratio = totalRows ? Math.min(100, Math.round((completedRows / totalRows) * 100)) : 0
   return (
     <div className="progress-block" aria-label="Analysis progress">
-      <div className="progress-line"><span>{completedRows} / {totalRows} rows</span><b>{ratio}%</b></div>
-      <ProgressBar value={ratio} />
+      <div className="progress-line"><span>{completedRows} / {totalRows} rows</span><b>{percent}%</b></div>
+      <ProgressBar value={percent} />
     </div>
   )
 })
@@ -107,6 +109,9 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     tense: live ? 'analyzing' : 'analyzed',
   })
   const errorCopy = snapshot.error ? runErrorCopy(snapshot.error, snapshot.progress.completedRows) : undefined
+  const displayCompleted = snapshot.status === 'complete' ? snapshot.progress.totalRows : snapshot.progress.completedRows
+  const progressPercent = runProgressPercent(snapshot.progress.completedRows, snapshot.progress.totalRows, snapshot.status)
+  const progressCount = runProgressCount(snapshot.progress.completedRows, snapshot.progress.totalRows, snapshot.status)
 
   useEffect(() => {
     if (!live) return undefined
@@ -129,7 +134,8 @@ export const AnalysisRunView = memo(function AnalysisRunView({
       <CardHeader className="analysis-head flex-row items-start justify-between space-y-0 p-6 pb-0">
         <div>
           <p className="eyebrow">Run</p>
-          <h2 id="analysis-heading">{runViewHeading()}</h2>
+          <h2 id="analysis-heading" className="analysis-progress-pct">{progressPercent}%</h2>
+          <p className="analysis-progress-count">{progressCount}</p>
         </div>
         <div className="analysis-actions">
           <StatusBadge status={snapshot.status} />
@@ -153,8 +159,9 @@ export const AnalysisRunView = memo(function AnalysisRunView({
       </CardHeader>
       <CardContent>
         <Progress
-          completedRows={snapshot.progress.completedRows}
+          completedRows={displayCompleted}
           totalRows={snapshot.progress.totalRows}
+          percent={progressPercent}
         />
         {latencyCopy ? <p className="run-latency" role="status">{latencyCopy}</p> : null}
         {errorCopy ? (

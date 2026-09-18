@@ -7,6 +7,24 @@ export const SAMPLE_H1_ROW_COUNT = 39
 
 export const runViewHeading = (): string => 'Results'
 
+export const runProgressPercent = (
+  completedRows: number,
+  totalRows: number,
+  status?: 'queued' | 'running' | 'complete' | 'error',
+): number => {
+  if (status === 'complete') return 100
+  if (totalRows <= 0) return 0
+  return Math.min(100, Math.round((completedRows / totalRows) * 100))
+}
+
+export const runProgressCount = (
+  completedRows: number,
+  totalRows: number,
+  status?: 'queued' | 'running' | 'complete' | 'error',
+): string => (
+  status === 'complete' ? `${totalRows} of ${totalRows}` : `${completedRows} / ${totalRows}`
+)
+
 export const chartHeading = (kind: JevQuestionKind): string => {
   if (kind === 'noul') return 'Win probability'
   if (kind === 'score') return 'Score'
