@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { footballFixture, getHalftimeModelInput, FOOTBALL_FIXTURE_ID, FOOTBALL_FIXTURE_SCHEMA } from '../fixtures/footballTimeline'
+import { footballFixture, getHalftimeModelInput, getWinLikelihoodModelInput, FOOTBALL_FIXTURE_ID, FOOTBALL_FIXTURE_SCHEMA } from '../fixtures/footballTimeline'
 import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
 import { parseJevQueryJson } from '../shared/jevQuery'
 import {
@@ -66,7 +66,7 @@ describe('analysis domain contract', () => {
   })
 
   it('honors a win-likelihood prompt instead of the fixture player-class fallback', async () => {
-    const draftCalls: Array<{ task: string; classes?: readonly string[] }> = []
+    const draftCalls: Array<{ task: string; classes?: readonly string[]; sampleRows?: Array<Record<string, unknown>> }> = []
     const service = serviceWith(makeClassifier([]), {
       async draft(input) {
         draftCalls.push(input)
@@ -83,9 +83,14 @@ describe('analysis domain contract', () => {
     expect(drafted.query).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(drafted.metadata.questionKind).toBe('noul')
     expect(drafted.metadata.classes).toEqual([])
+    expect(drafted.metadata.rowCount).toBe(71)
+    expect(drafted.metadata.inputHalf).toBeUndefined()
+    expect(drafted.metadata.labelHalf).toBeUndefined()
+    expect(drafted.metadata.columns).toEqual(expect.arrayContaining(['posteam_score', 'defteam_score', 'score_differential']))
     expect(JSON.stringify(drafted)).not.toMatch(/K\.Walker|C\.Kupp|Smith-Njigba|Other\/Tie/)
     expect(draftCalls[0]?.task).toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(draftCalls[0]?.classes ?? []).toEqual([])
+    expect(draftCalls[0]?.sampleRows?.[0]).toEqual(expect.objectContaining({ posteam_score: expect.any(Number), defteam_score: expect.any(Number), score_differential: expect.any(Number) }))
   })
 
   it('starts a Noul run from edited Jev query JSON', async () => {
@@ -95,6 +100,8 @@ describe('analysis domain contract', () => {
     expect(started.questionKind).toBe('noul')
     expect(started.classes).toEqual([])
     expect(started.query).toBe(jsonQuery)
+    expect(started.progress.totalRows).toBe(71)
+    expect(started.columns).toEqual(expect.arrayContaining(['posteam_score', 'defteam_score', 'score_differential']))
   })
 
   it('runs a Noul win-likelihood analysis from Jev values, not CSV wpa', async () => {
@@ -112,12 +119,27 @@ describe('analysis domain contract', () => {
       questionKind: 'noul',
     })
     const completed = await service.run(started.analysisId)
+    const expected = getWinLikelihoodModelInput(footballFixture)
     expect(started.questionKind).toBe('noul')
+    expect(started.progress.totalRows).toBe(71)
+    expect(completed.resultRows).toHaveLength(71)
     expect(completed.resultRows[0]).toEqual(expect.objectContaining({ value: 0.41 }))
     expect(completed.resultRows[0]?.selectedClass).toBeUndefined()
+    expect(calls).toHaveLength(71)
     expect(calls[0]?.questionKind).toBe('noul')
     expect(calls[0]?.row).toHaveProperty('wpa')
+    expect(calls[0]?.row).toMatchObject({
+      play_id: expected[0]?.play_id,
+      posteam_score: expected[0]?.posteam_score,
+      defteam_score: expected[0]?.defteam_score,
+      score_differential: expected[0]?.score_differential,
+    })
+    expect(calls.some((call) => Number(call.row.qtr) >= 3)).toBe(true)
+    expect(calls.map((call) => call.row.play_id)).toEqual(expected.map((row) => row.play_id))
+    expect(calls.every((call) => typeof call.row.posteam_score === 'number' && typeof call.row.defteam_score === 'number')).toBe(true)
     expect(completed.resultRows.every((row) => row.value === 0.41 && row.value !== row.input.wpa)).toBe(true)
+    expect(completed.resultRows[0]?.input).toEqual(expected[0])
+    expect(completed.resultRows.at(-1)?.input).toEqual(expected.at(-1))
   })
 
   it('runs only H1 rows, reports bounded progress, and sorts replay rows deterministically', async () => {

@@ -3,6 +3,7 @@ import {
   SAMPLE_WIN_LIKELIHOOD_TASK,
   SAMPLE_WIN_NOUL_QUERY,
   chartVisualFor,
+  fixtureAnalysisSliceFor,
   inferQuestionKind,
   resolveDraftedQuery,
   seriesValueFromRow,
@@ -70,6 +71,24 @@ describe('chart type follows the drafted query', () => {
     expect(inferQuestionKind(JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }))).toBe('noul')
     expect(inferQuestionKind(JSON.stringify({ type: 'choice', instructions: 'Classify tickets.', criteria: { urgent: 'a', routine: 'b' } }))).toBe('choice')
     expect(inferQuestionKind(JSON.stringify({ type: 'score', instructions: 'Rate it.', criteria: ['Low', 'High'] }))).toBe('score')
+  })
+
+  it('routes the sample Noul path to full-game rows and keeps H1 yards evaluation isolated', () => {
+    expect(fixtureAnalysisSliceFor()).toBe('win-likelihood')
+    expect(fixtureAnalysisSliceFor({ task: SAMPLE_WIN_LIKELIHOOD_TASK })).toBe('win-likelihood')
+    expect(fixtureAnalysisSliceFor({ query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul' })).toBe('win-likelihood')
+    expect(fixtureAnalysisSliceFor({
+      query: JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }),
+    })).toBe('win-likelihood')
+    expect(fixtureAnalysisSliceFor({ task: 'Find a useful H1 classifier.' })).toBe('halftime-eval')
+    expect(fixtureAnalysisSliceFor({
+      query: 'Classify the most likely leading player from the visible first-half play inputs.',
+      classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'],
+    })).toBe('halftime-eval')
+    expect(fixtureAnalysisSliceFor({
+      questionKind: 'choice',
+      classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'],
+    })).toBe('halftime-eval')
   })
 
   it('reads Jev series values and never treats CSV wpa as the prediction', () => {

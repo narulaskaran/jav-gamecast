@@ -46,6 +46,7 @@ export interface FootballPlay {
   fumble: number | null
 }
 export type FootballModelInput = Omit<FootballPlay, 'game_id' | 'game_date' | 'passer_player_name' | 'receiver_player_name' | 'rusher_player_name' | 'posteam_score' | 'defteam_score'>
+export type FootballWinLikelihoodInput = Omit<FootballPlay, 'game_id' | 'game_date' | 'passer_player_name' | 'receiver_player_name' | 'rusher_player_name'>
 export type FootballLabelClass = 'K.Walker' | 'C.Kupp' | 'J.Smith-Njigba' | 'Other/Tie'
 
 export interface FootballFixtureManifest {
@@ -134,6 +135,13 @@ const EXPECTED_IDENTITY = {
 } as const
 const FORBIDDEN_INPUT_FIELDS = new Set(['game_id', 'game_date', 'posteam_score', 'defteam_score', 'away_score', 'home_score', 'result', 'total', 'postgame', 'final_score'])
 const MODEL_INPUT_FIELDS = FOOTBALL_FIXTURE_SCHEMA.filter((field) => !['game_id', 'game_date', 'passer_player_name', 'receiver_player_name', 'rusher_player_name', 'posteam_score', 'defteam_score'].includes(field))
+const WIN_LIKELIHOOD_OMITTED_FIELDS = new Set(['game_id', 'game_date', 'passer_player_name', 'receiver_player_name', 'rusher_player_name'])
+const WIN_LIKELIHOOD_MODEL_INPUT_FIELDS: FootballFixtureField[] = [
+  'play_id', 'qtr', 'game_seconds_remaining', 'posteam_score', 'defteam_score', 'score_differential',
+  'half_seconds_remaining', 'posteam', 'defteam', 'side_of_field', 'yardline_100', 'down', 'ydstogo',
+  'play_type', 'passer_player_id', 'receiver_player_id', 'rusher_player_id', 'yards_gained', 'air_yards',
+  'yards_after_catch', 'epa', 'wpa', 'complete_pass', 'sack', 'penalty', 'fumble',
+]
 const LABEL_FIELDS = ['yards_gained', 'play_type', 'receiver_player_id', 'rusher_player_id', 'complete_pass', 'sack', 'penalty', 'fumble']
 const AUDIT_FIELDS = new Set(['game_id', 'game_date', 'passer_player_name', 'receiver_player_name', 'rusher_player_name', 'posteam_score', 'defteam_score'])
 const LABEL_DEFINITION = 'highest Seattle second-half scrimmage-yard contributor; sacks and penalties excluded'
@@ -248,11 +256,24 @@ export function validateFootballFixture(input: unknown): asserts input is Footba
   invariant(evaluation.label_class === expectedLabel, 'evaluation label class does not match H2 leaderboard')
 }
 
+const pickFields = <T extends FootballModelInput | FootballWinLikelihoodInput>(row: FootballPlay, fields: readonly FootballFixtureField[]): T => (
+  Object.fromEntries(fields.map((field) => [field, row[field]])) as T
+)
+
 export function getHalftimeModelInput(fixture: FootballFixture = footballFixture): FootballModelInput[] {
   validateFootballFixture(fixture)
   return fixture.rows
     .filter((row) => row.qtr <= 2 && row.half_seconds_remaining !== null && row.half_seconds_remaining > 0)
-    .map((row) => Object.fromEntries(MODEL_INPUT_FIELDS.map((field) => [field, row[field]])) as FootballModelInput)
+    .map((row) => pickFields<FootballModelInput>(row, MODEL_INPUT_FIELDS))
+}
+
+export function getWinLikelihoodModelInput(fixture: FootballFixture = footballFixture): FootballWinLikelihoodInput[] {
+  validateFootballFixture(fixture)
+  invariant(WIN_LIKELIHOOD_MODEL_INPUT_FIELDS.every((field) => !WIN_LIKELIHOOD_OMITTED_FIELDS.has(field)), 'win-likelihood input includes identity leakage')
+  invariant(WIN_LIKELIHOOD_MODEL_INPUT_FIELDS.includes('posteam_score') && WIN_LIKELIHOOD_MODEL_INPUT_FIELDS.includes('defteam_score') && WIN_LIKELIHOOD_MODEL_INPUT_FIELDS.includes('score_differential'), 'win-likelihood input must include absolute score state')
+  return [...fixture.rows]
+    .sort((left, right) => left.play_id - right.play_id)
+    .map((row) => pickFields<FootballWinLikelihoodInput>(row, WIN_LIKELIHOOD_MODEL_INPUT_FIELDS))
 }
 
 export function getEvaluationLabel(fixture: FootballFixture = footballFixture): FootballLabelClass {
@@ -266,6 +287,7 @@ validateFootballFixture(footballFixture)
 export const footballFixtureDisclosure = footballFixture.manifest.disclosure
 export const footballFixtureSchema = FOOTBALL_FIXTURE_SCHEMA
 export const footballFixtureModelInputFields = Object.freeze([...MODEL_INPUT_FIELDS])
+export const footballFixtureWinLikelihoodInputFields = Object.freeze([...WIN_LIKELIHOOD_MODEL_INPUT_FIELDS])
 export const footballFixtureLabelFields = Object.freeze([...footballFixture.manifest.label_fields])
 export const footballFixtureSourceLinks = Object.freeze({
   pbp: footballFixture.manifest.source_url,

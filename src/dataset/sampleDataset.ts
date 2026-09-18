@@ -1,15 +1,15 @@
 import {
   FOOTBALL_FIXTURE_ID,
   footballFixtureDisclosure,
-  footballFixtureModelInputFields,
   footballFixtureSourceLinks,
-  getHalftimeModelInput,
+  footballFixtureWinLikelihoodInputFields,
+  getWinLikelihoodModelInput,
 } from '../fixtures/footballTimeline'
 import { CSV_PREVIEW_ROWS } from './csvTypes'
 import { asAnalysisRow, type DatasetPreview } from '../shared/dataset'
 import { inferSampleColumns } from './sampleColumns'
 
-const rows = getHalftimeModelInput().map((row) => asAnalysisRow(row))
+const rows = getWinLikelihoodModelInput().map((row) => asAnalysisRow(row))
 
 export const SAMPLE_DATASET_ID = FOOTBALL_FIXTURE_ID
 export const SAMPLE_DATASET_NAME = 'Super Bowl Seahawks demo'
@@ -22,7 +22,7 @@ export const getSampleDatasetPreview = (): DatasetPreview => ({
   contentHash: 'fixture',
   encoding: 'utf-8',
   delimiter: ',',
-  columns: inferSampleColumns(rows, [...footballFixtureModelInputFields]),
+  columns: inferSampleColumns(rows, [...footballFixtureWinLikelihoodInputFields]),
   acceptedRowCount: rows.length,
   previewRows: rows.slice(0, CSV_PREVIEW_ROWS),
   validationWarnings: [],

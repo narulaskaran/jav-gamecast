@@ -34,7 +34,7 @@ npm run audit
 
 ## Sample fixture
 
-`src/fixtures/footballTimeline.ts` is the sample on-ramp: 39 first-half model-input rows and 32 held-out second-half evaluation rows. H2 rows, final scores, and postgame fields never enter the model. Validate with `npm run fixture:validate`.
+`src/fixtures/footballTimeline.ts` is the sample on-ramp: 71 Seattle run/pass/sack plays through the game. The default win-likelihood task sends every usable row (not H1-only) and includes in-progress `posteam_score` / `defteam_score` plus `score_differential` and clock. The leftover H1→H2 yards evaluation still uses 39 first-half rows without absolute scores. Validate with `npm run fixture:validate`.
 
 ## API
 

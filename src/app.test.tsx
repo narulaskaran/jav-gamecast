@@ -125,6 +125,9 @@ describe('Jev playground flow', () => {
     expect(screen.getByText(/bring a dataset\. ask a question\. see jev classify every row/i)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /choose a dataset/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
+    expect(screen.getByText('71 rows')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'posteam_score' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'defteam_score' })).toBeInTheDocument()
     expect(api.draft).not.toHaveBeenCalled()
     expect(api.start).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/^Analysis task$/i), { target: { value: 'Find a first-half signal.' } })
@@ -272,17 +275,17 @@ describe('Jev playground flow', () => {
     const noulDraft: AnalysisDraftResult = {
       ...draft,
       query: noulQueryJson,
-      metadata: { ...draft.metadata, questionKind: 'noul', classes: [] },
+      metadata: { ...draft.metadata, rowCount: 71, questionKind: 'noul', classes: [], columns: ['play_id', 'posteam_score', 'defteam_score', 'score_differential'] },
     }
     const noulRun = snapshot({
       query: noulQueryJson,
       questionKind: 'noul',
       classes: [],
       status: 'running',
-      progress: { completedRows: 3, totalRows: 39, completedCalls: 3, totalCalls: 39 },
+      progress: { completedRows: 3, totalRows: 71, completedCalls: 3, totalCalls: 71 },
       resultRows: Array.from({ length: 3 }, (_, rowIndex) => ({
         rowIndex,
-        input: { ...input, wpa: 0.91 },
+        input: { ...input, wpa: 0.91, posteam_score: 3, defteam_score: 0 },
         model: 'jev-latest',
         questionKind: 'noul' as const,
         value: 0.4 + rowIndex * 0.1,
@@ -300,17 +303,19 @@ describe('Jev playground flow', () => {
     const editor = await screen.findByLabelText(/^Jev query JSON$/i)
     expect(parseJevQueryJson((editor as HTMLTextAreaElement).value)).toEqual({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY })
     expect(screen.getByText(/noul · yes\/no probability 0–1/i)).toBeInTheDocument()
+    expect(screen.getByText('71 rows · noul')).toBeInTheDocument()
     expect((editor as HTMLTextAreaElement).value.trim().startsWith('{')).toBe(true)
     expect((editor as HTMLTextAreaElement).value).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
     expect(await screen.findByRole('img', { name: /win probability over play index/i })).toBeInTheDocument()
+    expect(await screen.findByText('3 / 71 rows')).toBeInTheDocument()
     expect(document.querySelector('[data-chart-kind="series"]')).toBeTruthy()
     expect(document.querySelector('[data-play-cursor="true"]')).toBeTruthy()
     expect(document.querySelector('[data-series-points="3"]')).toBeTruthy()
     expect(document.querySelector('[data-class="K.Walker"]')).toBeNull()
     expect(document.querySelector('[data-class="Adams"]')).toBeNull()
     const rail = screen.getByRole('complementary', { name: /processed rows/i })
-    expect(within(rail).getByRole('button', { name: /row 1 of 39/i })).toBeInTheDocument()
+    expect(within(rail).getByRole('button', { name: /row 1 of 71/i })).toBeInTheDocument()
     expect(within(rail).queryByText('K.Walker')).not.toBeInTheDocument()
     expect(api.draft).toHaveBeenCalledWith(expect.objectContaining({ task: SAMPLE_WIN_LIKELIHOOD_TASK }))
     expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ query: noulQueryJson, questionKind: 'noul', classes: [] }))

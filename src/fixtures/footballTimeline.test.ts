@@ -6,6 +6,8 @@ import {
   footballFixture,
   getEvaluationLabel,
   getHalftimeModelInput,
+  getWinLikelihoodModelInput,
+  footballFixtureWinLikelihoodInputFields,
   validateFootballFixture,
 } from './footballTimeline'
 
@@ -50,6 +52,27 @@ describe('pinned Seahawks Jev fixture', () => {
     expect(input.every((row) => row.qtr <= 2 && row.half_seconds_remaining !== null && row.half_seconds_remaining > 0)).toBe(true)
     expect(input.every((row) => !('home_score' in row) && !('away_score' in row) && !('result' in row) && !('total' in row))).toBe(true)
     expect(getEvaluationLabel()).toBe('K.Walker')
+  })
+
+  it('creates full-game win-likelihood inputs with absolute score state, ordered by play_id', () => {
+    const input = getWinLikelihoodModelInput()
+    expect(input).toHaveLength(71)
+    expect(input.map((row) => row.play_id)).toEqual(footballFixture.rows.map((row) => row.play_id))
+    expect(input.every((row, index) => index === 0 || row.play_id > input[index - 1].play_id)).toBe(true)
+    expect(input.some((row) => row.qtr >= 3)).toBe(true)
+    expect(input.at(-1)?.qtr).toBe(4)
+    expect(footballFixtureWinLikelihoodInputFields).toEqual(expect.arrayContaining(['posteam_score', 'defteam_score', 'score_differential', 'game_seconds_remaining']))
+    expect(input.every((row) => !('game_id' in row) && !('game_date' in row))).toBe(true)
+    expect(input.every((row) => !('receiver_player_name' in row) && !('rusher_player_name' in row))).toBe(true)
+    expect(input.every((row) => !('home_score' in row) && !('away_score' in row) && !('result' in row) && !('final_score' in row))).toBe(true)
+    expect(input.every((row) => typeof row.posteam_score === 'number' && typeof row.defteam_score === 'number')).toBe(true)
+    expect(input.every((row) => 'score_differential' in row && 'qtr' in row && 'game_seconds_remaining' in row)).toBe(true)
+    expect(input[0]).toMatchObject({ play_id: 57, posteam_score: 0, defteam_score: 0, score_differential: 0 })
+    expect(input.at(-1)).toEqual(expect.objectContaining({
+      play_id: footballFixture.rows.at(-1)?.play_id,
+      posteam_score: expect.any(Number),
+      defteam_score: expect.any(Number),
+    }))
   })
 
   it('rejects a row moved across the temporal boundary or a changed identity', () => {

@@ -2,7 +2,7 @@
 
 The playground accepts three dataset sources: the checked-in sample fixture, a CSV file upload, and a public HTTPS CSV URL. All three use the same draft → edit Jev query JSON → run worker. Chart type follows the drafted query: Noul/Score render a live series; Choice renders class-distribution bars. The sample default task is win likelihood per play (Jev Noul). The browser never calls Jev, OpenRouter, UploadThing, or privileged Convex writes.
 
-The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1`; it has 39 H1 input rows and 32 H2 evaluation rows. H2 rows, labels, final scores, and postgame fields are never sent to Jev. Super Bowl copy is illustrative sample data only.
+The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1` (71 Seattle run/pass/sack plays, ordered by `play_id`). The sample win-likelihood / Noul path sends the full game, including in-progress `posteam_score`, `defteam_score`, `score_differential`, and clock/situation. H1→H2 yards evaluation still uses 39 first-half rows without absolute scores; identity, final scores, and postgame fields never enter either path. Super Bowl copy is illustrative sample data only.
 
 ## Dataset intake
 
@@ -55,12 +55,10 @@ Request JSON (sample or BYOD):
   "metadata":{
     "provider":"openrouter",
     "model":"openai/gpt-4o-mini",
-    "rowCount":39,
-    "inputHalf":"H1",
-    "labelHalf":"H2",
+    "rowCount":71,
     "questionKind":"noul",
     "classes":[],
-    "columns":["play_id"],
+    "columns":["play_id","qtr","game_seconds_remaining","posteam_score","defteam_score","score_differential"],
     "displayName":"Super Bowl Seahawks demo"
   }
 }
@@ -98,16 +96,16 @@ A bounded snapshot has this shape:
   "status":"queued",
   "createdAt":"...",
   "updatedAt":"...",
-  "progress":{"completedRows":0,"totalRows":39,"completedCalls":0,"totalCalls":39},
+  "progress":{"completedRows":0,"totalRows":71,"completedCalls":0,"totalCalls":71},
   "questionKind":"noul",
   "classes":[],
-  "columns":["play_id"],
-  "currentFixtureRow":{"rowIndex":0,"input":{"play_id":57,"qtr":1}},
+  "columns":["play_id","qtr","game_seconds_remaining","posteam_score","defteam_score","score_differential"],
+  "currentFixtureRow":{"rowIndex":0,"input":{"play_id":57,"qtr":1,"posteam_score":0,"defteam_score":0,"score_differential":0}},
   "resultRows":[]
 }
 ```
 
-`status` is one of `queued`, `running`, `complete`, or `error`. Result rows are sorted by `rowIndex` on every read. Each completed row contains the H1 input plus the Jev model and the typed answer: Noul/Score store `value` (P(win) or normalized score); Choice stores selected class, per-class probabilities, and optional confidence. CSV columns such as `wpa` are inputs, not Jev outputs. Errors expose only a stable code and retryability flag; partial result rows remain bounded and readable.
+`status` is one of `queued`, `running`, `complete`, or `error`. Result rows are sorted by `rowIndex` on every read. Each completed row contains the row sent to Jev plus the Jev model and the typed answer: Noul/Score store `value` (P(win) or normalized score); Choice stores selected class, per-class probabilities, and optional confidence. Sample win-likelihood rows include in-progress scores and later-game plays. CSV columns such as `wpa` are inputs, not Jev outputs. Errors expose only a stable code and retryability flag; partial result rows remain bounded and readable.
 
 ## Public share read
 

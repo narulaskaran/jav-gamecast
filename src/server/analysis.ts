@@ -22,9 +22,11 @@ import {
   type JevQuestionKind,
 } from '../shared/analysis.js'
 import {
+  fixtureAnalysisSliceFor,
   inferQuestionKind,
   isFixturePlayerClassList,
   resolveDraftedQuery,
+  type FixtureAnalysisSlice,
 } from '../shared/questionKind.js'
 import {
   buildJevQuery,
@@ -37,7 +39,9 @@ import {
   FOOTBALL_FIXTURE_ID,
   footballFixture,
   footballFixtureModelInputFields,
+  footballFixtureWinLikelihoodInputFields,
   getHalftimeModelInput,
+  getWinLikelihoodModelInput,
 } from '../fixtures/footballTimeline.js'
 
 export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis.js'
@@ -130,14 +134,16 @@ export class InMemoryAnalysisStore implements AnalysisStorage {
   }
 }
 
-export const fixtureAnalysisDataset = (): ResolvedAnalysisDataset => {
-  const rows = getHalftimeModelInput(footballFixture).map((row) => asAnalysisRow(row))
+export const fixtureAnalysisDataset = (slice: FixtureAnalysisSlice = 'win-likelihood'): ResolvedAnalysisDataset => {
+  const winLikelihood = slice === 'win-likelihood'
+  const rows = (winLikelihood ? getWinLikelihoodModelInput(footballFixture) : getHalftimeModelInput(footballFixture))
+    .map((row) => asAnalysisRow(row))
   return {
     datasetId: FOOTBALL_FIXTURE_ID,
     fixtureId: FOOTBALL_FIXTURE_ID,
     sourceType: 'fixture',
     displayName: 'Super Bowl Seahawks demo',
-    columns: [...footballFixtureModelInputFields],
+    columns: [...(winLikelihood ? footballFixtureWinLikelihoodInputFields : footballFixtureModelInputFields)],
     rows,
   }
 }
@@ -154,7 +160,7 @@ export class InMemoryDatasetSource implements AnalysisDatasetSource {
   }
 
   get(datasetId: string): ResolvedAnalysisDataset | undefined {
-    if (datasetId === FOOTBALL_FIXTURE_ID) return fixtureAnalysisDataset()
+    if (datasetId === FOOTBALL_FIXTURE_ID) return fixtureAnalysisDataset(fixtureAnalysisSliceFor())
     return this.datasets.get(datasetId)
   }
 }
@@ -319,14 +325,24 @@ export class AnalysisService {
         columns: [...dataset.columns],
         displayName: dataset.displayName,
         questionKind: resolved.questionKind,
-        ...(dataset.sourceType === 'fixture' ? { inputHalf: 'H1' as const, labelHalf: 'H2' as const } : {}),
+        ...(dataset.sourceType === 'fixture' && fixtureAnalysisSliceFor({
+          task,
+          query: resolved.query,
+          questionKind: resolved.questionKind,
+          classes,
+        }) === 'halftime-eval' ? { inputHalf: 'H1' as const, labelHalf: 'H2' as const } : {}),
       },
     }
   }
 
   async start(input: AnalysisStartInput): Promise<AnalysisSnapshot> {
-    const dataset = await this.requireDataset(input)
     const query = this.requireQuery(input.query)
+    const parsedQuery = parseJevQueryJson(query)
+    const dataset = await this.requireDataset({
+      ...input,
+      query,
+      questionKind: parsedQuery?.type ?? input.questionKind,
+    })
     const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
     if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const analysisId = requestedAnalysisId || this.idFactory()
@@ -350,7 +366,6 @@ export class AnalysisService {
       }
       return cloneAnalysisSnapshot(normalized)
     }
-    const parsedQuery = parseJevQueryJson(query)
     const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
     const classes = questionKind === 'noul' ? [] : normalizeClasses(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes, dataset.classes ?? [])
     if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
@@ -409,7 +424,13 @@ export class AnalysisService {
     if (!initial) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
     const snapshot0 = normalizeSnapshot(initial)
     if (snapshot0.status === 'complete' || snapshot0.status === 'error') return cloneAnalysisSnapshot(snapshot0)
-    const dataset = await this.requireDataset({ fixtureId: snapshot0.fixtureId, datasetId: snapshot0.datasetId })
+    const dataset = await this.requireDataset({
+      fixtureId: snapshot0.fixtureId,
+      datasetId: snapshot0.datasetId,
+      query: snapshot0.query,
+      questionKind: snapshot0.questionKind,
+      classes: snapshot0.classes,
+    })
     const rows = dataset.rows
     const classes = snapshot0.classes
     const questionKind = inferQuestionKind(snapshot0.query, classes, snapshot0.questionKind)
@@ -457,10 +478,24 @@ export class AnalysisService {
     }
   }
 
-  private async requireDataset(input: { fixtureId?: string; datasetId?: string }): Promise<ResolvedAnalysisDataset> {
+  private async requireDataset(input: {
+    fixtureId?: string
+    datasetId?: string
+    task?: string
+    query?: string
+    questionKind?: JevQuestionKind
+    classes?: readonly string[]
+  }): Promise<ResolvedAnalysisDataset> {
     const datasetId = typeof input.datasetId === 'string' && input.datasetId.trim() ? input.datasetId.trim() : typeof input.fixtureId === 'string' && input.fixtureId.trim() ? input.fixtureId.trim() : ''
     if (!datasetId) throw new AnalysisError('INVALID_DATASET', 'Choose a sample dataset, upload a CSV, or paste a public CSV URL')
-    if (datasetId === FOOTBALL_FIXTURE_ID || input.fixtureId === FOOTBALL_FIXTURE_ID) return fixtureAnalysisDataset()
+    if (datasetId === FOOTBALL_FIXTURE_ID || input.fixtureId === FOOTBALL_FIXTURE_ID) {
+      return fixtureAnalysisDataset(fixtureAnalysisSliceFor({
+        task: input.task,
+        query: input.query,
+        questionKind: input.questionKind,
+        classes: input.classes,
+      }))
+    }
     const dataset = await this.datasets.get(datasetId)
     if (!dataset) throw new AnalysisError('DATASET_NOT_FOUND', 'Dataset was not found', 404)
     if (dataset.rows.length < 1) throw new AnalysisError('CSV_EMPTY', 'The CSV has no data rows')

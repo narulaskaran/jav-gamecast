@@ -4,6 +4,7 @@ import { parseCsvBytes, parseCsvText } from './parseCsv'
 import { validateCsvText } from './validateDataset'
 import { assertPublicHttpsCsvUrl, isResolvedAddressSafe } from './urlSafety'
 import { classDistribution, distributionAt } from './classDistribution'
+import { getSampleDatasetPreview } from './sampleDataset'
 
 const bytes = (text: string) => new TextEncoder().encode(text)
 
@@ -79,6 +80,33 @@ describe('running class distribution', () => {
     expect(distributionAt(rows, 2)).toEqual([
       { name: 'routine', count: 1 },
       { name: 'urgent', count: 1 },
+    ])
+  })
+})
+
+describe('sample dataset preview', () => {
+  it('uses full-game SEA plays with absolute score state for the win-likelihood path', () => {
+    const preview = getSampleDatasetPreview()
+    expect(preview.acceptedRowCount).toBe(71)
+    expect(preview.columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'posteam_score',
+      'defteam_score',
+      'score_differential',
+      'game_seconds_remaining',
+    ]))
+    expect(preview.previewRows[0]).toEqual(expect.objectContaining({
+      play_id: 57,
+      posteam_score: 0,
+      defteam_score: 0,
+      score_differential: 0,
+    }))
+    expect(preview.columns.slice(0, 6).map((column) => column.name)).toEqual([
+      'play_id',
+      'qtr',
+      'game_seconds_remaining',
+      'posteam_score',
+      'defteam_score',
+      'score_differential',
     ])
   })
 })

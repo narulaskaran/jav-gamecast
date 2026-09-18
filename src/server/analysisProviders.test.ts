@@ -7,11 +7,12 @@ import {
   parseClassifierResponse,
   type ClassifierClientBoundary,
 } from './analysisProviders'
-import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from '../fixtures/footballTimeline'
+import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput, getWinLikelihoodModelInput } from '../fixtures/footballTimeline'
 import { asAnalysisRow } from '../shared/dataset'
 import { AnalysisService, InMemoryAnalysisStore } from './analysis'
 
 const input = asAnalysisRow(getHalftimeModelInput()[0])
+const winLikelihoodInput = asAnalysisRow(getWinLikelihoodModelInput()[0])
 const draftBody = (content: unknown) => ({ choices: [{ message: { content } }], model: 'openrouter/test' })
 const fetchResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
@@ -119,11 +120,12 @@ describe('editable Jev classifier adapter', () => {
       datasetId: FOOTBALL_FIXTURE_ID,
       query: 'Will SEA win given this play state?',
       rowIndex: 0,
-      row: input,
+      row: winLikelihoodInput,
       classes: [],
       questionKind: 'noul',
     })).resolves.toMatchObject({ questionKind: 'noul', value: 0.63 })
     expect(calls[0]).toEqual(expect.objectContaining({
+      state: expect.objectContaining({ input: expect.objectContaining({ posteam_score: winLikelihoodInput.posteam_score, defteam_score: winLikelihoodInput.defteam_score, score_differential: winLikelihoodInput.score_differential }) }),
       questions: expect.objectContaining({ classification: expect.objectContaining({ type: 'noul', instructions: 'Will SEA win given this play state?' }) }),
     }))
   })

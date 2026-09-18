@@ -36,6 +36,17 @@ describe('analysis API contract', () => {
     expect(JSON.parse((state.body as { query: string }).query)).toEqual(expect.objectContaining({ type: expect.any(String), instructions: query }))
   })
 
+  it('drafts the sample win-likelihood path without the H1-only contract', async () => {
+    const state: ResponseState = { headers: {} }
+    await createAnalysisDraftHandler(service())({ method: 'POST', headers: {}, body: { fixtureId: FOOTBALL_FIXTURE_ID, task: 'Win likelihood of the game per play.' } }, response(state))
+    expect(state.code).toBe(200)
+    const body = state.body as { metadata: { rowCount: number; columns: string[]; inputHalf?: string; labelHalf?: string } }
+    expect(body.metadata.rowCount).toBe(71)
+    expect(body.metadata.columns).toEqual(expect.arrayContaining(['posteam_score', 'defteam_score', 'score_differential']))
+    expect(body.metadata.inputHalf).toBeUndefined()
+    expect(body.metadata.labelHalf).toBeUndefined()
+  })
+
   it('starts a run with queued status and reads it without starting another provider call', async () => {
     const instance = service()
     const runState: ResponseState = { headers: {} }

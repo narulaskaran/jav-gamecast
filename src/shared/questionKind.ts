@@ -31,6 +31,29 @@ export const chartVisualFor = (kind: JevQuestionKind): ChartVisualKind => (
   kind === 'choice' ? 'bars' : 'series'
 )
 
+export type FixtureAnalysisSlice = 'win-likelihood' | 'halftime-eval'
+
+export const fixtureAnalysisSliceFor = (input: {
+  task?: string
+  query?: string
+  questionKind?: JevQuestionKind
+  classes?: readonly string[]
+} = {}): FixtureAnalysisSlice => {
+  const task = input.task?.trim() ?? ''
+  const query = input.query?.trim() ?? ''
+  if (looksLikeWinLikelihood(task) || looksLikeWinLikelihood(query)) return 'win-likelihood'
+  const parsed = query ? parseJevQueryJson(query) : undefined
+  const kind = input.questionKind ?? parsed?.type
+  if (kind === 'noul' || kind === 'score') return 'win-likelihood'
+  if (kind === 'choice') return 'halftime-eval'
+  if (isPlayerClassifierQuery(task) || isPlayerClassifierQuery(query) || isFixturePlayerClassList(input.classes ?? [])) {
+    return 'halftime-eval'
+  }
+  if ((input.classes?.length ?? 0) >= 2) return 'halftime-eval'
+  if (task || query) return 'halftime-eval'
+  return 'win-likelihood'
+}
+
 export const inferQuestionKind = (
   text: string,
   classes: readonly string[] = [],
