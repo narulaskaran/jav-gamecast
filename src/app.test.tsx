@@ -139,7 +139,7 @@ describe('Jev playground flow', () => {
     expect(screen.getByRole('heading', { name: /choose a dataset/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(screen.getByText('71 rows')).toBeInTheDocument()
-    expect(screen.getByText(/^\d+ columns$/)).toBeInTheDocument()
+    expect(screen.getByText(/\d+ columns · showing first 8 of 71/i)).toBeInTheDocument()
     expect(screen.queryByText(/delimiter/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/not evidence of model quality/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /^source$/i })).not.toBeInTheDocument()
