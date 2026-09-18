@@ -13,17 +13,34 @@ export interface DatasetFetchOptions {
 
 const headerValue = (headers: Headers, name: string): string | undefined => headers.get(name) ?? undefined
 
+const isAbortError = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) return false
+  const record = error as { name?: unknown; code?: unknown }
+  return record.name === 'AbortError' || record.code === 20 || record.code === 'ABORT_ERR'
+}
+
+const wrapFetchError = (error: unknown): DatasetError => {
+  if (error instanceof DatasetError) return error
+  if (isAbortError(error)) return new DatasetError('URL_TIMEOUT', 'The CSV URL timed out.', 504)
+  return new DatasetError('URL_FETCH_FAILED', 'Could not fetch that CSV URL.')
+}
+
+const statusError = (status: number): DatasetError => {
+  if (status === 404 || status === 410) return new DatasetError('URL_NOT_FOUND', 'That CSV URL was not found.', 404)
+  return new DatasetError('URL_FETCH_FAILED', `The CSV URL returned HTTP ${status}.`)
+}
+
 const assertSafeHost = async (url: URL, lookup?: (hostname: string) => Promise<string[]>): Promise<void> => {
   assertPublicHttpsCsvUrl(url.toString())
   if (!lookup) return
   try {
     const addresses = await lookup(url.hostname)
     if (addresses.some((address) => !isResolvedAddressSafe(address))) {
-      throw new DatasetError('URL_UNSAFE', 'The URL is not a public HTTPS CSV link.')
+      throw new DatasetError('URL_UNSAFE', 'That URL is not a public CSV link.')
     }
   } catch (error) {
     if (error instanceof DatasetError) throw error
-    throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
+    throw new DatasetError('URL_FETCH_FAILED', 'Could not resolve that CSV host.')
   }
 }
 
@@ -45,12 +62,13 @@ export const fetchPublicCsv = async (rawUrl: string, options: DatasetFetchOption
       })
       if (response.status >= 300 && response.status < 400) {
         const location = headerValue(response.headers, 'location')
-        if (!location || redirect === MAX_REDIRECTS) throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
+        if (!location) throw new DatasetError('URL_FETCH_FAILED', 'The CSV URL redirected without a location.')
+        if (redirect === MAX_REDIRECTS) throw new DatasetError('URL_FETCH_FAILED', 'The CSV URL redirected too many times.')
         current = assertPublicHttpsCsvUrl(new URL(location, current).toString())
         await assertSafeHost(current, options.lookup)
         continue
       }
-      if (!response.ok) throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
+      if (!response.ok) throw statusError(response.status)
       const contentLength = Number(headerValue(response.headers, 'content-length') ?? '0')
       if (Number.isFinite(contentLength) && contentLength > CSV_MAX_BYTES) throw new DatasetError('CSV_TOO_LARGE', 'This file is too big. Maximum size is 5 MB.', 413)
       const contentType = headerValue(response.headers, 'content-type')
@@ -59,11 +77,10 @@ export const fetchPublicCsv = async (rawUrl: string, options: DatasetFetchOption
       sniffCsvContentType(contentType, buffer)
       return { bytes: buffer, finalUrl: current.toString(), contentType }
     } catch (error) {
-      if (error instanceof DatasetError) throw error
-      throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
+      throw wrapFetchError(error)
     } finally {
       clearTimeout(timer)
     }
   }
-  throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
+  throw new DatasetError('URL_FETCH_FAILED', 'Could not fetch that CSV URL.')
 }

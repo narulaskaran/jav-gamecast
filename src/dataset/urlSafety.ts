@@ -60,7 +60,10 @@ const isBlockedHostname = (hostname: string): boolean => {
 }
 
 export const assertPublicHttpsCsvUrl = (value: string): URL => {
-  if (typeof value !== 'string' || value.trim().length < 12 || value.length > 2_048) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new DatasetError('URL_NOT_PUBLIC', 'Enter a public HTTPS CSV URL first.')
+  }
+  if (value.trim().length < 12 || value.length > 2_048) {
     throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
   }
   let parsed: URL
@@ -69,13 +72,13 @@ export const assertPublicHttpsCsvUrl = (value: string): URL => {
   } catch {
     throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
   }
-  if (parsed.protocol !== 'https:') throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
+  if (parsed.protocol !== 'https:') throw new DatasetError('URL_NOT_HTTPS', 'Use an HTTPS CSV URL.')
   if (parsed.username || parsed.password) throw new DatasetError('URL_NOT_PUBLIC', 'The URL is not a public HTTPS CSV link.')
-  if (!parsed.hostname || isBlockedHostname(parsed.hostname)) throw new DatasetError('URL_UNSAFE', 'The URL is not a public HTTPS CSV link.')
+  if (!parsed.hostname || isBlockedHostname(parsed.hostname)) throw new DatasetError('URL_UNSAFE', 'That URL is not a public CSV link.')
   if (parsed.port && parsed.port !== '443') {
     const port = Number(parsed.port)
     if (!Number.isInteger(port) || port < 1 || port > 65535 || port === 80) {
-      throw new DatasetError('URL_UNSAFE', 'The URL is not a public HTTPS CSV link.')
+      throw new DatasetError('URL_UNSAFE', 'That URL is not a public CSV link.')
     }
   }
   return parsed

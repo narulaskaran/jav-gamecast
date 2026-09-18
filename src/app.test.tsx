@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, queryRunFooter, type AnalysisApiClient } from './App'
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballTimeline'
@@ -276,7 +276,8 @@ describe('Jev playground flow', () => {
     })) })
     await startSampleRun(api)
     expect(await screen.findByText('12 / 39 rows')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Class distribution' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Results' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Class distribution' })).toBeInTheDocument()
     expect(screen.getByText('Running')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
     expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
@@ -360,7 +361,9 @@ describe('Jev playground flow', () => {
     expect((editor as HTMLTextAreaElement).value.trim().startsWith('{')).toBe(true)
     expect((editor as HTMLTextAreaElement).value).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
-    expect(await screen.findByRole('heading', { level: 2, name: 'Win probability' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Results' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Win probability' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'Win probability' })).toHaveLength(1)
     expect(await screen.findByRole('img', { name: /win probability over play index/i })).toBeInTheDocument()
     expect(await screen.findByText('3 / 71 rows')).toBeInTheDocument()
     expect(document.querySelector('[data-chart-kind="series"]')).toBeTruthy()
@@ -508,7 +511,7 @@ describe('Jev playground flow', () => {
     const file = new File(['message,tier\nhello,gold\n'], 'tickets.csv', { type: 'text/csv' })
     fireEvent.change(screen.getByLabelText(/upload csv/i), { target: { files: [file] } })
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not upload this csv/i)
-    expect(screen.getByText(/couldn't use this csv/i)).toBeInTheDocument()
+    expect(screen.getByText(/couldn't load dataset/i)).toBeInTheDocument()
     expect(screen.queryByText(/not configured on this deployment/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/durable storage/i)).not.toBeInTheDocument()
     expect(api.start).not.toHaveBeenCalled()
@@ -520,7 +523,8 @@ describe('Jev playground flow', () => {
     window.history.pushState({}, '', `/share/${analysisId}`)
     try {
       render(<App api={api} />)
-      expect(await screen.findByRole('heading', { level: 2, name: 'Class distribution' })).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { level: 2, name: 'Results' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 3, name: 'Class distribution' })).toBeInTheDocument()
       expect(api.share).toHaveBeenCalledWith(analysisId)
       expect(screen.queryByText(/no provider credentials|bounded jev worker|engineer playground/i)).not.toBeInTheDocument()
       expect(screen.queryByRole('table', { name: /incremental analysis results/i })).not.toBeInTheDocument()
@@ -583,5 +587,116 @@ describe('Jev playground flow', () => {
     expect(await screen.findByText('You can try again.')).toBeInTheDocument()
     expect(screen.queryByText(/retryable/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/^stopped\.$/i)).not.toBeInTheDocument()
+  })
+
+  it('validates an empty public CSV URL next to the field', async () => {
+    const api = makeApi()
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/enter a public https csv url first/i)
+    expect(api.createFromUrl).not.toHaveBeenCalled()
+    expect(screen.queryByText(/couldn't run/i)).not.toBeInTheDocument()
+  })
+
+  it('clears the public CSV URL after Change dataset', async () => {
+    const api = makeApi()
+    render(<App api={api} />)
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'https://example.com/data.csv' } })
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    expect(await screen.findByRole('heading', { name: 'remote.csv' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /change dataset/i }))
+    expect(screen.getByLabelText(/public https csv url/i)).toHaveValue('')
+  })
+
+  it('shows dataset-load errors next to intake instead of Couldn\'t run', async () => {
+    const api = makeApi({
+      createFromUrl: vi.fn(async () => { throw new Error('URL_NOT_HTTPS') }),
+    })
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    expect(screen.getByLabelText(/^Analysis task$/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'http://example.com/data.csv' } })
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/couldn't load dataset/i)
+    expect(alert).toHaveTextContent(/use an https csv url/i)
+    expect(screen.queryByText(/couldn't run/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/^Analysis task$/i)).toBeInTheDocument()
+  })
+
+  it('resets Share Copied when the user drafts again and after a short delay', async () => {
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const api = makeApi({
+      start: vi.fn(async () => snapshot()),
+      read: vi.fn(async () => snapshot()),
+    })
+    await startSampleRun(api)
+    const share = await screen.findByRole('button', { name: /copy shareable public url/i })
+    fireEvent.click(share)
+    await waitFor(() => expect(share).toHaveTextContent(/^copied$/i))
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /copy shareable public url/i })).toHaveTextContent(/^share$/i))
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /copy shareable public url/i }))
+      await act(async () => { await Promise.resolve() })
+      expect(screen.getByRole('button', { name: /copy shareable public url/i })).toHaveTextContent(/^copied$/i)
+      await act(async () => { vi.advanceTimersByTime(2500) })
+      expect(screen.getByRole('button', { name: /copy shareable public url/i })).toHaveTextContent(/^share$/i)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('downloads results CSV from a completed run', async () => {
+    const api = makeApi({
+      start: vi.fn(async () => snapshot()),
+      read: vi.fn(async () => snapshot()),
+    })
+    await startSampleRun(api)
+    const click = vi.fn()
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:results'),
+      revokeObjectURL: vi.fn(),
+    })
+    const originalCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const node = originalCreate(tag)
+      if (tag === 'a') Object.assign(node, { click })
+      return node
+    })
+    try {
+      fireEvent.click(await screen.findByRole('button', { name: /download results csv/i }))
+      expect(URL.createObjectURL).toHaveBeenCalled()
+      expect(click).toHaveBeenCalled()
+    } finally {
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('labels an immediate complete start as a saved run', async () => {
+    const api = makeApi({
+      start: vi.fn(async () => snapshot({ status: 'complete' })),
+      read: vi.fn(async () => snapshot({ status: 'complete' })),
+    })
+    await startSampleRun(api)
+    expect(await screen.findByText('Saved run.')).toBeInTheDocument()
+    expect(screen.queryByText(/can take a few minutes/i)).not.toBeInTheDocument()
+  })
+
+  it('sets live-run expectations while a run is in flight', async () => {
+    const running = snapshot({
+      status: 'running',
+      createdAt: new Date().toISOString(),
+      progress: { completedRows: 1, totalRows: 39, completedCalls: 1, totalCalls: 39 },
+    })
+    const api = makeApi({
+      start: vi.fn(async () => running),
+      read: vi.fn(async () => running),
+    })
+    await startSampleRun(api)
+    expect(await screen.findByText(/live run/i)).toHaveTextContent(/39 rows can take a few minutes/i)
   })
 })

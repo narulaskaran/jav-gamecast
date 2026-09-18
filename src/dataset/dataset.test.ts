@@ -30,11 +30,34 @@ describe('CSV parser and validator', () => {
     expect(() => parseCsvText(`${wideHeader}\n${wideHeader}`)).toThrow(DatasetError)
   })
 
-  it('rejects more than the accepted row cap and unclosed quotes', () => {
+  it('rejects more than the accepted row cap', () => {
     const header = 'id,name'
     const rows = Array.from({ length: CSV_MAX_ROWS + 1 }, (_, index) => `${index},n`)
     expect(() => parseCsvText([header, ...rows].join('\n'))).toThrow(DatasetError)
-    expect(() => parseCsvText('a,b\n"unclosed,value')).toThrowError(/could not be parsed/i)
+  })
+
+  it('accepts real-world CSVs with stray quotes, matching Excel/pandas', () => {
+    const fsu = '"Index", Height(Inches)", "Weight(Pounds)"\n1, 65.78, 112.99\n2, 71.52, 136.49\n'
+    const parsed = parseCsvText(fsu)
+    expect(parsed.header).toEqual(['Index', 'Height(Inches)', 'Weight(Pounds)'])
+    expect(parsed.rows).toEqual([
+      ['1', ' 65.78', ' 112.99'],
+      ['2', ' 71.52', ' 136.49'],
+    ])
+    const validated = validateCsvText(fsu)
+    expect(validated.acceptedRowCount).toBe(2)
+    expect(validated.rows[0]).toEqual({ Index: 1, 'Height(Inches)': 65.78, 'Weight(Pounds)': 112.99 })
+  })
+
+  it('closes unclosed quotes at the end of a record instead of rejecting the file', () => {
+    const parsed = parseCsvText('a,b\n"unclosed,value')
+    expect(parsed.header).toEqual(['a', 'b'])
+    expect(parsed.rows[0]).toEqual(['unclosed,value', ''])
+  })
+
+  it('keeps quoted commas and newlines inside a field', () => {
+    const parsed = parseCsvText('label,note\n"hello, there","line 1\nline 2"\n')
+    expect(parsed.rows[0]).toEqual(['hello, there', 'line 1\nline 2'])
   })
 
   it('treats client and server text validation as the same parser', () => {
@@ -46,15 +69,15 @@ describe('CSV parser and validator', () => {
 describe('public CSV URL safety', () => {
   it('accepts public HTTPS URLs and rejects credentials, http, and local/private targets', () => {
     expect(assertPublicHttpsCsvUrl('https://example.com/data.csv').hostname).toBe('example.com')
-    expect(() => assertPublicHttpsCsvUrl('http://example.com/data.csv')).toThrowError(/not a public HTTPS CSV/i)
+    expect(() => assertPublicHttpsCsvUrl('http://example.com/data.csv')).toThrowError(/use an https csv url/i)
     expect(() => assertPublicHttpsCsvUrl('https://user:pass@example.com/data.csv')).toThrowError(/not a public HTTPS CSV/i)
-    expect(() => assertPublicHttpsCsvUrl('https://localhost/data.csv')).toThrowError(/not a public HTTPS CSV/i)
-    expect(() => assertPublicHttpsCsvUrl('https://127.0.0.1/data.csv')).toThrowError(/not a public HTTPS CSV/i)
-    expect(() => assertPublicHttpsCsvUrl('https://10.0.0.8/data.csv')).toThrowError(/not a public HTTPS CSV/i)
-    expect(() => assertPublicHttpsCsvUrl('https://192.168.1.9/data.csv')).toThrowError(/not a public HTTPS CSV/i)
-    expect(() => assertPublicHttpsCsvUrl('https://169.254.169.254/latest/meta-data')).toThrowError(/not a public HTTPS CSV/i)
-    expect(() => assertPublicHttpsCsvUrl('https://[::1]/data.csv')).toThrowError(/not a public HTTPS CSV/i)
-    expect(() => assertPublicHttpsCsvUrl('https://metadata.google.internal/computeMetadata')).toThrowError(/not a public HTTPS CSV/i)
+    expect(() => assertPublicHttpsCsvUrl('https://localhost/data.csv')).toThrowError(/not a public csv link/i)
+    expect(() => assertPublicHttpsCsvUrl('https://127.0.0.1/data.csv')).toThrowError(/not a public csv link/i)
+    expect(() => assertPublicHttpsCsvUrl('https://10.0.0.8/data.csv')).toThrowError(/not a public csv link/i)
+    expect(() => assertPublicHttpsCsvUrl('https://192.168.1.9/data.csv')).toThrowError(/not a public csv link/i)
+    expect(() => assertPublicHttpsCsvUrl('https://169.254.169.254/latest/meta-data')).toThrowError(/not a public csv link/i)
+    expect(() => assertPublicHttpsCsvUrl('https://[::1]/data.csv')).toThrowError(/not a public csv link/i)
+    expect(() => assertPublicHttpsCsvUrl('https://metadata.google.internal/computeMetadata')).toThrowError(/not a public csv link/i)
     expect(isResolvedAddressSafe('1.1.1.1')).toBe(true)
     expect(isResolvedAddressSafe('172.16.0.4')).toBe(false)
     expect(isResolvedAddressSafe('::1')).toBe(false)

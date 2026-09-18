@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { SAMPLE_DATASET_NAME } from '../shared/sampleDatasetName'
 import { plainDatasetError } from '../dataset/csvTypes'
 import type { DatasetIntakeStatus } from '../shared/dataset'
@@ -6,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 
-const BYOD_ERROR_HEADING = "Couldn't use this CSV"
+const INTAKE_ERROR_HEADING = "Couldn't load dataset"
+const EMPTY_URL_MESSAGE = 'Enter a public HTTPS CSV URL first.'
 
 export const DatasetIntake = ({
   status,
@@ -15,6 +17,7 @@ export const DatasetIntake = ({
   onSubmitUrl,
   onTrySample,
   disabled,
+  resetToken = 0,
 }: {
   status?: DatasetIntakeStatus
   intakeError?: string
@@ -22,8 +25,17 @@ export const DatasetIntake = ({
   onSubmitUrl: (url: string) => void
   onTrySample: () => void
   disabled?: boolean
+  resetToken?: number
 }) => {
   const byodBlocked = status?.convex === false || status?.uploadThing === false
+  const [csvUrl, setCsvUrl] = useState('')
+  const [urlHint, setUrlHint] = useState<string>()
+
+  useEffect(() => {
+    setCsvUrl('')
+    setUrlHint(undefined)
+  }, [resetToken])
+
   return (
     <section className="intake-panel" aria-labelledby="intake-heading">
       <h2 id="intake-heading">Choose a dataset</h2>
@@ -62,13 +74,31 @@ export const DatasetIntake = ({
               className="byod-url"
               onSubmit={(event) => {
                 event.preventDefault()
-                const form = event.currentTarget
-                const url = String(new FormData(form).get('csv-url') ?? '')
+                const url = csvUrl.trim()
+                if (!url) {
+                  setUrlHint(EMPTY_URL_MESSAGE)
+                  return
+                }
+                setUrlHint(undefined)
                 onSubmitUrl(url)
               }}
             >
               <Label htmlFor="csv-url">Public HTTPS CSV URL</Label>
-              <Input id="csv-url" name="csv-url" type="url" placeholder="https://example.com/data.csv" disabled={disabled || byodBlocked} />
+              <Input
+                id="csv-url"
+                name="csv-url"
+                type="url"
+                placeholder="https://example.com/data.csv"
+                value={csvUrl}
+                disabled={disabled || byodBlocked}
+                aria-invalid={Boolean(urlHint) || undefined}
+                aria-describedby={urlHint ? 'csv-url-hint' : undefined}
+                onChange={(event) => {
+                  setCsvUrl(event.target.value)
+                  if (urlHint) setUrlHint(undefined)
+                }}
+              />
+              {urlHint ? <p id="csv-url-hint" className="field-hint" role="alert">{urlHint}</p> : null}
               <Button variant="secondary" type="submit" disabled={disabled || byodBlocked}>Use public CSV URL</Button>
             </form>
           </CardContent>
@@ -76,7 +106,7 @@ export const DatasetIntake = ({
       </div>
       {intakeError && (
         <div className="error-banner" role="alert">
-          <b>{BYOD_ERROR_HEADING}</b>
+          <b>{INTAKE_ERROR_HEADING}</b>
           <span>{plainDatasetError(intakeError, intakeError)}</span>
         </div>
       )}

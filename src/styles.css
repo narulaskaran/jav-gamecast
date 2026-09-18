@@ -377,6 +377,20 @@ h3 {
 .error-banner b { font-size: 13px; font-weight: 600; }
 .error-banner.compact { margin-top: 14px; }
 
+.field-hint {
+  margin: 0;
+  color: var(--destructive);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.run-latency {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .analysis-head {
   display: flex;
   flex-direction: row;

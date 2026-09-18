@@ -42,15 +42,17 @@ const apiError = async (response: Response): Promise<Error> => {
   if (response.ok) return new Error('')
   let code = 'REQUEST_FAILED'
   let failure: DatasetError['failure']
+  let message = ''
   try {
-    const body = await response.json() as { error?: unknown; failure?: unknown }
+    const body = await response.json() as { error?: unknown; failure?: unknown; message?: unknown }
     if (typeof body.error === 'string' && /^[A-Z0-9_]+$/.test(body.error)) code = body.error
     if (typeof body.failure === 'string' && /^[A-Z0-9_]+$/.test(body.failure)) failure = body.failure as DatasetError['failure']
+    if (typeof body.message === 'string') message = body.message.trim()
   } catch { /* Keep a stable client-side error when the body is not JSON. */ }
   if (code in DATASET_ERROR_COPY) {
-    return new DatasetError(code as DatasetError['code'], DATASET_ERROR_COPY[code], response.status, failure)
+    return new DatasetError(code as DatasetError['code'], message || DATASET_ERROR_COPY[code], response.status, failure)
   }
-  return new Error(code)
+  return new Error(message || code)
 }
 
 const json = async <T,>(url: string, init: RequestInit): Promise<T> => {
@@ -150,15 +152,24 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const [starting, setStarting] = useState(false)
   const [intakeBusy, setIntakeBusy] = useState(false)
   const [error, setError] = useState<string | undefined>()
+  const [intakeError, setIntakeError] = useState<string | undefined>()
+  const [intakeResetToken, setIntakeResetToken] = useState(0)
   const [shareMessage, setShareMessage] = useState('')
   const [shareLoading, setShareLoading] = useState(false)
   const [queryCopyMessage, setQueryCopyMessage] = useState('')
   const [foldAnimate, setFoldAnimate] = useState(false)
+  const [runLatency, setRunLatency] = useState<'saved' | 'live' | undefined>()
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setFoldAnimate(true))
     return () => window.cancelAnimationFrame(frame)
   }, [])
+
+  useEffect(() => {
+    if (shareMessage !== 'Copied') return undefined
+    const timer = window.setTimeout(() => setShareMessage(''), 2500)
+    return () => window.clearTimeout(timer)
+  }, [shareMessage])
 
   useEffect(() => {
     if (isShareView || !api.intakeStatus) return undefined
@@ -207,6 +218,8 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const shareUrl = snapshot ? `${window.location.origin}/share/${encodeURIComponent(snapshot.analysisId)}` : ''
   const datasetId = dataset?.datasetId
 
+  const resetIntakeForm = () => setIntakeResetToken((token) => token + 1)
+
   const resetRunState = () => {
     setDraft(undefined)
     setQuery('')
@@ -214,12 +227,13 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     setShareMessage('')
     setQueryCopyMessage('')
     setError(undefined)
+    setRunLatency(undefined)
   }
 
   const handleDraft = async () => {
     if (!datasetId) { setError('Choose a dataset first.'); return }
     if (!task.trim()) { setError('Enter a task before drafting a query.'); return }
-    setDrafting(true); setError(undefined); setDraft(undefined); setQuery(''); setQueryCopyMessage('')
+    setDrafting(true); setError(undefined); setIntakeError(undefined); setDraft(undefined); setQuery(''); setQueryCopyMessage(''); setShareMessage('')
     try {
       const result = await api.draft({ datasetId, fixtureId: dataset?.sourceType === 'fixture' ? SAMPLE_DATASET_ID : undefined, task: task.trim() })
       setDraft(result)
@@ -236,15 +250,17 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     if (!draft || !hasRunnableQuery(query) || !datasetId) return
     const parsed = parseJevQueryJson(query)
     if (!parsed) return
-    setStarting(true); setError(undefined); setSnapshot(undefined); setShareMessage('')
+    setStarting(true); setError(undefined); setIntakeError(undefined); setSnapshot(undefined); setShareMessage(''); setRunLatency(undefined)
     try {
-      setSnapshot(await api.start({
+      const started = await api.start({
         datasetId,
         fixtureId: dataset?.sourceType === 'fixture' ? SAMPLE_DATASET_ID : undefined,
         query: query.trim(),
         classes: classesFromJevQuery(parsed),
         questionKind: parsed.type,
-      }))
+      })
+      setRunLatency(started.status === 'complete' ? 'saved' : 'live')
+      setSnapshot(started)
     } catch (runError) { setError(shortError(runError, 'Could not start Jev analysis'))
     } finally { setStarting(false) }
   }
@@ -260,35 +276,44 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   }
 
   const handleUpload = async (file: File) => {
-    setIntakeBusy(true); setError(undefined)
+    setIntakeBusy(true); setError(undefined); setIntakeError(undefined)
     try {
       const csvText = await readCsvText(file)
       validateCsvText(csvText)
       if (!api.createFromCsv) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', DATASET_ERROR_COPY.UPLOADTHING_NOT_CONFIGURED, 503)
       const preview = await api.createFromCsv({ csvText, filename: file.name })
       resetRunState()
+      resetIntakeForm()
       setDataset(preview)
       setTask(DEFAULT_TASK)
     } catch (uploadError) {
-      setError(shortError(uploadError, 'Could not use this CSV'))
+      setIntakeError(shortError(uploadError, 'Could not use this CSV'))
     } finally { setIntakeBusy(false) }
   }
 
   const handleUrl = async (url: string) => {
-    setIntakeBusy(true); setError(undefined)
+    const trimmed = url.trim()
+    if (!trimmed) {
+      setIntakeError('Enter a public HTTPS CSV URL first.')
+      return
+    }
+    setIntakeBusy(true); setError(undefined); setIntakeError(undefined)
     try {
       if (!api.createFromUrl) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', DATASET_ERROR_COPY.UPLOADTHING_NOT_CONFIGURED, 503)
-      const preview = await api.createFromUrl({ url })
+      const preview = await api.createFromUrl({ url: trimmed })
       resetRunState()
+      resetIntakeForm()
       setDataset(preview)
       setTask(DEFAULT_TASK)
     } catch (urlError) {
-      setError(shortError(urlError, 'Could not use this CSV URL'))
+      setIntakeError(shortError(urlError, 'Could not use this CSV URL'))
     } finally { setIntakeBusy(false) }
   }
 
   const handleSample = () => {
     resetRunState()
+    resetIntakeForm()
+    setIntakeError(undefined)
     setDataset(getSampleDatasetPreview())
     setTask(SAMPLE_TASK)
   }
@@ -335,7 +360,8 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
         <StageFold open={showIntake} animate={foldAnimate}>
           <DatasetIntake
             status={intakeStatus}
-            intakeError={dataset ? undefined : error}
+            intakeError={intakeError}
+            resetToken={intakeResetToken}
             disabled={intakeBusy}
             onUploadFile={(file) => void handleUpload(file)}
             onSubmitUrl={(url) => void handleUrl(url)}
@@ -345,7 +371,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
         <StageFold open={showTask} animate={foldAnimate}>
           {dataset ? (
             <div className="stage-stack">
-              <DatasetPreviewCard dataset={dataset} onChange={() => { setDataset(undefined); resetRunState() }} />
+              <DatasetPreviewCard dataset={dataset} onChange={() => { setDataset(undefined); resetRunState(); setIntakeError(undefined); resetIntakeForm() }} />
               <Card className="task-card" aria-labelledby="task-heading">
                 <CardHeader className="section-heading flex-row items-start justify-between space-y-0">
                   <div>
@@ -443,6 +469,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
               shareUrl={shareUrl}
               shareMessage={shareMessage}
               onCopyShare={copyShareUrl}
+              latencyHint={isShareView ? undefined : runLatency}
             />
           ) : null}
         </StageFold>

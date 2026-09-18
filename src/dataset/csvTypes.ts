@@ -35,6 +35,10 @@ export interface DatasetValidationError {
     | 'CSV_TOO_MANY_COLUMNS'
     | 'CSV_INVALID_HEADER'
     | 'URL_NOT_PUBLIC'
+    | 'URL_NOT_HTTPS'
+    | 'URL_TIMEOUT'
+    | 'URL_NOT_FOUND'
+    | 'URL_FETCH_FAILED'
     | 'URL_UNSAFE'
     | 'UPLOADTHING_NOT_CONFIGURED'
     | 'UPLOADTHING_FAILED'
@@ -87,7 +91,11 @@ export const DATASET_ERROR_COPY: Record<string, string> = {
   CSV_TOO_MANY_COLUMNS: 'This CSV has too many columns. Maximum is 100.',
   CSV_INVALID_HEADER: 'The CSV header is missing, duplicated, or invalid.',
   URL_NOT_PUBLIC: 'The URL is not a public HTTPS CSV link.',
-  URL_UNSAFE: 'The URL is not a public HTTPS CSV link.',
+  URL_NOT_HTTPS: 'Use an HTTPS CSV URL.',
+  URL_TIMEOUT: 'The CSV URL timed out.',
+  URL_NOT_FOUND: 'That CSV URL was not found.',
+  URL_FETCH_FAILED: 'Could not fetch that CSV URL.',
+  URL_UNSAFE: 'That URL is not a public CSV link.',
   UPLOADTHING_NOT_CONFIGURED: 'Could not upload this CSV.',
   UPLOADTHING_FAILED: 'Could not upload this CSV.',
   DATASET_UNAVAILABLE: 'Could not use this CSV.',

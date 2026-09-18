@@ -6,6 +6,7 @@ import { clampPlayhead, playDomainCount, playIndexFromRatio, type PlayheadMotion
 import { areaPath, formatPercentTick, jevSeriesPoints, linePath, seriesX } from '../runView/seriesPath'
 import { chartVisualFor, inferQuestionKind, type ChartVisualKind, type JevQuestionKind } from '../shared/questionKind'
 import type { AnalysisResultRow } from '../shared/analysis'
+import { chartHeading } from '../runView/format'
 import { Button } from './ui/button'
 
 const EMPTY_CLASSES: readonly string[] = []
@@ -89,11 +90,11 @@ export const ResultsChart = memo(function ResultsChart({
     : visual === 'series'
       ? `Play ${prefixCount}${playheadValue === undefined ? '' : ` · ${formatPercentTick(playheadValue)}`}`
       : `Through row ${prefixCount}`
-  const heading = visual === 'series' ? 'Win probability' : 'Class distribution'
+  const heading = chartHeading(kind)
   const aria = waiting
     ? 'Waiting for the first row'
     : visual === 'series'
-      ? 'Win probability over play index'
+      ? `${chartHeading(kind)} over play index`
       : 'Class distribution visualization'
 
   const indexFromClientX = useCallback((clientX: number) => {

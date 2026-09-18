@@ -1,7 +1,9 @@
 import type { AnalysisResultRow } from '../shared/analysis'
 import type { ChartVisualKind, JevQuestionKind } from '../shared/questionKind'
 
-export const runViewHeading = (kind: JevQuestionKind): string => {
+export const runViewHeading = (): string => 'Results'
+
+export const chartHeading = (kind: JevQuestionKind): string => {
   if (kind === 'noul') return 'Win probability'
   if (kind === 'score') return 'Score'
   return 'Class distribution'

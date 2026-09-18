@@ -72,7 +72,7 @@ describe('dataset intake', () => {
       fetch: vi.fn(async () => { throw new Error('should not fetch') }),
     })
     await expect(intake.fromPublicUrl({ url: 'https://127.0.0.1/secret.csv' })).rejects.toBeInstanceOf(DatasetError)
-    await expect(intake.fromPublicUrl({ url: 'http://example.com/data.csv' })).rejects.toMatchObject({ code: 'URL_NOT_PUBLIC' })
+    await expect(intake.fromPublicUrl({ url: 'http://example.com/data.csv' })).rejects.toMatchObject({ code: 'URL_NOT_HTTPS' })
   })
 
   it('maps datasets.put throws to CONVEX_PUT_FAILED instead of UNCAUGHT', async () => {

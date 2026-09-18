@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { railMetaLine, runErrorHint, runViewHeading } from './format'
+import { railMetaLine, runErrorHint, runViewHeading, chartHeading } from './format'
 
 describe('rail meta line', () => {
   it('keeps one compact play_id · qtr · class-or-percent line', () => {
@@ -29,10 +29,11 @@ describe('rail meta line', () => {
 })
 
 describe('run view copy', () => {
-  it('uses chart labels instead of Jev analysis run', () => {
-    expect(runViewHeading('noul')).toBe('Win probability')
-    expect(runViewHeading('score')).toBe('Score')
-    expect(runViewHeading('choice')).toBe('Class distribution')
+  it('uses Results for the panel and chart labels for the plot', () => {
+    expect(runViewHeading()).toBe('Results')
+    expect(chartHeading('noul')).toBe('Win probability')
+    expect(chartHeading('score')).toBe('Score')
+    expect(chartHeading('choice')).toBe('Class distribution')
   })
 
   it('humanizes retryable vs stopped run errors', () => {
