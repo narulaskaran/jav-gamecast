@@ -1,7 +1,7 @@
 import { plainDatasetError } from '../dataset/csvTypes'
 import type { DatasetIntakeStatus } from '../shared/dataset'
 import { Button } from './ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 
@@ -30,6 +30,7 @@ export const DatasetIntake = ({
           <CardHeader>
             <p className="eyebrow">Try sample</p>
             <CardTitle>Super Bowl Seahawks demo</CardTitle>
+            <CardDescription>Football is the sample, not the product.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button type="button" onClick={onTrySample} disabled={disabled}>Try sample</Button>
@@ -39,6 +40,7 @@ export const DatasetIntake = ({
           <CardHeader>
             <p className="eyebrow">Bring your own</p>
             <CardTitle>Upload .csv or public HTTPS CSV URL</CardTitle>
+            <CardDescription>Same live chart as the sample.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="byod-file">

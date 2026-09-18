@@ -26,9 +26,11 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
         <Badge variant="secondary">{dataset.acceptedRowCount} rows</Badge>
       </CardHeader>
       <CardContent>
-        {dataset.columns.length > 0 ? (
-          <p className="preview-meta">{dataset.columns.length} columns</p>
-        ) : null}
+        <div className="preview-meta">
+          <span><b>Columns</b>{dataset.columns.length}</span>
+          <span><b>Delimiter</b>{dataset.delimiter === '\t' ? 'tab' : dataset.delimiter}</span>
+          <span><b>Source</b>{dataset.sourceType.replace('_', ' ')}</span>
+        </div>
         <div className="table-scroll preview-table">
           <table aria-label="Dataset preview">
             <thead>
@@ -42,10 +44,11 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
           </table>
         </div>
         {dataset.attribution && (
-          <p className="preview-links">
-            <a href={dataset.attribution.sourceUrl} target="_blank" rel="noreferrer">Source</a>
-            <a href={dataset.attribution.licenseUrl} target="_blank" rel="noreferrer">License</a>
-          </p>
+          <div className="preview-links">
+            <a href={dataset.attribution.sourceUrl} target="_blank" rel="noreferrer">Sample source</a>
+            <a href={dataset.attribution.licenseUrl} target="_blank" rel="noreferrer">CC BY 4.0</a>
+            <span>{dataset.attribution.disclosure}</span>
+          </div>
         )}
       </CardContent>
       {onChange && (
