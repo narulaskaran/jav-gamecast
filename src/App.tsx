@@ -26,12 +26,24 @@ import {
   parseJevQueryJson,
 } from './shared/jevQuery'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
+import { ANALYSIS_ERROR_COPY, plainAnalysisError, runSubsetCopy } from './runView/format'
 import { useTheme } from './theme'
 import './styles.css'
 
+export const INTAKE_TIMEOUT_MS = 45_000
+
 export interface AnalysisApiClient {
   draft: (input: { fixtureId?: string; datasetId?: string; task: string }) => Promise<AnalysisDraftResult>
-  start: (input: { fixtureId?: string; datasetId?: string; query: string; classes?: readonly string[]; questionKind?: AnalysisDraftResult['metadata']['questionKind'] }) => Promise<AnalysisSnapshot>
+  start: (input: {
+    fixtureId?: string
+    datasetId?: string
+    query: string
+    classes?: readonly string[]
+    questionKind?: AnalysisDraftResult['metadata']['questionKind']
+    analysisId?: string
+    resume?: boolean
+    forceNew?: boolean
+  }) => Promise<AnalysisSnapshot>
   read: (analysisId: string) => Promise<AnalysisSnapshot>
   share: (analysisId: string) => Promise<AnalysisSnapshot>
   intakeStatus?: () => Promise<DatasetIntakeStatus>
@@ -56,10 +68,30 @@ const apiError = async (response: Response): Promise<Error> => {
   return new Error(message || code)
 }
 
-const json = async <T,>(url: string, init: RequestInit): Promise<T> => {
-  const response = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) } })
-  if (!response.ok) throw await apiError(response)
-  return response.json() as Promise<T>
+const isAbortError = (error: unknown): boolean => (
+  typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError'
+)
+
+const json = async <T,>(url: string, init: RequestInit, options: { timeoutMs?: number } = {}): Promise<T> => {
+  const timeoutMs = options.timeoutMs
+  const controller = timeoutMs ? new AbortController() : undefined
+  const timer = timeoutMs ? window.setTimeout(() => controller?.abort(), timeoutMs) : undefined
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller?.signal ?? init.signal,
+      headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+    })
+    if (!response.ok) throw await apiError(response)
+    return response.json() as Promise<T>
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new DatasetError('URL_TIMEOUT', 'This CSV took too long to load. Try a smaller file or another URL.', 504)
+    }
+    throw error
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer)
+  }
 }
 
 export const defaultAnalysisApi: AnalysisApiClient = {
@@ -68,8 +100,8 @@ export const defaultAnalysisApi: AnalysisApiClient = {
   read: (analysisId) => json<AnalysisSnapshot>(`/api/analysis/${encodeURIComponent(analysisId)}`, { method: 'GET' }),
   share: (analysisId) => json<AnalysisSnapshot>(`/api/share/${encodeURIComponent(analysisId)}`, { method: 'GET' }),
   intakeStatus: () => json<DatasetIntakeStatus>('/api/datasets/status', { method: 'GET' }),
-  createFromCsv: (input) => json<DatasetPreview>('/api/datasets/from-csv', { method: 'POST', body: JSON.stringify(input) }),
-  createFromUrl: (input) => json<DatasetPreview>('/api/datasets/from-url', { method: 'POST', body: JSON.stringify(input) }),
+  createFromCsv: (input) => json<DatasetPreview>('/api/datasets/from-csv', { method: 'POST', body: JSON.stringify(input) }, { timeoutMs: INTAKE_TIMEOUT_MS }),
+  createFromUrl: (input) => json<DatasetPreview>('/api/datasets/from-url', { method: 'POST', body: JSON.stringify(input) }, { timeoutMs: INTAKE_TIMEOUT_MS }),
 }
 
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
@@ -96,14 +128,12 @@ export const queryRunFooter = ({
   return 'Enter Jev query JSON before running.'
 }
 
-const ANALYSIS_ERROR_COPY: Record<string, string> = {
-  INVALID_CLASSES: INVALID_CLASSES_COPY,
-}
-
 const shortError = (error: unknown, fallback: string) => {
   if (error instanceof DatasetError) return error.message.trim() || plainDatasetError(error.code, fallback)
   if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) {
-    return ANALYSIS_ERROR_COPY[error.message] ?? plainDatasetError(error.message, fallback)
+    return ANALYSIS_ERROR_COPY[error.message]
+      ?? DATASET_ERROR_COPY[error.message]
+      ?? plainAnalysisError(error.message, fallback)
   }
   return fallback
 }
@@ -272,6 +302,25 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     } finally { setStarting(false) }
   }
 
+  const handleResume = async () => {
+    if (!snapshot || snapshot.status !== 'error' || !datasetId) return
+    setStarting(true); setError(undefined); setIntakeError(undefined); setShareMessage(''); setRunLatency('live')
+    try {
+      const started = await api.start({
+        datasetId,
+        fixtureId: dataset?.sourceType === 'fixture' ? SAMPLE_DATASET_ID : undefined,
+        query: snapshot.query,
+        classes: [...snapshot.classes],
+        questionKind: snapshot.questionKind,
+        analysisId: snapshot.analysisId,
+        resume: true,
+      })
+      setRunLatency(started.status === 'complete' ? 'saved' : 'live')
+      setSnapshot(started)
+    } catch (runError) { setError(shortError(runError, 'Could not resume Jev analysis'))
+    } finally { setStarting(false) }
+  }
+
   const readCsvText = async (file: File): Promise<string> => {
     if (typeof file.text === 'function') return file.text()
     return await new Promise((resolve, reject) => {
@@ -350,6 +399,14 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const querySummary = parsedQuery?.instructions
   const queryInvalid = query.trim().length > 0 && !parsedQuery
   const runFooter = queryRunFooter({ query, starting, hasSnapshot: Boolean(snapshot) })
+  const subsetCopy = draft
+    ? runSubsetCopy({
+      analyzedRows: draft.metadata.rowCount,
+      datasetRows: dataset?.acceptedRowCount,
+      sourceType: draft.sourceType,
+      inputHalf: draft.metadata.inputHalf,
+    })
+    : undefined
 
   return (
     <main className="analysis-shell" data-stage={isShareView ? 'share' : snapshot ? 'run' : draft ? 'query' : dataset ? 'task' : 'intake'}>
@@ -420,6 +477,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
               </CardHeader>
               <CardContent>
                 {querySummary ? <p className="query-summary">{querySummary}</p> : null}
+                {subsetCopy ? <p className="query-scope" role="status">{subsetCopy}</p> : null}
                 <div className="grid gap-2 min-w-0">
                   <div className="query-editor-head">
                     <Label htmlFor="jev-query">Jev query JSON</Label>
@@ -476,6 +534,10 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
               shareUrl={shareUrl}
               shareMessage={shareMessage}
               onCopyShare={copyShareUrl}
+              onResume={isShareView ? undefined : () => void handleResume()}
+              resuming={starting}
+              datasetRowCount={dataset?.acceptedRowCount}
+              inputHalf={draft?.metadata.inputHalf}
               latencyHint={isShareView ? undefined : runLatency}
             />
           ) : null}

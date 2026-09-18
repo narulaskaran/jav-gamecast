@@ -1,5 +1,9 @@
 import type { AnalysisResultRow } from '../shared/analysis'
-import type { ChartVisualKind, JevQuestionKind } from '../shared/questionKind'
+import type { DatasetSourceType } from '../shared/dataset'
+import { INVALID_CLASSES_COPY, type ChartVisualKind, type JevQuestionKind } from '../shared/questionKind'
+
+export const SAMPLE_DATASET_ROW_COUNT = 71
+export const SAMPLE_H1_ROW_COUNT = 39
 
 export const runViewHeading = (): string => 'Results'
 
@@ -9,9 +13,67 @@ export const chartHeading = (kind: JevQuestionKind): string => {
   return 'Class distribution'
 }
 
+export const ANALYSIS_ERROR_COPY: Record<string, string> = {
+  INVALID_CLASSES: INVALID_CLASSES_COPY,
+  JEV_MALFORMED_RESPONSE: 'Jev returned a response this run could not use.',
+  MALFORMED_PROVIDER_RESPONSE: 'Jev returned a response this run could not use.',
+  JEV_TIMEOUT: 'Jev timed out while classifying a row.',
+  JEV_CONNECTION: 'Could not reach Jev.',
+  ANALYSIS_PROVIDER_ERROR: 'Jev hit a provider error.',
+  JEV_NOT_CONFIGURED: 'Jev is not configured on this deployment.',
+}
+
+export const plainAnalysisError = (code: string, fallback = 'This run hit an error.'): string => {
+  if (ANALYSIS_ERROR_COPY[code]) return ANALYSIS_ERROR_COPY[code]
+  if (/^JEV_\d+$/.test(code)) return 'Jev could not classify a row.'
+  return fallback
+}
+
 export const runErrorHint = (retryable: boolean): string => (
   retryable ? 'You can try again.' : 'This run stopped.'
 )
+
+export const runErrorCopy = (
+  error: { code: string; retryable: boolean },
+  completedRows: number,
+): { title: string; detail: string } => {
+  const reason = plainAnalysisError(error.code)
+  const next = completedRows > 0
+    ? `Saved rows are kept. You can resume from row ${completedRows + 1}.`
+    : 'You can retry this run.'
+  return { title: "Couldn't finish this run", detail: `${reason} ${next}` }
+}
+
+export const resumeRunLabel = (completedRows: number): string => (
+  completedRows > 0 ? `Resume from row ${completedRows + 1}` : 'Retry'
+)
+
+export const savedRunCopy = (): string => 'Saved. Share copies a public link.'
+
+export const runSubsetCopy = ({
+  analyzedRows,
+  datasetRows,
+  sourceType,
+  inputHalf,
+  tense = 'analyzing',
+}: {
+  analyzedRows: number
+  datasetRows?: number
+  sourceType?: DatasetSourceType
+  inputHalf?: 'H1'
+  tense?: 'analyzing' | 'analyzed'
+}): string | undefined => {
+  let rows = datasetRows
+  let half = inputHalf
+  if (sourceType === 'fixture' && analyzedRows === SAMPLE_H1_ROW_COUNT) {
+    rows = rows ?? SAMPLE_DATASET_ROW_COUNT
+    half = half ?? 'H1'
+  }
+  if (!rows || analyzedRows < 1 || analyzedRows >= rows) return undefined
+  const verb = tense === 'analyzed' ? 'Analyzed' : 'Analyzing'
+  if (half === 'H1') return `${verb} H1 plays (${analyzedRows} of ${rows})`
+  return `${verb} a subset (${analyzedRows} of ${rows} rows)`
+}
 
 export const percent = (value: number | undefined): string => (
   value === undefined ? '—' : `${Math.round(value * 100)}%`

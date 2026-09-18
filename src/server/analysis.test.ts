@@ -610,6 +610,28 @@ describe('analysis domain contract', () => {
     expect(retry.status).toBe('queued')
   })
 
+  it('resumes a non-retryable mid-run Jev failure from the last good row when asked', async () => {
+    let calls = 0
+    const classifier: AnalysisClassifier = {
+      async classify() {
+        calls += 1
+        if (calls === 2) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'bad envelope', 502, false)
+        return classification()
+      },
+    }
+    const service = serviceWith(classifier)
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'malformed-resume', classes: choiceClasses })
+    const failed = await service.run(started.analysisId)
+    expect(failed).toMatchObject({ status: 'error', progress: { completedRows: 1 }, error: { code: 'JEV_MALFORMED_RESPONSE', retryable: false } })
+    const ignored = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: started.analysisId, classes: choiceClasses })
+    expect(ignored).toMatchObject({ status: 'error', analysisId: started.analysisId })
+    const recovered = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: started.analysisId, classes: choiceClasses, resume: true })
+    expect(recovered).toMatchObject({ status: 'queued', progress: { completedRows: 1 } })
+    expect(recovered.error).toBeUndefined()
+    await expect(service.run(started.analysisId)).resolves.toMatchObject({ status: 'complete', progress: { completedRows: 39 } })
+    expect(calls).toBe(40)
+  })
+
   it('suppresses duplicate execution across independent service instances with a durable claim', async () => {
     const store = new InMemoryAnalysisStore()
     let releaseFirst: (() => void) | undefined

@@ -37,7 +37,7 @@ export const DatasetIntake = ({
   }, [resetToken])
 
   return (
-    <section className="intake-panel" aria-labelledby="intake-heading">
+    <section className="intake-panel" aria-labelledby="intake-heading" aria-busy={disabled || undefined}>
       <h2 id="intake-heading">Choose a dataset</h2>
       <div className="intake-cards">
         <Card className="intake-card">
@@ -104,6 +104,12 @@ export const DatasetIntake = ({
           </CardContent>
         </Card>
       </div>
+      {disabled ? (
+        <p className="thinking" role="status">
+          <span className="thinking-dot" aria-hidden="true" />
+          Loading dataset…
+        </p>
+      ) : null}
       {intakeError && (
         <div className="error-banner" role="alert">
           <b>{INTAKE_ERROR_HEADING}</b>

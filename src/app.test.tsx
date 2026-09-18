@@ -167,6 +167,7 @@ describe('Jev playground flow', () => {
     expect(api.start).not.toHaveBeenCalled()
     const runButton = screen.getByRole('button', { name: /run jev/i })
     expect(runButton).toBeEnabled()
+    expect(screen.getByText('Analyzing H1 plays (39 of 71)')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^copy$/i })).toBeInTheDocument()
     expect(document.querySelector('[data-stage="query"]')).toBeTruthy()
     expect(screen.getByRole('button', { name: /^try sample$/i })).toBeInTheDocument()
@@ -276,6 +277,7 @@ describe('Jev playground flow', () => {
     })) })
     await startSampleRun(api)
     expect(await screen.findByText('12 / 39 rows')).toBeInTheDocument()
+    expect(screen.getAllByText(/analyzing h1 plays \(39 of 71\)/i).length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { level: 2, name: 'Results' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Class distribution' })).toBeInTheDocument()
     expect(screen.getByText('Running')).toBeInTheDocument()
@@ -357,6 +359,7 @@ describe('Jev playground flow', () => {
     expect(parseJevQueryJson((editor as HTMLTextAreaElement).value)).toEqual({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY })
     expect(screen.queryByText(/noul · yes\/no probability 0–1/i)).not.toBeInTheDocument()
     expect(document.querySelector('.query-summary')).toHaveTextContent(SAMPLE_WIN_NOUL_QUERY)
+    expect(screen.queryByText(/analyzing h1 plays/i)).not.toBeInTheDocument()
     expect(screen.getByText('71 rows')).toBeInTheDocument()
     expect((editor as HTMLTextAreaElement).value.trim().startsWith('{')).toBe(true)
     expect((editor as HTMLTextAreaElement).value).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
@@ -636,8 +639,9 @@ describe('Jev playground flow', () => {
   it('renders stable API errors and empty results without exposing provider details', async () => {
     const api = makeApi({ start: vi.fn(async () => { throw new Error('ANALYSIS_PROVIDER_ERROR') }) })
     await startSampleRun(api)
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not start/i)
-    expect(screen.getByText(/couldn't run/i)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn't run/i)
+    expect(screen.getByText(/jev hit a provider error/i)).toBeInTheDocument()
+    expect(screen.queryByText(/ANALYSIS_PROVIDER_ERROR/)).not.toBeInTheDocument()
     expect(screen.queryByText(/action needs attention/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/provider response|api key/i)).not.toBeInTheDocument()
   })
@@ -645,16 +649,27 @@ describe('Jev playground flow', () => {
   it('humanizes in-run error status instead of Retryable/Stopped', async () => {
     const failed = snapshot({
       status: 'error',
-      error: { code: 'ANALYSIS_PROVIDER_ERROR', retryable: true },
+      progress: { completedRows: 31, totalRows: 39, completedCalls: 31, totalCalls: 39 },
+      error: { code: 'JEV_MALFORMED_RESPONSE', retryable: false },
     })
     const api = makeApi({
       start: vi.fn(async () => failed),
       read: vi.fn(async () => failed),
     })
     await startSampleRun(api)
-    expect(await screen.findByText('You can try again.')).toBeInTheDocument()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/couldn't finish this run/i)
+    expect(alert).toHaveTextContent(/could not use/i)
+    expect(alert).toHaveTextContent(/resume from row 32/i)
+    expect(screen.queryByText(/JEV_MALFORMED_RESPONSE/)).not.toBeInTheDocument()
     expect(screen.queryByText(/retryable/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/^stopped\.$/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /resume from row 32/i }))
+    await waitFor(() => expect(api.start).toHaveBeenCalledTimes(2))
+    expect(api.start).toHaveBeenLastCalledWith(expect.objectContaining({
+      analysisId: failed.analysisId,
+      resume: true,
+    }))
   })
 
   it('validates an empty public CSV URL next to the field', async () => {
@@ -750,7 +765,9 @@ describe('Jev playground flow', () => {
       read: vi.fn(async () => snapshot({ status: 'complete' })),
     })
     await startSampleRun(api)
-    expect(await screen.findByText('Saved run.')).toBeInTheDocument()
+    expect(await screen.findByText(/saved\. share copies a public link/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
+    expect(screen.queryByText(/^saved run\.$/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/can take a few minutes/i)).not.toBeInTheDocument()
   })
 
@@ -765,6 +782,36 @@ describe('Jev playground flow', () => {
       read: vi.fn(async () => running),
     })
     await startSampleRun(api)
-    expect(await screen.findByText(/live run/i)).toHaveTextContent(/39 rows can take a few minutes/i)
+    expect(await screen.findByText(/live run/i)).toHaveTextContent(/analyzing h1 plays \(39 of 71\)/i)
+    expect(screen.getByText(/live run/i)).toHaveTextContent(/can take a few minutes/i)
+  })
+
+  it('shows loading feedback while a public CSV URL is in flight', async () => {
+    let finish: ((value: DatasetPreview) => void) | undefined
+    const pending = new Promise<DatasetPreview>((resolve) => { finish = resolve })
+    const api = makeApi({
+      createFromUrl: vi.fn(() => pending),
+    })
+    render(<App api={api} />)
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'https://example.com/nyc.csv' } })
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    expect(await screen.findByText(/loading dataset/i)).toBeInTheDocument()
+    finish?.({ ...uploaded, datasetId: 'dataset-url-1', sourceType: 'public_url', displayName: 'nyc.csv' })
+    expect(await screen.findByRole('heading', { name: 'nyc.csv' })).toBeInTheDocument()
+    expect(screen.queryByText(/loading dataset/i)).not.toBeInTheDocument()
+  })
+
+  it('maps aborted dataset fetches to a timeout instead of hanging', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    }))
+    try {
+      await expect(defaultAnalysisApi.createFromUrl?.({ url: 'https://example.com/data.csv' })).rejects.toMatchObject({
+        name: 'DatasetError',
+        code: 'URL_TIMEOUT',
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
