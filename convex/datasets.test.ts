@@ -63,4 +63,43 @@ describe('durable Convex dataset functions', () => {
     expect(stored[0]).toEqual({ label: 'row-0' })
     expect(stored[200]).toEqual({ label: 'row-200' })
   })
+
+  it('persists a Plotly iris-shaped public CSV', async () => {
+    const t = convexTest(schema, modules)
+    const irisRows = [
+      { SepalLength: 5.1, SepalWidth: 3.5, PetalLength: 1.4, PetalWidth: 0.2, Name: 'Iris-setosa' },
+      { SepalLength: 7.0, SepalWidth: 3.2, PetalLength: 4.7, PetalWidth: 1.4, Name: 'Iris-versicolor' },
+    ]
+    const iris = {
+      datasetId: 'dataset-iris',
+      sourceType: 'public_url' as const,
+      displayName: 'iris.csv',
+      blobKey: 'blob-iris',
+      sourceUrl: 'https://raw.githubusercontent.com/plotly/datasets/master/iris.csv',
+      byteSize: 120,
+      contentHash: 'iris-hash',
+      encoding: 'utf-8',
+      delimiter: ',',
+      columns: [
+        { name: 'SepalLength', normalizedName: 'sepallength', inferredType: 'number' },
+        { name: 'SepalWidth', normalizedName: 'sepalwidth', inferredType: 'number' },
+        { name: 'PetalLength', normalizedName: 'petallength', inferredType: 'number' },
+        { name: 'PetalWidth', normalizedName: 'petalwidth', inferredType: 'number' },
+        { name: 'Name', normalizedName: 'name', inferredType: 'string' },
+      ],
+      acceptedRowCount: 2,
+      previewRows: irisRows,
+      validationWarnings: [],
+      visibility: 'published' as const,
+      createdAt: 1_800_000_000_000,
+      publishedAt: 1_800_000_000_000,
+    }
+    const stored = await t.action(api.datasets.authorizedPutDataset, {
+      authToken: writeSecret,
+      dataset: iris,
+      rows: irisRows.map((values, rowIndex) => ({ rowIndex, rowHash: `iris-${rowIndex}`, values })),
+    })
+    expect(stored).toMatchObject({ datasetId: 'dataset-iris', sourceType: 'public_url', acceptedRowCount: 2 })
+    await expect(t.action(api.datasets.authorizedGetDatasetRows, { authToken: writeSecret, datasetId: 'dataset-iris' })).resolves.toEqual(irisRows)
+  })
 })

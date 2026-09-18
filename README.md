@@ -79,7 +79,22 @@ A real Convex deployment and its URL are required for live operation and for dur
    LIVE_PUBLIC_ORIGIN=https://<public-site-origin>
    ```
 
-3. Deploy the Convex functions with the official command (`npx convex deploy`) and verify the generated API/function metadata in the deployment dashboard. The `npx convex dev`/`deploy` steps require an operator login and are intentionally not run in CI without credentials.
+3. Deploy the Convex functions. Vercel Production must do this on every deploy:
+
+   ```bash
+   # Local / ops one-shot (same effect as the Vercel production build):
+   npx convex deploy --cmd 'npm run build'
+   printf '%s' "$CONVEX_WRITE_SECRET" | npx convex env set CONVEX_WRITE_SECRET
+   ```
+
+   On Vercel:
+   1. Convex dashboard → **this production deployment** → **Settings** → **Generate Production Deploy Key** (enable `deployment:deploy`).
+   2. Vercel project → Environment Variables → `CONVEX_DEPLOY_KEY` = that key. **Production only** (do not attach it to Preview, or PR builds will push to prod Convex).
+   3. Confirm `CONVEX_WRITE_SECRET` is already on Vercel Production (same value you want on Convex).
+   4. `vercel.json` `buildCommand` is `node scripts/vercel-build.mjs`. On `VERCEL_ENV=production` it runs `npx convex deploy --cmd 'npm run build'`, then `npx convex env set CONVEX_WRITE_SECRET` from stdin so `authorizeWrite` matches.
+   5. Redeploy Production. The build log must contain `Deploying Convex functions with npx convex deploy`. A log that only shows `tsc -b && vite build` means Convex was **not** updated — BYOD then fails with Convex HTTP `[Request ID] Server Error`.
+
+   `npx convex dev` is still the local loop. It is not a substitute for the production deploy key.
 
 ## UploadThing provisioning (operator step)
 
@@ -88,7 +103,7 @@ BYOD CSV upload and public URL intake store the original blob on UploadThing. Sa
 1. In the UploadThing dashboard, open the app → **API Keys** → **V7** tab. Copy the token. It is a base64 JSON object `{ apiKey, appId, regions }` (optionally `ingestHost`). Do not use only the inner `sk_…` secret.
 2. Set `UPLOADTHING_TOKEN` (preferred) or `UPLOADTHING_SECRET` as a server-side Vercel env var. Never put it in a `VITE_*` variable.
 3. Redeploy. `GET /api/datasets/status` reports `uploadThing: true` when a usable `sk_…` key is present. A successful `POST /api/datasets/from-csv` or `/from-url` also needs `appId` and `regions` so the server can HMAC-sign `https://<region>.ingest.uploadthing.com/<fileKey>` and PUT the CSV (the same path as `UTApi.uploadFiles`).
-4. `POST https://api.uploadthing.com/v6/uploadFiles` is retired. A valid v7 app key calling it returns HTTP 400 `Unsupported operation`. Missing tokens return `UPLOADTHING_NOT_CONFIGURED`; present-but-unusable tokens or ingest rejections return `UPLOADTHING_FAILED` with a `failure` code (`TOKEN_MISSING_APP_REGION`, `INGEST_HTTP`, or `INGEST_RUNTIME`). After a successful ingest, Convex `datasets.put` failures return `DATASET_INTAKE_UNAVAILABLE` with `failure: "CONVEX_PUT_FAILED"` and a secret-free reason (authorization, missing function, undefined fields, or mutation error). Uncaught handler throws return `DATASET_UNAVAILABLE` + `failure: "UNCAUGHT"` and are logged as `[datasets] intake failed`. Redeploy Convex functions (`npx convex deploy`) so `authorizedPutDataset` batches row writes; the Vercel adapter already omits `undefined` optional fields that ConvexHttpClient rejects.
+4. `POST https://api.uploadthing.com/v6/uploadFiles` is retired. A valid v7 app key calling it returns HTTP 400 `Unsupported operation`. Missing tokens return `UPLOADTHING_NOT_CONFIGURED`; present-but-unusable tokens or ingest rejections return `UPLOADTHING_FAILED` with a `failure` code (`TOKEN_MISSING_APP_REGION`, `INGEST_HTTP`, or `INGEST_RUNTIME`). After a successful ingest, Convex `datasets.put` failures return `DATASET_INTAKE_UNAVAILABLE` with `failure: "CONVEX_PUT_FAILED"` and a secret-free reason. A Convex HTTP body of `[Request ID] Server Error` (no `Uncaught Error`) means the functions were not pushed — Vercel Production must run `node scripts/vercel-build.mjs` with `CONVEX_DEPLOY_KEY`. Uncaught handler throws return `DATASET_UNAVAILABLE` + `failure: "UNCAUGHT"` and are logged as `[datasets] intake failed`.
 
 ## Vercel deployment and live runbook (operator step)
 

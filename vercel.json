@@ -1,4 +1,5 @@
 {
+  "buildCommand": "node scripts/vercel-build.mjs",
   "rewrites": [
     { "source": "/share/:analysisId", "destination": "/index.html" }
   ]

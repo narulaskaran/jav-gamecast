@@ -212,15 +212,21 @@ export const authorizedPutDataset = action({
     validateDataset({ ...dataset, rows })
     const datasetId = dataset.datasetId
     if (typeof datasetId !== 'string') throw new Error('Invalid dataset')
-    const stored = await ctx.runMutation(internal.datasets.putDatasetMetaInternal, { dataset })
-    for (let offset = 0; offset < rows.length; offset += ROW_WRITE_BATCH) {
-      const batch = rows.slice(offset, offset + ROW_WRITE_BATCH)
-      if (offset === 0) {
-        await ctx.runMutation(internal.datasets.replaceDatasetRowsInternal, { datasetId, rows: batch })
-      } else {
-        await ctx.runMutation(internal.datasets.appendDatasetRowsInternal, { datasetId, rows: batch })
+    try {
+      const stored = await ctx.runMutation(internal.datasets.putDatasetMetaInternal, { dataset })
+      for (let offset = 0; offset < rows.length; offset += ROW_WRITE_BATCH) {
+        const batch = rows.slice(offset, offset + ROW_WRITE_BATCH)
+        if (offset === 0) {
+          await ctx.runMutation(internal.datasets.replaceDatasetRowsInternal, { datasetId, rows: batch })
+        } else {
+          await ctx.runMutation(internal.datasets.appendDatasetRowsInternal, { datasetId, rows: batch })
+        }
       }
+      return stored
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unknown'
+      if (/unauthorized/i.test(detail)) throw error
+      throw new Error(`dataset put failed: ${detail.slice(0, 180)}`)
     }
-    return stored
   },
 })

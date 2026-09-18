@@ -78,6 +78,9 @@ const convexDetail = (message: string): string => {
 export const convexPutFailureReason = (error: unknown): string => {
   const message = error instanceof Error ? error.message : ''
   const detail = convexDetail(message)
+  if (/\[Request ID: [0-9a-f]+\] Server Error/i.test(message) && !/Uncaught Error/i.test(message)) {
+    return 'Convex HTTP action failed (Server Error). Production must run npx convex deploy with CONVEX_DEPLOY_KEY.'
+  }
   if (/unauthorized/i.test(message)) return 'Convex write authorization failed.'
   if (/not configured/i.test(message)) return 'Convex write authorization is not configured.'
   if (/undefined is not a valid Convex value/i.test(message)) return 'Convex rejected undefined fields in the dataset payload.'
@@ -90,7 +93,7 @@ export const convexPutFailureReason = (error: unknown): string => {
   if (/too many writes|too many documents|write size|bytes written/i.test(message)) return 'Convex dataset put exceeded the mutation write limit.'
   if (/timed out|timeout/i.test(message)) return 'Convex dataset put timed out.'
   if (/ArgumentValidationError/i.test(message)) return 'Convex rejected the dataset argument shape.'
-  if (/^[A-Za-z][A-Za-z0-9 .,'()/_-]{0,120}$/.test(detail) && !/authToken|secret|sk_/i.test(detail)) {
+  if (/^[A-Za-z][A-Za-z0-9 .,'():/_-]{0,160}$/.test(detail) && !/authToken|secret|sk_/i.test(detail)) {
     return `Convex dataset put failed: ${detail}`
   }
   return `Convex dataset put failed (${safeRuntimeName(error)}).`

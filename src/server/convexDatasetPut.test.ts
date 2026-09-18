@@ -39,12 +39,31 @@ describe('convex dataset put payload', () => {
     expect('fixtureKey' in args.dataset).toBe(false)
   })
 
+  it('serializes a Plotly iris-shaped CSV for Convex put', () => {
+    const iris = validateCsvText('SepalLength,SepalWidth,PetalLength,PetalWidth,Name\n5.1,3.5,1.4,0.2,Iris-setosa\n4.9,3.0,1.4,0.2,Iris-setosa\n')
+    const record = toDatasetRecord({
+      sourceType: 'public_url',
+      displayName: 'iris.csv',
+      validated: iris,
+      contentHash: 'iris-hash',
+      blobKey: 'blob-iris',
+      sourceUrl: 'https://raw.githubusercontent.com/plotly/datasets/master/iris.csv',
+      createdAt: 1_800_000_000_000,
+    })
+    const args = toConvexDatasetPutArgs(record, iris.rows)
+    expect(args.dataset.acceptedRowCount).toBe(2)
+    expect(args.rows[0]?.values).toMatchObject({ SepalLength: 5.1, Name: 'Iris-setosa' })
+    expect(() => convexToJson({ authToken: 'write-secret', ...args } as never)).not.toThrow()
+  })
+
   it('strips undefined nested fields and non-finite numbers', () => {
     expect(omitUndefinedDeep({ a: 1, b: undefined, c: { d: undefined, e: Number.NaN } })).toEqual({ a: 1, c: { e: null } })
   })
 
   it('maps Convex throws to CONVEX_PUT_FAILED without forwarding dumps', () => {
-    expect(convexPutFailureReason(new Error('Unauthorized dataset mutation'))).toBe('Convex write authorization failed.')
+    expect(convexPutFailureReason(new Error('[Request ID: 082fcbfbbca35101] Server Error'))).toBe(
+      'Convex HTTP action failed (Server Error). Production must run npx convex deploy with CONVEX_DEPLOY_KEY.',
+    )
     expect(convexPutFailureReason(new Error('undefined is not a valid Convex value (present at path .dataset.fixtureKey in original object {"authToken":"super-secret"})'))).toBe('Convex rejected undefined fields in the dataset payload.')
     expect(convexPutFailureReason(new Error('undefined is not a valid Convex value authToken=super-secret'))).not.toMatch(/super-secret/)
     const error = (() => {
