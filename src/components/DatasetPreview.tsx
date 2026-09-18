@@ -14,8 +14,14 @@ const sourceLabel = (sourceType: DatasetPreview['sourceType']) => {
   return 'Public CSV'
 }
 
+export const previewRowCapCopy = (shown: number, total: number): string | undefined => {
+  if (shown < 1 || shown >= total) return undefined
+  return `Showing first ${shown} of ${total}`
+}
+
 export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPreview; onChange?: () => void }) => {
-  const columns = dataset.columns.slice(0, 6)
+  const columns = dataset.columns
+  const cap = previewRowCapCopy(dataset.previewRows.length, dataset.acceptedRowCount)
   return (
     <Card className="dataset-preview" aria-labelledby="dataset-heading">
       <CardHeader className="section-heading flex-row items-start justify-between space-y-0">
@@ -26,17 +32,29 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
         <Badge variant="secondary">{dataset.acceptedRowCount} rows</Badge>
       </CardHeader>
       <CardContent>
-        {dataset.columns.length > 0 ? (
-          <p className="preview-meta">{dataset.columns.length} columns</p>
+        {columns.length > 0 ? (
+          <p className="preview-meta">
+            {columns.length} columns{cap ? ` · ${cap}` : ''}
+          </p>
+        ) : cap ? (
+          <p className="preview-meta">{cap}</p>
         ) : null}
         <div className="table-scroll preview-table">
           <table aria-label="Dataset preview">
             <thead>
-              <tr>{columns.map((column) => <th key={column.name}>{column.name}</th>)}</tr>
+              <tr>
+                {columns.map((column, index) => (
+                  <th key={column.name} className={index === 0 ? 'is-sticky' : undefined}>{column.name}</th>
+                ))}
+              </tr>
             </thead>
             <tbody>
-              {dataset.previewRows.map((row, index) => (
-                <tr key={index}>{columns.map((column) => <td key={column.name}>{previewValue(row[column.name])}</td>)}</tr>
+              {dataset.previewRows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {columns.map((column, index) => (
+                    <td key={column.name} className={index === 0 ? 'is-sticky' : undefined}>{previewValue(row[column.name])}</td>
+                  ))}
+                </tr>
               ))}
             </tbody>
           </table>

@@ -42,5 +42,8 @@ describe('browser/server boundary', () => {
       expect(source).not.toMatch(/dataset\/sampleDataset/)
     }
     expect(analysis).toMatch(/shared\/sampleDatasetName/)
+    for (const file of collect('api')) {
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/sampleDataset/)
+    }
   })
 })

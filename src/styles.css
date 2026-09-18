@@ -473,8 +473,7 @@ h3 {
   max-width: 100%;
 }
 
-.results-card table,
-.dataset-preview table {
+.results-card table {
   width: 100%;
   border-collapse: collapse;
 }
@@ -823,7 +822,54 @@ h3 {
 
 .results-card.is-secondary { margin-top: 16px; }
 
-.dataset-preview .preview-table { margin: 0 0 8px; }
+.dataset-preview {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.dataset-preview .preview-table {
+  margin: 0 0 8px;
+  max-width: 100%;
+  max-height: 280px;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dataset-preview table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.dataset-preview th,
+.dataset-preview td {
+  white-space: nowrap;
+}
+
+.dataset-preview thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+}
+
+.dataset-preview th.is-sticky,
+.dataset-preview td.is-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--card);
+  box-shadow: 1px 0 0 var(--border);
+}
+
+.dataset-preview thead th.is-sticky {
+  z-index: 3;
+}
+
 .preview-actions { padding: 0 0 4px; }
 
 .dataset-preview .preview-meta {
@@ -895,15 +941,20 @@ h3 {
     word-break: break-word;
   }
   h1 { font-size: 1.5rem; }
-  .run-view, .run-view-main, .run-rail, .chart-hero, .chart-shell, .chart-plot, .series-svg, .chart-transport, .table-scroll, .query-card, .query-json, .task-card, .stage-fold, .workspace {
+  .run-view, .run-view-main, .run-rail, .chart-hero, .chart-shell, .chart-plot, .series-svg, .chart-transport, .table-scroll:not(.preview-table), .query-card, .query-json, .task-card, .stage-fold, .workspace, .dataset-preview {
     min-width: 0;
     max-width: 100%;
+  }
+  .run-view, .run-view-main, .run-rail, .chart-hero, .chart-shell, .chart-plot, .series-svg, .chart-transport, .table-scroll:not(.preview-table), .query-card, .query-json, .task-card, .stage-fold, .workspace {
     overflow-x: hidden;
   }
-  .results-card table,
-  .dataset-preview table {
+  .results-card table {
     min-width: 0;
     width: 100%;
+  }
+  .dataset-preview .preview-table {
+    overflow-x: auto;
+    overflow-y: auto;
   }
 }
 
