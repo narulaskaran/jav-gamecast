@@ -274,7 +274,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     }
   }, [query])
 
-  const showIntake = !isShareView && !dataset
+  const showIntake = !isShareView
   const showTask = !isShareView && Boolean(dataset)
   const showQuery = !isShareView && Boolean(draft)
   const showRun = Boolean(snapshot)
@@ -282,6 +282,13 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const parsedQuery = parseJevQueryJson(query)
   const querySummary = parsedQuery ? jevQuerySummary(parsedQuery) : undefined
   const queryInvalid = query.trim().length > 0 && !parsedQuery
+  const queryMeta = draft
+    ? [
+        `${draft.metadata.rowCount} rows`,
+        draft.metadata.questionKind,
+        draft.metadata.classes.length ? `${draft.metadata.classes.length} classes` : undefined,
+      ].filter(Boolean).join(' · ')
+    : ''
 
   return (
     <main className="analysis-shell" data-stage={isShareView ? 'share' : snapshot ? 'run' : draft ? 'query' : dataset ? 'task' : 'intake'}>
@@ -289,19 +296,17 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
         <a className="brand" href="/" aria-label="Jev playground home">Jev</a>
         {isShareView ? <Badge variant="secondary">Public snapshot</Badge> : null}
       </header>
-      <section className={`hero${showIntake || isShareView ? '' : ' is-compact'}`} aria-labelledby="page-title">
+      <section className="hero" aria-labelledby="page-title">
         <h1 id="page-title">{isShareView ? 'Inspect a saved run.' : 'Run Jev on a CSV.'}</h1>
-        {showIntake || isShareView ? (
-          <p className="hero-copy">
-            {isShareView ? 'A saved Jev run, replayed from stored predictions.' : 'Bring a dataset. Ask a question. See Jev classify every row.'}
-          </p>
-        ) : null}
+        <p className="hero-copy">
+          {isShareView ? 'A saved Jev run, replayed from stored predictions.' : 'Bring a dataset. Ask a question. See Jev classify every row.'}
+        </p>
       </section>
       <div className="workspace">
         <StageFold open={showIntake} animate={foldAnimate}>
           <DatasetIntake
             status={intakeStatus}
-            intakeError={error}
+            intakeError={dataset ? undefined : error}
             disabled={intakeBusy}
             onUploadFile={(file) => void handleUpload(file)}
             onSubmitUrl={(url) => void handleUrl(url)}
@@ -334,7 +339,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
                   {drafting ? <Thinking>Drafting query…</Thinking> : null}
                 </CardContent>
                 <CardFooter className="form-footer">
-                  <span />
+                  <span>Draft builds the editable Jev query JSON.</span>
                   <Button type="button" onClick={() => void handleDraft()} disabled={drafting}>
                     {drafting ? 'Drafting…' : 'Draft task'}
                   </Button>
@@ -374,10 +379,11 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
                     aria-invalid={queryInvalid || undefined}
                   />
                 </div>
+                {queryMeta ? <p className="query-meta">{queryMeta}</p> : null}
                 {starting ? <Thinking>Starting run…</Thinking> : null}
               </CardContent>
               <CardFooter className="form-footer">
-                <span>{canRun ? '' : queryInvalid ? 'Valid Jev JSON required.' : 'Enter Jev query JSON before running.'}</span>
+                <span>{canRun ? 'Review the JSON, then Run Jev.' : queryInvalid ? 'Valid Jev JSON required.' : 'Enter Jev query JSON before running.'}</span>
                 <Button
                   className="run-button"
                   variant="run"

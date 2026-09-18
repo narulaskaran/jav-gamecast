@@ -24,7 +24,7 @@ export const DatasetIntake = ({
   const missing = status?.convex === false ? 'Durable storage is not configured on this deployment.' : status?.uploadThing === false ? 'CSV storage is not configured on this deployment.' : undefined
   return (
     <section className="intake-panel" aria-labelledby="intake-heading">
-      <h2 id="intake-heading" className="visually-hidden">Choose a dataset</h2>
+      <h2 id="intake-heading">Choose a dataset</h2>
       <div className="intake-cards">
         <Card className="intake-card">
           <CardHeader>

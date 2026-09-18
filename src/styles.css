@@ -105,10 +105,6 @@ button, a { cursor: pointer; }
   max-width: 40rem;
 }
 
-.hero.is-compact {
-  padding: 16px 0 12px;
-}
-
 .eyebrow {
   margin: 0;
   color: var(--muted-foreground);
@@ -453,11 +449,8 @@ h3 {
   font-size: 12px;
 }
 
-.intake-disclosure {
-  margin: 0 0 14px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  line-height: 1.55;
+.intake-panel h2 {
+  margin-bottom: 12px;
 }
 
 .intake-cards {
