@@ -68,6 +68,8 @@ export interface DatasetIntakeStatus {
   convex: boolean
   uploadThing: boolean
   sampleAvailable: true
+  /** Present when durable storage env is incomplete. Names only, never values. */
+  missingEnv?: readonly string[]
 }
 
 export const asAnalysisRow = (row: object): AnalysisRowInput => {
