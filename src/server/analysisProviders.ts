@@ -163,6 +163,88 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
 
 const isAbortError = (error: unknown): boolean => isRecord(error) && error.name === 'AbortError'
 
+const UNIT_EPSILON = 1e-6
+const PROBABILITY_SUM_RESCALE = 1e-3
+const ENVELOPE_WRAPPER_KEYS = ['data', 'result', 'response', 'body'] as const
+
+const malformed = (message: string, retryable = false): AnalysisError => (
+  new AnalysisError('JEV_MALFORMED_RESPONSE', message, 502, retryable)
+)
+
+const parseJsonValue = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value
+  const trimmed = value.trim()
+  if (!trimmed) return value
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return value
+  }
+}
+
+const asFiniteNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+const asUnitNumber = (value: unknown): number | undefined => {
+  const parsed = asFiniteNumber(value)
+  if (parsed === undefined) return undefined
+  if (parsed >= 0 && parsed <= 1) return parsed
+  if (parsed > 1 && parsed <= 1 + UNIT_EPSILON) return 1
+  if (parsed < 0 && parsed >= -UNIT_EPSILON) return 0
+  return undefined
+}
+
+const answerTypeOf = (value: Record<string, unknown>): string | undefined => (
+  typeof value.type === 'string' && value.type.trim() ? value.type.trim().toLowerCase() : undefined
+)
+
+const looksLikeAnswer = (value: Record<string, unknown>): boolean => {
+  const type = answerTypeOf(value)
+  if (type === 'noul' || type === 'score' || type === 'choice') return true
+  return value.noul !== undefined || value.score !== undefined || typeof value.choice === 'string' || isRecord(value.probabilities)
+}
+
+const unwrapEnvelope = (value: unknown): Record<string, unknown> | undefined => {
+  const parsed = parseJsonValue(value)
+  if (!isRecord(parsed)) return undefined
+  for (const key of ENVELOPE_WRAPPER_KEYS) {
+    const nested = parsed[key]
+    if (isRecord(nested) && (isRecord(nested.answers) || looksLikeAnswer(nested) || ENVELOPE_WRAPPER_KEYS.some((wrapper) => isRecord(nested[wrapper])))) {
+      return unwrapEnvelope(nested) ?? nested
+    }
+  }
+  return parsed
+}
+
+const firstAnswer = (answers: Record<string, unknown>): unknown => {
+  if (isRecord(answers.classification) || typeof answers.classification === 'string') return answers.classification
+  const values = Object.values(answers)
+  return values.length === 1 ? values[0] : values.find((item) => {
+    const candidate = unwrapEnvelope(item)
+    return candidate !== undefined && looksLikeAnswer(candidate)
+  })
+}
+
+const extractClassifierAnswer = (value: unknown): { model: string; answer: Record<string, unknown> } | undefined => {
+  const envelope = unwrapEnvelope(value)
+  if (!envelope) return undefined
+  const model = typeof envelope.model === 'string' && envelope.model.trim() ? envelope.model.trim() : JEV_MODEL
+  let rawAnswer: unknown
+  if (isRecord(envelope.answers)) rawAnswer = firstAnswer(envelope.answers)
+  else if (Array.isArray(envelope.answers) && envelope.answers.length === 1) rawAnswer = envelope.answers[0]
+  else if (looksLikeAnswer(envelope)) rawAnswer = envelope
+  else rawAnswer = envelope.classification
+  const answer = unwrapEnvelope(rawAnswer)
+  if (!answer || !looksLikeAnswer(answer)) return undefined
+  return { model, answer }
+}
+
 const classifierCriteriaFor = (classes: readonly string[]): Record<string, string> => (
   Object.fromEntries(classes.map((name) => [name, `the ${name} class`]))
 )
@@ -223,19 +305,29 @@ export class TypeSafeClassifierProvider implements AnalysisClassifier {
       state: { fixtureId: input.fixtureId, datasetId: input.datasetId, rowIndex: input.rowIndex, input: input.row } as unknown as EntryType,
       questions: { classification: questionFor(input) },
     }
-    try {
-      const response = await client.systemOne(request, { headers: { 'Idempotency-Key': `analysis:${input.analysisId}:${input.rowIndex}` } })
-      return parseClassifierResponse(response, input.classes ?? [], questionKind)
-    } catch (error) {
-      if (error instanceof AnalysisError) throw error
-      if (error instanceof APITimeoutError) throw new AnalysisError('JEV_TIMEOUT', 'Jev request timed out', 504, true)
-      if (error instanceof APIConnectionError) throw new AnalysisError('JEV_CONNECTION', 'Jev connection failed', 502, true)
-      if (error instanceof APIError) {
-        const status = error.status
-        throw new AnalysisError(`JEV_${status}`, 'Jev provider request failed', status === 401 ? 502 : status === 429 ? 503 : 502, status === 429 || status >= 500)
+    const baseKey = `analysis:${input.analysisId}:${input.rowIndex}`
+    const attemptKeys = [baseKey, `${baseKey}:r1`]
+    let lastError: unknown
+    for (let attempt = 0; attempt < attemptKeys.length; attempt += 1) {
+      try {
+        const response = await client.systemOne(request, { headers: { 'Idempotency-Key': attemptKeys[attempt] } })
+        return parseClassifierResponse(response, input.classes ?? [], questionKind)
+      } catch (error) {
+        lastError = error
+        if (error instanceof AnalysisError) {
+          if (error.code === 'JEV_MALFORMED_RESPONSE' && error.retryable && attempt < attemptKeys.length - 1) continue
+          throw error
+        }
+        if (error instanceof APITimeoutError) throw new AnalysisError('JEV_TIMEOUT', 'Jev request timed out', 504, true)
+        if (error instanceof APIConnectionError) throw new AnalysisError('JEV_CONNECTION', 'Jev connection failed', 502, true)
+        if (error instanceof APIError) {
+          const status = error.status
+          throw new AnalysisError(`JEV_${status}`, 'Jev provider request failed', status === 401 ? 502 : status === 429 ? 503 : 502, status === 429 || status >= 500)
+        }
+        throw error
       }
-      throw error
     }
+    throw lastError
   }
 }
 
@@ -244,44 +336,47 @@ export const parseClassifierResponse = (
   classes: readonly string[] = [],
   questionKind: JevQuestionKind = inferQuestionKind('', classes),
 ): AnalysisClassification => {
-  if (!isRecord(value) || !isRecord(value.answers) || !isRecord(value.answers.classification)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
-  const answer = value.answers.classification
-  const model = typeof value.model === 'string' && value.model.trim() ? value.model.trim() : JEV_MODEL
-  if (questionKind === 'noul' || answer.type === 'noul') {
-    if (answer.type !== 'noul' || typeof answer.noul !== 'number' || !Number.isFinite(answer.noul) || answer.noul < 0 || answer.noul > 1) {
-      throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid noul', 502)
-    }
-    return { model, questionKind: 'noul', value: answer.noul }
+  const extracted = extractClassifierAnswer(value)
+  if (!extracted) throw malformed('Jev returned an invalid classification', true)
+  const { model, answer } = extracted
+  const type = answerTypeOf(answer)
+  if (questionKind === 'noul' || type === 'noul') {
+    const noulValue = asUnitNumber(answer.noul ?? answer.value ?? answer.probability)
+    if ((type !== undefined && type !== 'noul') || noulValue === undefined) throw malformed('Jev returned an invalid noul')
+    return { model, questionKind: 'noul', value: noulValue }
   }
-  if (questionKind === 'score' || answer.type === 'score') {
-    if (answer.type !== 'score' || typeof answer.score !== 'number' || !Number.isFinite(answer.score)) {
-      throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid score', 502)
-    }
+  if (questionKind === 'score' || type === 'score') {
+    const scoreValue = asFiniteNumber(answer.score ?? answer.value)
+    if ((type !== undefined && type !== 'score') || scoreValue === undefined) throw malformed('Jev returned an invalid score')
     const levels = classes.length >= 2 ? classes.length : Object.keys(isRecord(answer.legend) ? answer.legend : {}).length
     const max = Math.max(1, levels - 1)
-    const value01 = Math.min(1, Math.max(0, answer.score / max))
-    if (answer.confidence !== undefined && (typeof answer.confidence !== 'number' || !Number.isFinite(answer.confidence) || answer.confidence < 0 || answer.confidence > 1)) {
-      throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned invalid confidence', 502)
-    }
+    const value01 = Math.min(1, Math.max(0, scoreValue / max))
+    const confidence = answer.confidence === undefined ? undefined : asUnitNumber(answer.confidence)
+    if (answer.confidence !== undefined && confidence === undefined) throw malformed('Jev returned invalid confidence')
     return {
       model,
       questionKind: 'score',
       value: value01,
-      ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
+      ...(confidence === undefined ? {} : { confidence }),
     }
   }
   const allowed = classes.length >= 2 ? classes : []
-  if (allowed.length < 2 || answer.type !== 'choice' || typeof answer.choice !== 'string' || !allowed.includes(answer.choice) || !isRecord(answer.probabilities)) {
-    throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
+  const selected = typeof answer.choice === 'string' ? answer.choice.trim() : ''
+  if (allowed.length < 2 || (type !== undefined && type !== 'choice') || !selected || !allowed.includes(selected) || !isRecord(answer.probabilities)) {
+    throw malformed('Jev returned an invalid classification')
   }
   const probabilities: Record<string, number> = {}
   for (const className of allowed) {
-    const probability = answer.probabilities[className]
-    if (typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned invalid class probabilities', 502)
+    const probability = asUnitNumber(answer.probabilities[className])
+    if (probability === undefined) throw malformed('Jev returned invalid class probabilities')
     probabilities[className] = probability
   }
   const total = Object.values(probabilities).reduce((sum, probability) => sum + probability, 0)
-  if (Math.abs(total - 1) > 1e-6) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev class probabilities are inconsistent', 502)
-  if (answer.confidence !== undefined && (typeof answer.confidence !== 'number' || !Number.isFinite(answer.confidence) || answer.confidence < 0 || answer.confidence > 1)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned invalid confidence', 502)
-  return { model, questionKind: 'choice', selectedClass: answer.choice, probabilities, ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) }
+  if (Math.abs(total - 1) > PROBABILITY_SUM_RESCALE) throw malformed('Jev class probabilities are inconsistent')
+  if (Math.abs(total - 1) > UNIT_EPSILON && total > 0) {
+    for (const className of allowed) probabilities[className] = probabilities[className] / total
+  }
+  const confidence = answer.confidence === undefined ? undefined : asUnitNumber(answer.confidence)
+  if (answer.confidence !== undefined && confidence === undefined) throw malformed('Jev returned invalid confidence')
+  return { model, questionKind: 'choice', selectedClass: selected, probabilities, ...(confidence === undefined ? {} : { confidence }) }
 }
