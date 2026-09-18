@@ -59,7 +59,7 @@ Request JSON (sample or BYOD):
     "questionKind":"noul",
     "classes":[],
     "columns":["play_id","qtr","game_seconds_remaining","posteam_score","defteam_score","score_differential"],
-    "displayName":"Super Bowl Seahawks demo"
+    "displayName":"2026 Super Bowl Demo"
   }
 }
 ```
