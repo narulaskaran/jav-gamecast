@@ -37,6 +37,7 @@ export interface DatasetValidationError {
     | 'URL_NOT_PUBLIC'
     | 'URL_UNSAFE'
     | 'UPLOADTHING_NOT_CONFIGURED'
+    | 'UPLOADTHING_FAILED'
     | 'DATASET_NOT_FOUND'
     | 'DATASET_INTAKE_UNAVAILABLE'
   message: string
@@ -77,10 +78,11 @@ export const DATASET_ERROR_COPY: Record<string, string> = {
   URL_NOT_PUBLIC: 'The URL is not a public HTTPS CSV link.',
   URL_UNSAFE: 'The URL is not a public HTTPS CSV link.',
   UPLOADTHING_NOT_CONFIGURED: 'CSV storage is not configured on this deployment.',
+  UPLOADTHING_FAILED: 'CSV storage is configured, but UploadThing rejected the upload. Check the API token on this deployment.',
   ANALYSIS_STORAGE_NOT_CONFIGURED: 'Durable storage is not configured on this deployment.',
   DATASET_NOT_FOUND: 'That dataset was not found.',
   INVALID_DATASET: 'Choose a sample dataset, upload a CSV, or paste a public CSV URL.',
-  DATASET_INTAKE_UNAVAILABLE: 'CSV intake is not configured on this deployment.',
+  DATASET_INTAKE_UNAVAILABLE: 'CSV intake is unavailable on this deployment.',
 }
 
 export const plainDatasetError = (code: string, fallback = 'Could not use this dataset'): string => {

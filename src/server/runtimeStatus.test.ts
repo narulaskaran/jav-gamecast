@@ -12,7 +12,7 @@ describe('dataset intake status', () => {
     expect(readDatasetIntakeStatus({
       VITE_CONVEX_URL: 'https://demo.convex.cloud/',
       CONVEX_WRITE_SECRET: 'write-secret',
-      UPLOADTHING_TOKEN: 'ut_token',
+      UPLOADTHING_TOKEN: 'sk_live_token',
     })).toEqual({ convex: true, uploadThing: true, sampleAvailable: true })
     expect(readDatasetIntakeStatus({
       CONVEX_URL: 'https://demo.convex.cloud',

@@ -6,7 +6,7 @@ The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1`; it has 39 
 
 ## Dataset intake
 
-`GET /api/datasets/status` returns `{ convex, uploadThing, sampleAvailable }` with no secrets. Upload and public URL fail closed (`UPLOADTHING_NOT_CONFIGURED` or `ANALYSIS_STORAGE_NOT_CONFIGURED`) when those flags are false.
+`GET /api/datasets/status` returns `{ convex, uploadThing, sampleAvailable }` with no secrets. `uploadThing: true` means the same token reader the upload path uses found a usable `UPLOADTHING_TOKEN` / `UPLOADTHING_SECRET` (raw `sk_…` or an UploadThing dashboard token that unwraps to one). Empty or invalid-format values are `false`. Upload and public URL fail closed (`UPLOADTHING_NOT_CONFIGURED` or `ANALYSIS_STORAGE_NOT_CONFIGURED`) when those flags are false. When storage is configured but UploadThing rejects or returns an unexpected response, the routes return `UPLOADTHING_FAILED` — never a false “not configured”.
 
 `POST /api/datasets/from-csv`
 

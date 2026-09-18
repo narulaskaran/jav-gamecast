@@ -11,8 +11,10 @@ export interface CsvBlobStore {
   getCsv(blobKey: string): Promise<Uint8Array>
 }
 
+const NOT_CONFIGURED_COPY = 'CSV storage is not configured on this deployment.'
+
 const notConfigured = (): never => {
-  throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', 'CSV storage is not configured on this deployment.', 503)
+  throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', NOT_CONFIGURED_COPY, 503)
 }
 
 export class UnconfiguredBlobStore implements CsvBlobStore {
@@ -51,6 +53,10 @@ export class InMemoryBlobStore implements CsvBlobStore {
 }
 
 const UPLOADTHING_ENV_KEYS = ['UPLOADTHING_TOKEN', 'UPLOADTHING_SECRET'] as const
+const UPLOADTHING_UPLOAD_FILES_URL = 'https://api.uploadthing.com/v6/uploadFiles'
+const UPLOADTHING_LIST_FILES_URL = 'https://api.uploadthing.com/v6/listFiles'
+const API_KEY_PREFIX = 'sk_'
+const SAFE_PROVIDER_ERROR = /^[A-Za-z0-9][A-Za-z0-9 .,_':()-]{0,160}$/
 
 const envValue = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
   // Bracket access so Vercel/esbuild cannot replace process.env.UPLOADTHING_* at
@@ -58,6 +64,24 @@ const envValue = (env: NodeJS.ProcessEnv, name: string): string | undefined => {
   const value = env[name]
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
+
+const stripWrappingQuotes = (raw: string): string => {
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    return raw.slice(1, -1).trim()
+  }
+  return raw
+}
+
+const normalizeSecret = (raw: string): string => {
+  let value = raw.replace(/^\uFEFF/, '').trim()
+  value = stripWrappingQuotes(value)
+  if (/^bearer\s+/i.test(value)) value = value.replace(/^bearer\s+/i, '').trim()
+  return value
+}
+
+const isApiKey = (value: string | undefined): value is string => (
+  typeof value === 'string' && value.startsWith(API_KEY_PREFIX) && value.length > API_KEY_PREFIX.length
+)
 
 const decodeBase64Json = (raw: string): Record<string, unknown> | undefined => {
   const normalized = raw.replace(/-/g, '+').replace(/_/g, '/')
@@ -71,12 +95,32 @@ const decodeBase64Json = (raw: string): Record<string, unknown> | undefined => {
   return undefined
 }
 
+const parseJsonObject = (raw: string): Record<string, unknown> | undefined => {
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('{')) return undefined
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 const apiKeyFromRecord = (record: Record<string, unknown> | undefined): string | undefined => {
   if (!record) return undefined
-  for (const key of ['apiKey', 'api_key', 'secret', 'key']) {
+  for (const key of ['apiKey', 'api_key', 'secret', 'key', 'uploadthingSecret']) {
     const value = record[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (isApiKey(typeof value === 'string' ? value.trim() : undefined)) return (value as string).trim()
   }
+  return undefined
+}
+
+const credentialFromEncoded = (raw: string): string | undefined => {
+  const fromJson = apiKeyFromRecord(parseJsonObject(raw)) ?? apiKeyFromRecord(decodeBase64Json(raw))
+  if (fromJson) return fromJson
+  const parts = raw.split('.')
+  if (parts.length >= 2 && parts[1]) return apiKeyFromRecord(decodeBase64Json(parts[1]))
   return undefined
 }
 
@@ -85,20 +129,18 @@ const apiKeyFromRecord = (record: Record<string, unknown> | undefined): string |
  * so `uploadThing: true` cannot diverge from `createCsvBlobStore()`.
  *
  * Accepts `UPLOADTHING_TOKEN` (raw sk_ key or UploadThing's base64/JWT token)
- * or `UPLOADTHING_SECRET`. Encoded tokens are reduced to the inner API key
- * when present; otherwise the trimmed raw value is used.
+ * or `UPLOADTHING_SECRET`. Encoded tokens are reduced to the inner API key.
+ * Empty or invalid-format values are treated as missing — never as configured.
  */
 export const readUploadThingToken = (env: NodeJS.ProcessEnv = process.env): string | undefined => {
   for (const name of UPLOADTHING_ENV_KEYS) {
     const raw = envValue(env, name)
     if (!raw) continue
-    if (raw.startsWith('sk_')) return raw
-    const fromJson = apiKeyFromRecord(decodeBase64Json(raw))
-    if (fromJson) return fromJson
-    const jwtPayload = raw.split('.')[1]
-    const fromJwt = jwtPayload ? apiKeyFromRecord(decodeBase64Json(jwtPayload)) : undefined
-    if (fromJwt) return fromJwt
-    return raw
+    const normalized = normalizeSecret(raw)
+    if (!normalized) continue
+    if (isApiKey(normalized)) return normalized
+    const extracted = credentialFromEncoded(normalized)
+    if (extracted) return extracted
   }
   return undefined
 }
@@ -107,28 +149,120 @@ export const isUploadThingConfigured = (env: NodeJS.ProcessEnv = process.env): b
 
 const csvFilename = (filename: string): string => (filename.endsWith('.csv') ? filename : `${filename}.csv`)
 
+const asRecord = (value: unknown): Record<string, unknown> | undefined => (
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+)
+
+const firstOf = (value: unknown): Record<string, unknown> | undefined => (
+  Array.isArray(value) ? asRecord(value[0]) : undefined
+)
+
+const looksLikeFileRecord = (record: Record<string, unknown> | undefined): record is Record<string, unknown> => (
+  Boolean(record && (typeof record.key === 'string' || typeof record.fileKey === 'string' || typeof record.url === 'string' || asRecord(record.fields)))
+)
+
+const firstFileRecord = (payload: unknown): Record<string, unknown> | undefined => {
+  const record = asRecord(payload)
+  if (!record) return undefined
+  const nested = asRecord(record.data)
+  return firstOf(record.data)
+    ?? firstOf(nested?.files)
+    ?? firstOf(record.files)
+    ?? (looksLikeFileRecord(nested) ? nested : undefined)
+    ?? (looksLikeFileRecord(record) ? record : undefined)
+}
+
 const readBlobKey = (payload: unknown): string | undefined => {
-  if (typeof payload !== 'object' || payload === null) return undefined
-  const record = payload as Record<string, unknown>
-  const data = Array.isArray(record.data) ? record.data[0] : Array.isArray(record.files) ? record.files[0] : record
-  if (typeof data !== 'object' || data === null) return undefined
-  const file = data as Record<string, unknown>
+  const file = firstFileRecord(payload)
+  if (!file) return undefined
   if (typeof file.key === 'string' && file.key.trim()) return file.key.trim()
   if (typeof file.fileKey === 'string' && file.fileKey.trim()) return file.fileKey.trim()
-  if (typeof file.url === 'string' && file.url.trim()) return file.url.trim()
   return undefined
 }
 
-const readUploadUrl = (payload: unknown): string | undefined => {
-  if (typeof payload !== 'object' || payload === null) return undefined
-  const record = payload as Record<string, unknown>
-  const data = Array.isArray(record.data) ? record.data[0] : Array.isArray(record.files) ? record.files[0] : record
-  if (typeof data !== 'object' || data === null) return undefined
-  const file = data as Record<string, unknown>
-  if (typeof file.url === 'string' && file.url.trim().startsWith('http')) return file.url.trim()
-  if (typeof file.uploadUrl === 'string' && file.uploadUrl.trim().startsWith('http')) return file.uploadUrl.trim()
-  if (typeof file.presignedUrl === 'string' && file.presignedUrl.trim().startsWith('http')) return file.presignedUrl.trim()
+const isHttpUrl = (value: string): boolean => {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+const isCdnFileUrl = (value: string): boolean => {
+  try {
+    const host = new URL(value).hostname.toLowerCase()
+    return host === 'utfs.io' || host.endsWith('.utfs.io') || host === 'ufs.sh' || host.endsWith('.ufs.sh')
+  } catch {
+    return false
+  }
+}
+
+const readStringFields = (value: unknown): Record<string, string> | undefined => {
+  const record = asRecord(value)
+  if (!record) return undefined
+  const fields: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry === 'string') fields[key] = entry
+  }
+  return Object.keys(fields).length > 0 ? fields : undefined
+}
+
+interface UploadThingPresign {
+  key?: string
+  uploadUrl?: string
+  fields?: Record<string, string>
+}
+
+const readPresign = (payload: unknown): UploadThingPresign => {
+  const file = firstFileRecord(payload)
+  const key = readBlobKey(payload)
+  if (!file) return { key }
+  const fields = readStringFields(file.fields)
+  const candidates = [file.uploadUrl, file.presignedUrl, file.url]
+  const uploadUrl = candidates.find((value): value is string => typeof value === 'string' && isHttpUrl(value.trim()) && !isCdnFileUrl(value.trim()))
+    ?.trim()
+  return { key, uploadUrl, fields }
+}
+
+const readSafeProviderError = (payload: unknown): string | undefined => {
+  const candidates: unknown[] = [payload]
+  const record = asRecord(payload)
+  if (record) {
+    candidates.push(record.error, record.message, record.code)
+    const nested = asRecord(record.error)
+    if (nested) candidates.push(nested.message, nested.code, nested.error)
+  }
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue
+    const text = candidate.trim()
+    if (!SAFE_PROVIDER_ERROR.test(text)) continue
+    if (/sk_|bearer\s|UPLOADTHING_/i.test(text)) continue
+    return text
+  }
   return undefined
+}
+
+const uploadFailed = (reason: string, statusCode = 503): never => {
+  throw new DatasetError('UPLOADTHING_FAILED', reason, statusCode)
+}
+
+const failureFromResponse = async (response: Response, action: string): Promise<never> => {
+  let payload: unknown
+  try { payload = await response.json() } catch { payload = undefined }
+  const provider = readSafeProviderError(payload)
+  if (response.status === 401 || response.status === 403) {
+    return uploadFailed(
+      provider
+        ? `UploadThing rejected the API key (HTTP ${response.status}): ${provider}`
+        : `UploadThing rejected the API key (HTTP ${response.status}).`,
+    )
+  }
+  return uploadFailed(
+    provider
+      ? `UploadThing ${action} failed (HTTP ${response.status}): ${provider}`
+      : `UploadThing ${action} failed (HTTP ${response.status}).`,
+  )
 }
 
 /**
@@ -155,45 +289,50 @@ export class UploadThingBlobStore implements CsvBlobStore {
     if (!token) return notConfigured()
     const filename = csvFilename(input.filename)
     const contentType = input.contentType ?? 'text/csv'
-    const response = await this.fetcher('https://api.uploadthing.com/v6/uploadFiles', {
+    const bytes = Uint8Array.from(input.bytes)
+    const response = await this.fetcher(UPLOADTHING_UPLOAD_FILES_URL, {
       method: 'POST',
       headers: {
         'x-uploadthing-api-key': token,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        files: [{ name: filename, size: input.bytes.byteLength, type: contentType }],
+        files: [{ name: filename, size: bytes.byteLength, type: contentType }],
+        metadata: {},
+        contentDisposition: 'inline',
+        acl: 'public-read',
       }),
     })
-    if (!response.ok) {
-      throw new DatasetError('DATASET_INTAKE_UNAVAILABLE', 'CSV intake is not configured on this deployment.', 503)
-    }
+    if (!response.ok) return failureFromResponse(response, 'uploadFiles')
     let payload: unknown
     try { payload = await response.json() } catch {
-      throw new DatasetError('DATASET_INTAKE_UNAVAILABLE', 'CSV intake is not configured on this deployment.', 503)
+      return uploadFailed('UploadThing returned a non-JSON uploadFiles response.')
     }
-    const uploadUrl = readUploadUrl(payload)
-    if (uploadUrl) {
-      const uploaded = await this.fetcher(uploadUrl, {
+    const presign = readPresign(payload)
+    if (presign.fields && presign.uploadUrl) {
+      const form = new FormData()
+      for (const [key, value] of Object.entries(presign.fields)) form.append(key, value)
+      form.append('file', new Blob([bytes], { type: contentType }), filename)
+      const uploaded = await this.fetcher(presign.uploadUrl, { method: 'POST', body: form })
+      if (!uploaded.ok) return failureFromResponse(uploaded, 'blob upload')
+    } else if (presign.uploadUrl) {
+      const uploaded = await this.fetcher(presign.uploadUrl, {
         method: 'PUT',
         headers: { 'content-type': contentType },
-        body: new Blob([Uint8Array.from(input.bytes)], { type: contentType }),
+        body: new Blob([bytes], { type: contentType }),
       })
-      if (!uploaded.ok) {
-        throw new DatasetError('DATASET_INTAKE_UNAVAILABLE', 'CSV intake is not configured on this deployment.', 503)
-      }
+      if (!uploaded.ok) return failureFromResponse(uploaded, 'blob upload')
     }
-    const key = readBlobKey(payload)
-    if (!key) {
-      throw new DatasetError('DATASET_INTAKE_UNAVAILABLE', 'CSV intake is not configured on this deployment.', 503)
+    if (!presign.key) {
+      return uploadFailed('UploadThing returned an unexpected uploadFiles response (missing file key).')
     }
-    return { blobKey: key, byteSize: input.bytes.byteLength }
+    return { blobKey: presign.key, byteSize: bytes.byteLength }
   }
 
   async getCsv(blobKey: string): Promise<Uint8Array> {
     const token = this.token()
     if (!token) return notConfigured()
-    const response = await this.fetcher('https://api.uploadthing.com/v6/listFiles', {
+    const response = await this.fetcher(UPLOADTHING_LIST_FILES_URL, {
       method: 'POST',
       headers: { 'x-uploadthing-api-key': token, 'content-type': 'application/json' },
       body: JSON.stringify({ fileKeys: [blobKey] }),

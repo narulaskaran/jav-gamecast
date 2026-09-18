@@ -3,7 +3,7 @@ import { AnalysisRunView } from './components/AnalysisRunView'
 import { DatasetIntake } from './components/DatasetIntake'
 import { DatasetPreviewCard } from './components/DatasetPreview'
 import { getSampleDatasetPreview, SAMPLE_DATASET_ID } from './dataset/sampleDataset'
-import { DatasetError, plainDatasetError, PUBLIC_DATA_WARNING } from './dataset/csvTypes'
+import { DatasetError, DATASET_ERROR_COPY, plainDatasetError, PUBLIC_DATA_WARNING } from './dataset/csvTypes'
 import { validateCsvText } from './dataset/validateDataset'
 import type {
   AnalysisDraftResult,
@@ -25,10 +25,18 @@ export interface AnalysisApiClient {
 const apiError = async (response: Response): Promise<Error> => {
   if (response.ok) return new Error('')
   let code = 'REQUEST_FAILED'
+  let message: string | undefined
   try {
-    const body = await response.json() as { error?: unknown }
+    const body = await response.json() as { error?: unknown; message?: unknown }
     if (typeof body.error === 'string' && /^[A-Z0-9_]+$/.test(body.error)) code = body.error
+    if (typeof body.message === 'string') {
+      const trimmed = body.message.trim()
+      if (trimmed && trimmed.length <= 240 && !/\bsk_|bearer\s/i.test(trimmed)) message = trimmed
+    }
   } catch { /* Keep a stable client-side error when the body is not JSON. */ }
+  if (message && code in DATASET_ERROR_COPY) {
+    return new DatasetError(code as DatasetError['code'], message, response.status)
+  }
   return new Error(code)
 }
 
@@ -50,7 +58,7 @@ export const defaultAnalysisApi: AnalysisApiClient = {
 
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
 const shortError = (error: unknown, fallback: string) => {
-  if (error instanceof DatasetError) return plainDatasetError(error.code, fallback)
+  if (error instanceof DatasetError) return error.message.trim() || plainDatasetError(error.code, fallback)
   if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) return plainDatasetError(error.message, `${fallback} (${error.message})`)
   return fallback
 }

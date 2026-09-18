@@ -49,10 +49,20 @@ const errorShape = (error: unknown): { statusCode: number; code: string } | unde
   return undefined
 }
 
+const publicErrorMessage = (error: unknown, code: string): string | undefined => {
+  if (!(error instanceof DatasetError) && !(error instanceof AnalysisError)) return undefined
+  const message = error.message.trim()
+  if (!message || message === code) return undefined
+  // Only our canned DatasetError/AnalysisError strings are returned; never provider bodies.
+  if (message.length > 240) return undefined
+  return message
+}
+
 const errorResponse = (response: DatasetApiResponse, error: unknown): void => {
   const shaped = errorShape(error)
   if (shaped) {
-    response.status(shaped.statusCode).json({ error: shaped.code })
+    const message = publicErrorMessage(error, shaped.code)
+    response.status(shaped.statusCode).json(message ? { error: shaped.code, message } : { error: shaped.code })
     return
   }
   response.status(500).json({ error: 'DATASET_UNAVAILABLE' })
