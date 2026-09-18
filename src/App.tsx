@@ -26,16 +26,18 @@ const apiError = async (response: Response): Promise<Error> => {
   if (response.ok) return new Error('')
   let code = 'REQUEST_FAILED'
   let message: string | undefined
+  let failure: string | undefined
   try {
-    const body = await response.json() as { error?: unknown; message?: unknown }
+    const body = await response.json() as { error?: unknown; message?: unknown; failure?: unknown }
     if (typeof body.error === 'string' && /^[A-Z0-9_]+$/.test(body.error)) code = body.error
     if (typeof body.message === 'string') {
       const trimmed = body.message.trim()
       if (trimmed && trimmed.length <= 240 && !/\bsk_|bearer\s/i.test(trimmed)) message = trimmed
     }
+    if (typeof body.failure === 'string' && /^[A-Z0-9_]+$/.test(body.failure)) failure = body.failure
   } catch { /* Keep a stable client-side error when the body is not JSON. */ }
   if (message && code in DATASET_ERROR_COPY) {
-    return new DatasetError(code as DatasetError['code'], message, response.status)
+    return new DatasetError(code as DatasetError['code'], failure ? `${message} (${failure})` : message, response.status)
   }
   return new Error(code)
 }

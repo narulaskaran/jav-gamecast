@@ -138,7 +138,7 @@ describe('UploadThing blob store', () => {
     const store = new UploadThingBlobStore({ UPLOADTHING_TOKEN: 'sk_live_upload' }, fetchMock)
     const error = await store.putCsv({ bytes: csvBytes(), filename: 'n.csv' }).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(DatasetError)
-    expect(error).toMatchObject({ code: 'UPLOADTHING_FAILED', statusCode: 503 })
+    expect(error).toMatchObject({ code: 'UPLOADTHING_FAILED', statusCode: 503, failure: 'TOKEN_MISSING_APP_REGION' })
     expect((error as DatasetError).code).not.toBe('UPLOADTHING_NOT_CONFIGURED')
     expect((error as DatasetError).code).not.toBe('DATASET_INTAKE_UNAVAILABLE')
     expect((error as DatasetError).message).not.toMatch(/not configured/i)
@@ -147,13 +147,26 @@ describe('UploadThing blob store', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('maps an uncaught ingest throw to UPLOADTHING_FAILED instead of leaking a raw Error', async () => {
+    const env: NodeJS.ProcessEnv = { UPLOADTHING_TOKEN: encodedToken('sk_live_upload') }
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('File is not defined')
+    }) as unknown as typeof fetch
+    const store = new UploadThingBlobStore(env, fetchMock)
+    const error = await store.putCsv({ bytes: csvBytes(), filename: 'n.csv' }).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(DatasetError)
+    expect(error).toMatchObject({ code: 'UPLOADTHING_FAILED', failure: 'INGEST_RUNTIME', statusCode: 503 })
+    expect((error as DatasetError).message).toMatch(/TypeError/)
+    expect((error as DatasetError).message).not.toMatch(/not configured/i)
+  })
+
   it('does not map a rejected ingest response to not-configured', async () => {
     const env: NodeJS.ProcessEnv = { UPLOADTHING_TOKEN: encodedToken('sk_live_upload') }
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'Invalid API key' }), { status: 401 })) as unknown as typeof fetch
     const store = new UploadThingBlobStore(env, fetchMock)
     const error = await store.putCsv({ bytes: csvBytes(), filename: 'n.csv' }).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(DatasetError)
-    expect(error).toMatchObject({ code: 'UPLOADTHING_FAILED', statusCode: 503 })
+    expect(error).toMatchObject({ code: 'UPLOADTHING_FAILED', statusCode: 503, failure: 'INGEST_HTTP' })
     expect((error as DatasetError).code).not.toBe('UPLOADTHING_NOT_CONFIGURED')
     expect((error as DatasetError).code).not.toBe('DATASET_INTAKE_UNAVAILABLE')
     expect((error as DatasetError).message).not.toMatch(/not configured/i)

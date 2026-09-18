@@ -95,7 +95,14 @@ export class DatasetIntakeService {
     filename: string
     sourceUrl?: string
   }): Promise<DatasetPreview> {
-    const blob = await this.options.blobs.putCsv({ bytes: input.bytes, filename: input.filename, contentType: 'text/csv' })
+    let blob
+    try {
+      blob = await this.options.blobs.putCsv({ bytes: input.bytes, filename: input.filename, contentType: 'text/csv' })
+    } catch (error) {
+      if (error instanceof DatasetError || error instanceof AnalysisError) throw error
+      const name = error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,40}$/.test(error.name) ? error.name : 'Error'
+      throw new DatasetError('UPLOADTHING_FAILED', `UploadThing ingest failed (${name}).`, 503, 'INGEST_RUNTIME')
+    }
     const record = toDatasetRecord({
       sourceType: input.sourceType,
       displayName: input.displayName,
@@ -105,7 +112,12 @@ export class DatasetIntakeService {
       sourceUrl: input.sourceUrl,
       createdAt: this.options.now?.() ?? Date.now(),
     })
-    await this.options.datasets.put(record, input.validated.rows)
+    try {
+      await this.options.datasets.put(record, input.validated.rows)
+    } catch (error) {
+      if (error instanceof DatasetError || error instanceof AnalysisError) throw error
+      throw new DatasetError('DATASET_INTAKE_UNAVAILABLE', 'CSV intake failed on this deployment.', 503, 'UNCAUGHT')
+    }
     return { ...toDatasetPreview(record), publicDataWarning: PUBLIC_DATA_WARNING }
   }
 }
