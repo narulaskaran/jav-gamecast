@@ -4,6 +4,7 @@ import {
   OpenRouterConfigurationError,
   OpenRouterDraftProvider,
   TypeSafeClassifierProvider,
+  parseClassifierResponse,
   type ClassifierClientBoundary,
 } from './analysisProviders'
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from '../fixtures/footballTimeline'
@@ -127,6 +128,71 @@ describe('editable Jev classifier adapter', () => {
     }))
   })
 
+  it('retries an unreadable duplicate-replay body with a fresh idempotency key', async () => {
+    const keys: Array<string | undefined> = []
+    const client: ClassifierClientBoundary = {
+      async systemOne(_request, options) {
+        keys.push(options?.headers?.['Idempotency-Key'])
+        if (keys.length === 1) return undefined
+        return { model: 'jev-latest', answers: { classification: { type: 'noul', noul: 0.41 } } }
+      },
+    }
+    const provider = new TypeSafeClassifierProvider({ client })
+    await expect(provider.classify({
+      analysisId: 'analysis-dup-1',
+      fixtureId: FOOTBALL_FIXTURE_ID,
+      datasetId: FOOTBALL_FIXTURE_ID,
+      query: 'Will SEA win given this play state?',
+      rowIndex: 0,
+      row: input,
+      classes: [],
+      questionKind: 'noul',
+    })).resolves.toMatchObject({ questionKind: 'noul', value: 0.41 })
+    expect(keys).toEqual(['analysis:analysis-dup-1:0', 'analysis:analysis-dup-1:0:r1'])
+  })
+
+  it('exhausts one replay retry and keeps JEV_MALFORMED_RESPONSE retryable', async () => {
+    const keys: Array<string | undefined> = []
+    const client: ClassifierClientBoundary = {
+      async systemOne(_request, options) {
+        keys.push(options?.headers?.['Idempotency-Key'])
+        return ''
+      },
+    }
+    await expect(new TypeSafeClassifierProvider({ client }).classify({
+      analysisId: 'analysis-dup-2',
+      fixtureId: FOOTBALL_FIXTURE_ID,
+      datasetId: FOOTBALL_FIXTURE_ID,
+      query: 'Will SEA win given this play state?',
+      rowIndex: 3,
+      row: input,
+      classes: [],
+      questionKind: 'noul',
+    })).rejects.toMatchObject({ code: 'JEV_MALFORMED_RESPONSE', retryable: true, statusCode: 502 })
+    expect(keys).toEqual(['analysis:analysis-dup-2:3', 'analysis:analysis-dup-2:3:r1'])
+  })
+
+  it('does not spend a second Jev call on a semantically invalid answer', async () => {
+    let calls = 0
+    const client: ClassifierClientBoundary = {
+      async systemOne() {
+        calls += 1
+        return { model: 'jev-latest', answers: { classification: { type: 'noul', noul: 2 } } }
+      },
+    }
+    await expect(new TypeSafeClassifierProvider({ client }).classify({
+      analysisId: 'analysis-1',
+      fixtureId: FOOTBALL_FIXTURE_ID,
+      datasetId: FOOTBALL_FIXTURE_ID,
+      query: 'Will SEA win given this play state?',
+      rowIndex: 0,
+      row: input,
+      classes: [],
+      questionKind: 'noul',
+    })).rejects.toMatchObject({ code: 'JEV_MALFORMED_RESPONSE', retryable: false })
+    expect(calls).toBe(1)
+  })
+
   it.each([401, 429, 500])('maps Jev HTTP %s to a truthful stable error', async (status) => {
     const fetcher: typeof fetch = async () => fetchResponse({ error: { message: 'provider details' } }, status)
     const provider = new TypeSafeClassifierProvider({ apiKey: 'placeholder', fetch: fetcher })
@@ -137,5 +203,82 @@ describe('editable Jev classifier adapter', () => {
     } finally {
       vi.stubGlobal('window', browserWindow)
     }
+  })
+})
+
+describe('Jev classifier response normalize', () => {
+  const noulAnswer = { type: 'noul', noul: 0.63 }
+  const choiceClasses = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie']
+  const choiceAnswer = {
+    type: 'choice',
+    choice: 'K.Walker',
+    probabilities: { 'K.Walker': 0.7, 'C.Kupp': 0.1, 'J.Smith-Njigba': 0.1, 'Other/Tie': 0.1 },
+    confidence: 0.7,
+  }
+
+  it('accepts the documented System One envelope', () => {
+    expect(parseClassifierResponse({ model: 'jev-latest', answers: { classification: noulAnswer } }, [], 'noul')).toEqual({
+      model: 'jev-latest',
+      questionKind: 'noul',
+      value: 0.63,
+    })
+  })
+
+  it.each([
+    ['JSON string body', JSON.stringify({ model: 'jev-latest', answers: { classification: noulAnswer } })],
+    ['data wrapper', { data: { model: 'jev-latest', answers: { classification: noulAnswer } } }],
+    ['stringified answer', { model: 'jev-latest', answers: { classification: JSON.stringify(noulAnswer) } }],
+    ['alternate answer key', { model: 'jev-latest', answers: { q0: noulAnswer } }],
+    ['bare answer', noulAnswer],
+    ['numeric string noul', { model: 'jev-latest', answers: { classification: { type: 'noul', noul: '0.63' } } }],
+    ['noul alias value', { model: 'jev-latest', answers: { classification: { type: 'noul', value: 0.63 } } }],
+    ['epsilon clamp', { model: 'jev-latest', answers: { classification: { type: 'noul', noul: 1.0000004 } } }],
+  ])('normalizes %s without failing closed', (_label, body) => {
+    const parsed = parseClassifierResponse(body, [], 'noul')
+    expect(parsed.questionKind).toBe('noul')
+    expect(parsed.value).toBeGreaterThanOrEqual(0.63)
+    expect(parsed.value).toBeLessThanOrEqual(1)
+  })
+
+  it('keeps Choice bars parseable after a duplicate-shaped replay', () => {
+    expect(parseClassifierResponse({
+      result: { model: 'jev-latest', answers: { classification: { ...choiceAnswer, choice: ' K.Walker ', probabilities: { 'K.Walker': '0.7', 'C.Kupp': 0.1, 'J.Smith-Njigba': 0.1, 'Other/Tie': 0.1 } } } },
+    }, choiceClasses, 'choice')).toMatchObject({
+      questionKind: 'choice',
+      selectedClass: 'K.Walker',
+      probabilities: { 'K.Walker': 0.7, 'C.Kupp': 0.1, 'J.Smith-Njigba': 0.1, 'Other/Tie': 0.1 },
+    })
+  })
+
+  it('marks empty or unreadable envelopes as retryable', () => {
+    for (const body of [undefined, 'not-json', { model: 'jev-latest', answers: {} }]) {
+      try {
+        parseClassifierResponse(body, [], 'noul')
+        throw new Error('expected malformed response')
+      } catch (error) {
+        expect(error).toMatchObject({ code: 'JEV_MALFORMED_RESPONSE', retryable: true, statusCode: 502 })
+      }
+    }
+  })
+
+  it('still rejects a noul that is not a unit probability', () => {
+    expect(() => parseClassifierResponse({ answers: { classification: { type: 'noul', noul: 2 } } }, [], 'noul')).toThrow(/invalid noul/)
+    try {
+      parseClassifierResponse({ answers: { classification: { type: 'noul', noul: 2 } } }, [], 'noul')
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'JEV_MALFORMED_RESPONSE', retryable: false })
+    }
+  })
+
+  it('still maps a Score answer onto a 0-1 series value', () => {
+    expect(parseClassifierResponse({
+      model: 'jev-latest',
+      answers: { classification: { type: 'score', score: 1.5, legend: { 0: 'Low', 1: 'Medium', 2: 'High' }, confidence: 0.5 } },
+    }, ['Low', 'Medium', 'High'], 'score')).toEqual({
+      model: 'jev-latest',
+      questionKind: 'score',
+      value: 0.75,
+      confidence: 0.5,
+    })
   })
 })
