@@ -101,6 +101,8 @@ export interface AnalysisStartInput {
   questionKind?: JevQuestionKind
   /** Skip content-hash reuse and mint a new analysis. Same analysisId is still idempotent. */
   forceNew?: boolean
+  /** Requeue an errored analysis and continue from the last persisted row. */
+  resume?: boolean
 }
 
 export interface AnalysisStorage {

@@ -5,7 +5,13 @@ import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader } from './ui/card'
 import { Progress as ProgressBar } from './ui/progress'
-import { runErrorHint, runViewHeading } from '../runView/format'
+import {
+  resumeRunLabel,
+  runErrorCopy,
+  runSubsetCopy,
+  runViewHeading,
+  savedRunCopy,
+} from '../runView/format'
 import { downloadTextFile, resultsCsv, resultsCsvFilename } from '../runView/resultsCsv'
 import { useRunPlayhead } from '../runView/playhead'
 import { chartVisualFor, inferQuestionKind } from '../shared/questionKind'
@@ -61,12 +67,20 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   shareUrl,
   shareMessage,
   onCopyShare,
+  onResume,
+  resuming,
+  datasetRowCount,
+  inputHalf,
   latencyHint,
 }: {
   snapshot: AnalysisSnapshot
   shareUrl: string
   shareMessage: string
   onCopyShare: () => void
+  onResume?: () => void
+  resuming?: boolean
+  datasetRowCount?: number
+  inputHalf?: 'H1'
   latencyHint?: 'saved' | 'live'
 }) {
   const rows = snapshot.resultRows
@@ -87,6 +101,14 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   const questionKind = inferQuestionKind(snapshot.query, snapshot.classes, snapshot.questionKind)
   const chartKind = chartVisualFor(questionKind)
   const canDownload = rows.length > 0
+  const subsetCopy = runSubsetCopy({
+    analyzedRows: snapshot.progress.totalRows,
+    datasetRows: datasetRowCount,
+    sourceType: snapshot.sourceType,
+    inputHalf,
+    tense: live ? 'analyzing' : 'analyzed',
+  })
+  const errorCopy = snapshot.error ? runErrorCopy(snapshot.error, snapshot.progress.completedRows) : undefined
 
   useEffect(() => {
     if (!live) return undefined
@@ -99,10 +121,12 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   }, [live, snapshot.analysisId, snapshot.createdAt])
 
   const latencyCopy = live
-    ? `Live run · ${formatElapsed(elapsedMs)} · ${snapshot.progress.totalRows} rows can take a few minutes.`
+    ? subsetCopy
+      ? `Live run · ${formatElapsed(elapsedMs)} · ${subsetCopy}. Can take a few minutes.`
+      : `Live run · ${formatElapsed(elapsedMs)} · ${snapshot.progress.totalRows} rows can take a few minutes.`
     : latencyHint === 'saved' && snapshot.status === 'complete'
-      ? 'Saved run.'
-      : undefined
+      ? [subsetCopy, savedRunCopy()].filter(Boolean).join(' ')
+      : subsetCopy
 
   return (
     <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
@@ -137,10 +161,24 @@ export const AnalysisRunView = memo(function AnalysisRunView({
           totalRows={snapshot.progress.totalRows}
         />
         {latencyCopy ? <p className="run-latency" role="status">{latencyCopy}</p> : null}
-        {snapshot.error ? (
+        {errorCopy ? (
           <div className="error-banner compact" role="alert">
-            <b>{snapshot.error.code}</b>
-            <span>{runErrorHint(snapshot.error.retryable)}</span>
+            <div className="error-banner-copy">
+              <b>{errorCopy.title}</b>
+              <span>{errorCopy.detail}</span>
+            </div>
+            {onResume ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                onClick={onResume}
+                disabled={resuming}
+                aria-label={resumeRunLabel(snapshot.progress.completedRows)}
+              >
+                {resuming ? 'Resuming…' : resumeRunLabel(snapshot.progress.completedRows)}
+              </Button>
+            ) : null}
           </div>
         ) : null}
         <div className="run-view">

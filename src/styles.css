@@ -376,6 +376,20 @@ h3 {
 
 .error-banner b { font-size: 13px; font-weight: 600; }
 .error-banner.compact { margin-top: 14px; }
+.error-banner-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.query-scope {
+  margin: 0 0 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
 
 .field-hint {
   margin: 0;
@@ -850,6 +864,12 @@ h3 {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+.dataset-preview td.preview-spacer {
+  padding: 0;
+  border: 0;
+  line-height: 0;
 }
 
 .dataset-preview table {

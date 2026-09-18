@@ -100,6 +100,7 @@ export const createAnalysisRunHandler = (service: AnalysisService, options: { sc
       classes: Array.isArray(body.classes) ? body.classes as string[] : undefined,
       questionKind: body.questionKind === 'noul' || body.questionKind === 'score' || body.questionKind === 'choice' ? body.questionKind : undefined,
       forceNew: body.forceNew === true,
+      resume: body.resume === true,
     })
     if (snapshot.status === 'complete') {
       response.status(200).json(snapshotBody(snapshot))

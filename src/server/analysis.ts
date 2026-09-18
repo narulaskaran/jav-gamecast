@@ -403,7 +403,7 @@ export class AnalysisService {
     if (requestedAnalysisId) {
       if (!validText(requestedAnalysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
       const existing = await this.options.store.get(requestedAnalysisId)
-      if (existing) return this.resumeExisting(existing, dataset.datasetId, query)
+      if (existing) return this.resumeExisting(existing, dataset.datasetId, query, input.resume === true)
     }
     if (input.forceNew !== true && (questionKind !== 'choice' || lookupClasses.length >= 2)) {
       // Same datasetId + canonical query is reused for every source (fixture and BYOD).
@@ -418,7 +418,7 @@ export class AnalysisService {
     const analysisId = requestedAnalysisId || this.idFactory()
     if (!validText(analysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const existing = await this.options.store.get(analysisId)
-    if (existing) return this.resumeExisting(existing, dataset.datasetId, query)
+    if (existing) return this.resumeExisting(existing, dataset.datasetId, query, input.resume === true)
     const classes = questionKind === 'noul' ? [] : normalizeClasses(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes, dataset.classes ?? [])
     if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
     if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
@@ -530,11 +530,11 @@ export class AnalysisService {
     }
   }
 
-  private async resumeExisting(existing: AnalysisSnapshot, datasetId: string, query: string): Promise<AnalysisSnapshot> {
+  private async resumeExisting(existing: AnalysisSnapshot, datasetId: string, query: string, resume = false): Promise<AnalysisSnapshot> {
     const normalized = normalizeSnapshot(existing)
     if (normalized.datasetId !== datasetId || normalized.query !== query) throw new AnalysisError('ANALYSIS_ID_CONFLICT', 'Analysis ID is already used for another analysis', 409)
     const stale = normalized.status === 'running' && this.now() - Date.parse(normalized.updatedAt) > ANALYSIS_STALE_AFTER_MS
-    const retryableFailure = normalized.status === 'error' && normalized.error?.retryable === true
+    const retryableFailure = normalized.status === 'error' && (normalized.error?.retryable === true || resume)
     if (stale || retryableFailure) {
       const recovered: AnalysisSnapshot = {
         ...normalized,
