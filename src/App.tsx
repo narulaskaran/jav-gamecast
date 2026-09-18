@@ -21,7 +21,6 @@ import {
 import {
   classesFromJevQuery,
   formatDraftQueryForEditor,
-  jevQuerySummary,
   looksLikeJevQueryJson,
   parseJevQueryJson,
 } from './shared/jevQuery'
@@ -94,7 +93,7 @@ export const queryRunFooter = ({
 }): string | undefined => {
   if (starting) return 'Starting…'
   if (hasSnapshot) return undefined
-  if (hasRunnableQuery(query)) return 'Review the JSON, then Run Jev.'
+  if (hasRunnableQuery(query)) return undefined
   if (query.trim().length > 0) return 'Valid Jev JSON required.'
   return 'Enter Jev query JSON before running.'
 }
@@ -321,15 +320,9 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const showRun = Boolean(snapshot)
   const canRun = Boolean(draft && datasetId && canConfirmJevRun({ query, starting }))
   const parsedQuery = parseJevQueryJson(query)
-  const querySummary = parsedQuery ? jevQuerySummary(parsedQuery) : undefined
+  const querySummary = parsedQuery?.instructions
   const queryInvalid = query.trim().length > 0 && !parsedQuery
-  const queryMeta = draft
-    ? [
-        `${draft.metadata.rowCount} rows`,
-        draft.metadata.questionKind,
-        draft.metadata.classes.length ? `${draft.metadata.classes.length} classes` : undefined,
-      ].filter(Boolean).join(' · ')
-    : ''
+  const runFooter = queryRunFooter({ query, starting, hasSnapshot: Boolean(snapshot) })
 
   return (
     <main className="analysis-shell" data-stage={isShareView ? 'share' : snapshot ? 'run' : draft ? 'query' : dataset ? 'task' : 'intake'}>
@@ -342,9 +335,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
       </header>
       <section className="hero" aria-labelledby="page-title">
         <h1 id="page-title">{isShareView ? 'Inspect a saved run.' : 'Run Jev on a CSV.'}</h1>
-        <p className="hero-copy">
-          {isShareView ? 'A saved Jev run, replayed from stored predictions.' : 'Bring a dataset. Ask a question. See Jev classify every row.'}
-        </p>
+        {isShareView ? <p className="hero-copy">A saved Jev run, replayed from stored predictions.</p> : null}
       </section>
       <div className="workspace">
         <StageFold open={showIntake} animate={foldAnimate}>
@@ -383,7 +374,6 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
                   {drafting ? <Thinking>Drafting query…</Thinking> : null}
                 </CardContent>
                 <CardFooter className="form-footer">
-                  <span>Draft builds the editable Jev query JSON.</span>
                   <Button type="button" onClick={() => void handleDraft()} disabled={drafting}>
                     {drafting ? 'Drafting…' : 'Draft task'}
                   </Button>
@@ -400,7 +390,6 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
                     <p className="eyebrow">Query</p>
                     <h2 id="query-heading">Jev query</h2>
                 </div>
-                <Badge variant="secondary">{draft.metadata.questionKind ?? 'query'}</Badge>
               </CardHeader>
               <CardContent>
                 {querySummary ? <p className="query-summary">{querySummary}</p> : null}
@@ -423,11 +412,10 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
                     aria-invalid={queryInvalid || undefined}
                   />
                 </div>
-                {queryMeta ? <p className="query-meta">{queryMeta}</p> : null}
                 {starting ? <Thinking>Starting run…</Thinking> : null}
               </CardContent>
               <CardFooter className="form-footer">
-                <span>{queryRunFooter({ query, starting, hasSnapshot: Boolean(snapshot) }) ?? ''}</span>
+                {runFooter ? <span>{runFooter}</span> : null}
                 <Button
                   className="run-button"
                   variant="run"
@@ -443,7 +431,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
         </StageFold>
         {!isShareView && error && (dataset || !showIntake) && (
           <div className="error-banner" role="alert">
-            <b>Action needs attention</b>
+            <b>Couldn't run</b>
             <span>{error}</span>
           </div>
         )}

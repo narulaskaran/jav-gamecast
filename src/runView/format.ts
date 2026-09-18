@@ -1,5 +1,15 @@
 import type { AnalysisResultRow } from '../shared/analysis'
-import type { ChartVisualKind } from '../shared/questionKind'
+import type { ChartVisualKind, JevQuestionKind } from '../shared/questionKind'
+
+export const runViewHeading = (kind: JevQuestionKind): string => {
+  if (kind === 'noul') return 'Win probability'
+  if (kind === 'score') return 'Score'
+  return 'Class distribution'
+}
+
+export const runErrorHint = (retryable: boolean): string => (
+  retryable ? 'You can try again.' : 'This run stopped.'
+)
 
 export const percent = (value: number | undefined): string => (
   value === undefined ? '—' : `${Math.round(value * 100)}%`

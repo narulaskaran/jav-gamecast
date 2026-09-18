@@ -41,7 +41,7 @@ describe('Jev query JSON', () => {
     expect(looksLikeJevQueryJson(json)).toBe(true)
     expect(json).not.toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(parseJevQueryJson(json)).toEqual({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY })
-    expect(jevQuerySummary(parseJevQueryJson(json)!)).toBe('Noul · yes/no probability 0–1')
+    expect(jevQuerySummary(parseJevQueryJson(json)!)).toBe(SAMPLE_WIN_NOUL_QUERY)
   })
 
   it('round-trips an edited Choice JSON including class criteria', () => {
