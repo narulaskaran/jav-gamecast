@@ -9,7 +9,9 @@ import { Card, CardContent, CardFooter, CardHeader } from './components/ui/card'
 import { Label } from './components/ui/label'
 import { Textarea } from './components/ui/textarea'
 import { getSampleDatasetPreview, SAMPLE_DATASET_ID } from './dataset/sampleDataset'
-import { DatasetError, DATASET_ERROR_COPY, plainDatasetError } from './dataset/csvTypes'
+import { DatasetError, DATASET_ERROR_COPY, CSV_MAX_BYTES, plainDatasetError } from './dataset/csvTypes'
+import { afterPaint, fetchJsonWithTimeout } from './dataset/intakeClient'
+import { shouldParseCsvOnClient } from './dataset/previewBounds'
 import { validateCsvText } from './dataset/validateDataset'
 import type {
   AnalysisDraftResult,
@@ -68,8 +70,8 @@ export const defaultAnalysisApi: AnalysisApiClient = {
   read: (analysisId) => json<AnalysisSnapshot>(`/api/analysis/${encodeURIComponent(analysisId)}`, { method: 'GET' }),
   share: (analysisId) => json<AnalysisSnapshot>(`/api/share/${encodeURIComponent(analysisId)}`, { method: 'GET' }),
   intakeStatus: () => json<DatasetIntakeStatus>('/api/datasets/status', { method: 'GET' }),
-  createFromCsv: (input) => json<DatasetPreview>('/api/datasets/from-csv', { method: 'POST', body: JSON.stringify(input) }),
-  createFromUrl: (input) => json<DatasetPreview>('/api/datasets/from-url', { method: 'POST', body: JSON.stringify(input) }),
+  createFromCsv: (input) => fetchJsonWithTimeout<DatasetPreview>('/api/datasets/from-csv', { method: 'POST', body: JSON.stringify(input) }, { parseError: apiError }),
+  createFromUrl: (input) => fetchJsonWithTimeout<DatasetPreview>('/api/datasets/from-url', { method: 'POST', body: JSON.stringify(input) }, { parseError: apiError }),
 }
 
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
@@ -285,8 +287,10 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const handleUpload = async (file: File) => {
     setIntakeBusy(true); setError(undefined); setIntakeError(undefined)
     try {
+      await afterPaint()
+      if (file.size > CSV_MAX_BYTES) throw new DatasetError('CSV_TOO_LARGE', DATASET_ERROR_COPY.CSV_TOO_LARGE, 413)
       const csvText = await readCsvText(file)
-      validateCsvText(csvText)
+      if (shouldParseCsvOnClient(file.size)) validateCsvText(csvText)
       if (!api.createFromCsv) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', DATASET_ERROR_COPY.UPLOADTHING_NOT_CONFIGURED, 503)
       const preview = await api.createFromCsv({ csvText, filename: file.name })
       resetRunState()
@@ -306,6 +310,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     }
     setIntakeBusy(true); setError(undefined); setIntakeError(undefined)
     try {
+      await afterPaint()
       if (!api.createFromUrl) throw new DatasetError('UPLOADTHING_NOT_CONFIGURED', DATASET_ERROR_COPY.UPLOADTHING_NOT_CONFIGURED, 503)
       const preview = await api.createFromUrl({ url: trimmed })
       resetRunState()

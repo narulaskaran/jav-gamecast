@@ -47,7 +47,35 @@ describe('DatasetPreviewCard', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(1 + dataset.acceptedRowCount)
     expect(screen.getByText(/^7 columns$/)).toBeInTheDocument()
     expect(screen.queryByText(/showing first/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/preview is limited/i)).not.toBeInTheDocument()
     expect(document.querySelector('.preview-table')).toBeTruthy()
     expect(table.querySelectorAll('th.is-sticky, td.is-sticky').length).toBe(1 + dataset.acceptedRowCount)
+  })
+
+  it('virtualizes a large BYOD preview instead of mounting every cell', () => {
+    const columns = Array.from({ length: 40 }, (_, index) => ({
+      name: `c${index}`,
+      normalizedName: `c${index}`,
+      inferredType: 'string' as const,
+    }))
+    const dataset = preview({
+      sourceType: 'public_url',
+      displayName: 'squirrels.csv',
+      columns,
+      acceptedRowCount: 3_023,
+      previewRows: Array.from({ length: 3_023 }, (_, rowIndex) => {
+        const row: DatasetPreview['previewRows'][number] = {}
+        for (const column of columns) row[column.name] = `${column.name}-${rowIndex}`
+        return row
+      }),
+    })
+    render(<DatasetPreviewCard dataset={dataset} />)
+    const table = screen.getByRole('table', { name: /dataset preview/i })
+    expect(screen.getByText('3023 rows')).toBeInTheDocument()
+    expect(screen.getByText(/^40 columns$/)).toBeInTheDocument()
+    expect(screen.getByText(/preview is limited so the page stays responsive/i)).toBeInTheDocument()
+    expect(within(table).getAllByRole('row').length).toBeLessThan(80)
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(40)
+    expect(document.querySelector('.preview-table.is-virtualized')).toBeTruthy()
   })
 })

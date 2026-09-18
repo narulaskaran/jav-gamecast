@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, queryRunFooter, type AnalysisApiClient } from './App'
+import { DatasetError, DATASET_ERROR_COPY } from './dataset/csvTypes'
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballTimeline'
 import { asAnalysisRow } from './shared/dataset'
 import type { AnalysisDraftResult, AnalysisSnapshot } from './shared/analysis'
@@ -432,6 +433,56 @@ describe('Jev playground flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
     expect(await screen.findByRole('heading', { name: 'remote.csv' })).toBeInTheDocument()
     expect(api.createFromUrl).toHaveBeenCalledWith({ url: 'https://example.com/data.csv' })
+  })
+
+  it('shows CSV loading progress and keeps sample preview at the full 71×26 table', async () => {
+    let finish: (preview: DatasetPreview) => void = () => undefined
+    const api = makeApi({
+      createFromUrl: vi.fn(() => new Promise<DatasetPreview>((resolve) => { finish = resolve })),
+    })
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    const sampleTable = screen.getByRole('table', { name: /dataset preview/i })
+    expect(within(sampleTable).getAllByRole('row')).toHaveLength(72)
+    expect(screen.getByText('71 rows')).toBeInTheDocument()
+    expect(screen.getByText(/^26 columns$/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /change dataset/i }))
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'https://data.cityofnewyork.us/api/v3/views/vfnx-vebw/query.csv' } })
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/loading csv/i)
+    expect(screen.getByRole('progressbar', { name: /loading csv/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /use public csv url/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^try sample$/i })).toBeDisabled()
+    finish({
+      ...uploaded,
+      datasetId: 'dataset-squirrels',
+      sourceType: 'public_url',
+      displayName: 'query.csv',
+      columns: Array.from({ length: 40 }, (_, index) => ({ name: `c${index}`, normalizedName: `c${index}`, inferredType: 'string' as const })),
+      acceptedRowCount: 3_023,
+      previewRows: Array.from({ length: 46 }, () => ({ c0: 'ok' })),
+    })
+    expect(await screen.findByRole('heading', { name: 'query.csv' })).toBeInTheDocument()
+    expect(screen.getByText('3023 rows')).toBeInTheDocument()
+    expect(screen.getByText(/^40 columns$/)).toBeInTheDocument()
+    expect(screen.getByText(/preview is limited so the page stays responsive/i)).toBeInTheDocument()
+    const byodTable = screen.getByRole('table', { name: /dataset preview/i })
+    expect(within(byodTable).getAllByRole('row').length).toBeLessThan(80)
+    expect(screen.queryByText(/showing first/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a plain timeout when a public CSV URL hangs', async () => {
+    const api = makeApi({
+      createFromUrl: vi.fn(async () => { throw new DatasetError('CSV_TIMEOUT', DATASET_ERROR_COPY.CSV_TIMEOUT, 504) }),
+    })
+    render(<App api={api} />)
+    fireEvent.change(screen.getByLabelText(/public https csv url/i), { target: { value: 'https://example.com/slow.csv' } })
+    fireEvent.click(screen.getByRole('button', { name: /use public csv url/i }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/couldn't load dataset/i)
+    expect(alert).toHaveTextContent(/took too long to load/i)
+    expect(alert).toHaveTextContent(/smaller file or a faster link/i)
+    expect(screen.queryByText(/timeoutms|abortcontroller|504/i)).not.toBeInTheDocument()
   })
 
   it('uses the same chart and row-rail shell for a BYOD run', async () => {

@@ -6,6 +6,7 @@ import { Button } from './ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+import { Progress } from './ui/progress'
 
 const INTAKE_ERROR_HEADING = "Couldn't load dataset"
 const EMPTY_URL_MESSAGE = 'Enter a public HTTPS CSV URL first.'
@@ -37,7 +38,7 @@ export const DatasetIntake = ({
   }, [resetToken])
 
   return (
-    <section className="intake-panel" aria-labelledby="intake-heading">
+    <section className="intake-panel" aria-labelledby="intake-heading" aria-busy={disabled || undefined}>
       <h2 id="intake-heading">Choose a dataset</h2>
       <div className="intake-cards">
         <Card className="intake-card">
@@ -104,6 +105,15 @@ export const DatasetIntake = ({
           </CardContent>
         </Card>
       </div>
+      {disabled ? (
+        <div className="intake-progress" role="status">
+          <p className="thinking">
+            <span className="thinking-dot" aria-hidden="true" />
+            Loading CSV…
+          </p>
+          <Progress indeterminate aria-label="Loading CSV" />
+        </div>
+      ) : null}
       {intakeError && (
         <div className="error-banner" role="alert">
           <b>{INTAKE_ERROR_HEADING}</b>

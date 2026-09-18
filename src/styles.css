@@ -588,6 +588,15 @@ h3 {
   line-height: 1.5;
 }
 
+.intake-progress {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  max-width: 28rem;
+}
+
+.intake-progress .thinking { margin: 0; }
+
 .thinking {
   display: inline-flex;
   align-items: center;
@@ -595,6 +604,16 @@ h3 {
   margin: 10px 0 0;
   color: var(--muted-foreground);
   font-size: 13px;
+}
+
+.progress-fill.is-indeterminate {
+  width: 36%;
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(280%); }
 }
 
 .thinking-dot {
@@ -886,10 +905,10 @@ h3 {
 
 .preview-actions { padding: 0 0 4px; }
 
-.dataset-preview .preview-meta {
-  margin: 0 0 8px;
-  color: var(--muted-foreground);
-  font-size: 12px;
+.dataset-preview tr.preview-spacer td {
+  padding: 0;
+  border: 0;
+  line-height: 0;
 }
 
 .dataset-preview .preview-disclosure {
@@ -974,6 +993,7 @@ h3 {
 
 @media (prefers-reduced-motion: reduce) {
   .progress-fill,
+  .progress-fill.is-indeterminate,
   .progress-track span,
   .chart-shell .distribution-track span,
   .series-fill,
@@ -990,4 +1010,8 @@ h3 {
     animation: none !important;
   }
   .thinking-dot { opacity: 0.7; }
+  .progress-fill.is-indeterminate {
+    width: 40%;
+    transform: none;
+  }
 }

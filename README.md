@@ -43,7 +43,7 @@ Dataset intake:
 - `GET /api/datasets/status` — Convex / UploadThing / sample flags, no secrets
 - `POST /api/datasets/from-csv` — upload a CSV
 - `POST /api/datasets/from-url` — fetch a public HTTPS CSV
-- `GET /api/datasets/<id>` — sanitized preview
+- `GET /api/datasets/<id>` — bounded sanitized preview (full sample 71×26 stays client-side)
 - `GET /api/browse` — public dataset metadata
 
 Analysis:

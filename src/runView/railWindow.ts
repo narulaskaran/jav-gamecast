@@ -9,6 +9,7 @@ export const railWindow = ({
   itemSize = RAIL_ITEM_SIZE,
   overscan = RAIL_OVERSCAN,
   includeIndex,
+  virtualizeAfter = RAIL_VIRTUALIZE_AFTER,
 }: {
   count: number
   scrollOffset: number
@@ -16,8 +17,9 @@ export const railWindow = ({
   itemSize?: number
   overscan?: number
   includeIndex?: number
+  virtualizeAfter?: number
 }): { start: number; end: number; padStart: number; padEnd: number; virtualized: boolean } => {
-  if (count <= RAIL_VIRTUALIZE_AFTER) {
+  if (count <= virtualizeAfter) {
     return { start: 0, end: count, padStart: 0, padEnd: 0, virtualized: false }
   }
   const safeSize = Math.max(1, itemSize)

@@ -1,4 +1,5 @@
 import { DatasetError, PUBLIC_DATA_WARNING } from '../dataset/csvTypes.js'
+import { boundByodPreviewRows } from '../dataset/previewBounds.js'
 import { validateCsvBytes, validateCsvText } from '../dataset/validateDataset.js'
 import type { DatasetIntakeStatus, DatasetPreview } from '../shared/dataset.js'
 import { AnalysisError } from './analysis.js'
@@ -82,7 +83,11 @@ export class DatasetIntakeService {
     if (!dataset) throw new DatasetError('DATASET_NOT_FOUND', 'That dataset was not found.', 404)
     const rows = await this.options.datasets.getRows(datasetId)
     const preview = toDatasetPreview(dataset)
-    return rows.length > 0 ? { ...preview, previewRows: [...rows] } : preview
+    if (rows.length === 0) return preview
+    return {
+      ...preview,
+      previewRows: boundByodPreviewRows(rows, preview.columns.length),
+    }
   }
 
   async listPublic() {
@@ -121,7 +126,11 @@ export class DatasetIntakeService {
       if (error instanceof AnalysisError) throw error
       wrapConvexPutError(error)
     }
-    return { ...toDatasetPreview(record), previewRows: input.validated.rows, publicDataWarning: PUBLIC_DATA_WARNING }
+    return {
+      ...toDatasetPreview(record),
+      previewRows: boundByodPreviewRows(input.validated.rows, input.validated.columns.length),
+      publicDataWarning: PUBLIC_DATA_WARNING,
+    }
   }
 }
 

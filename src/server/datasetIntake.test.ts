@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CSV_PREVIEW_ROWS, DatasetError } from '../dataset/csvTypes'
+import { boundByodPreviewRowCount } from '../dataset/previewBounds'
 import { DatasetIntakeService } from './datasetIntake'
 import { InMemoryDatasetStore } from './datasetStore'
 import { InMemoryBlobStore, UnconfiguredBlobStore } from './uploadthing'
@@ -47,7 +48,7 @@ describe('dataset intake', () => {
     expect(store.get(fromUrl.datasetId)?.sourceUrl).toBe('https://example.com/data.csv')
   })
 
-  it('returns the full accepted table on intake and get without enlarging stored previewRows', async () => {
+  it('returns the full accepted table for small BYOD without enlarging stored previewRows', async () => {
     const store = new InMemoryDatasetStore()
     const intake = new DatasetIntakeService({
       datasets: store,
@@ -62,6 +63,31 @@ describe('dataset intake', () => {
     expect(store.getRows(uploaded.datasetId)).toHaveLength(20)
     const readBack = await intake.get(uploaded.datasetId)
     expect(readBack.previewRows).toHaveLength(20)
+  })
+
+  it('caps playground preview for a large BYOD table while persisting every accepted row', async () => {
+    const store = new InMemoryDatasetStore()
+    const intake = new DatasetIntakeService({
+      datasets: store,
+      blobs: new InMemoryBlobStore(),
+      convexConfigured: true,
+    })
+    const columns = Array.from({ length: 40 }, (_, index) => `c${index}`)
+    const csvText = [
+      columns.join(','),
+      ...Array.from({ length: 200 }, (_, row) => columns.map((column) => `${column}-${row}`).join(',')),
+    ].join('\n')
+    const uploaded = await intake.fromCsvText({ csvText, filename: 'squirrels.csv' })
+    const previewCap = boundByodPreviewRowCount(200, 40)
+    expect(uploaded.acceptedRowCount).toBe(200)
+    expect(uploaded.columns).toHaveLength(40)
+    expect(uploaded.previewRows).toHaveLength(previewCap)
+    expect(uploaded.previewRows.length).toBeLessThan(200)
+    expect(store.get(uploaded.datasetId)?.previewRows).toHaveLength(CSV_PREVIEW_ROWS)
+    expect(store.getRows(uploaded.datasetId)).toHaveLength(200)
+    const readBack = await intake.get(uploaded.datasetId)
+    expect(readBack.previewRows).toHaveLength(previewCap)
+    expect(readBack.acceptedRowCount).toBe(200)
   })
 
   it('rejects private URLs before fetch', async () => {

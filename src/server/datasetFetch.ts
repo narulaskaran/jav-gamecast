@@ -1,8 +1,8 @@
-import { CSV_MAX_BYTES, DatasetError } from '../dataset/csvTypes.js'
+import { CSV_MAX_BYTES, DatasetError, DATASET_ERROR_COPY } from '../dataset/csvTypes.js'
 import { assertPublicHttpsCsvUrl, isResolvedAddressSafe } from '../dataset/urlSafety.js'
 import { sniffCsvContentType } from '../dataset/validateDataset.js'
 
-const FETCH_TIMEOUT_MS = 12_000
+export const FETCH_TIMEOUT_MS = 12_000
 const MAX_REDIRECTS = 3
 
 export interface DatasetFetchOptions {
@@ -19,10 +19,52 @@ const isAbortError = (error: unknown): boolean => {
   return record.name === 'AbortError' || record.code === 20 || record.code === 'ABORT_ERR'
 }
 
+const tooLarge = (): DatasetError => new DatasetError('CSV_TOO_LARGE', 'This file is too big. Maximum size is 5 MB.', 413)
+
 const wrapFetchError = (error: unknown): DatasetError => {
   if (error instanceof DatasetError) return error
-  if (isAbortError(error)) return new DatasetError('URL_TIMEOUT', 'The CSV URL timed out.', 504)
+  if (isAbortError(error)) return new DatasetError('URL_TIMEOUT', DATASET_ERROR_COPY.URL_TIMEOUT, 504)
   return new DatasetError('URL_FETCH_FAILED', 'Could not fetch that CSV URL.')
+}
+
+const concatChunks = (chunks: readonly Uint8Array[], total: number): Uint8Array => {
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+export const readLimitedBody = async (response: Response, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array> => {
+  const contentLength = Number(response.headers.get('content-length') ?? 'NaN')
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) throw tooLarge()
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const buffer = new Uint8Array(await response.arrayBuffer())
+    if (buffer.byteLength > maxBytes) throw tooLarge()
+    return buffer
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  try {
+    while (true) {
+      if (signal?.aborted) throw new DatasetError('URL_TIMEOUT', DATASET_ERROR_COPY.URL_TIMEOUT, 504)
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      received += value.byteLength
+      if (received > maxBytes) {
+        await reader.cancel().catch(() => undefined)
+        throw tooLarge()
+      }
+      chunks.push(value)
+    }
+  } finally {
+    try { reader.releaseLock() } catch { /* already released */ }
+  }
+  return concatChunks(chunks, received)
 }
 
 const statusError = (status: number): DatasetError => {
@@ -69,11 +111,8 @@ export const fetchPublicCsv = async (rawUrl: string, options: DatasetFetchOption
         continue
       }
       if (!response.ok) throw statusError(response.status)
-      const contentLength = Number(headerValue(response.headers, 'content-length') ?? '0')
-      if (Number.isFinite(contentLength) && contentLength > CSV_MAX_BYTES) throw new DatasetError('CSV_TOO_LARGE', 'This file is too big. Maximum size is 5 MB.', 413)
       const contentType = headerValue(response.headers, 'content-type')
-      const buffer = new Uint8Array(await response.arrayBuffer())
-      if (buffer.byteLength > CSV_MAX_BYTES) throw new DatasetError('CSV_TOO_LARGE', 'This file is too big. Maximum size is 5 MB.', 413)
+      const buffer = await readLimitedBody(response, CSV_MAX_BYTES, controller.signal)
       sniffCsvContentType(contentType, buffer)
       return { bytes: buffer, finalUrl: current.toString(), contentType }
     } catch (error) {

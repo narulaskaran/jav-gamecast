@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DatasetError } from '../dataset/csvTypes'
+import { CSV_MAX_BYTES, DatasetError, DATASET_ERROR_COPY } from '../dataset/csvTypes'
 import { fetchPublicCsv } from './datasetFetch'
 
 describe('public CSV fetch errors', () => {
@@ -9,7 +9,7 @@ describe('public CSV fetch errors', () => {
     })
     await expect(fetchPublicCsv('https://example.com/slow.csv', { fetch: timeout, timeoutMs: 5, lookup: async () => ['93.184.216.34'] })).rejects.toMatchObject({
       code: 'URL_TIMEOUT',
-      message: 'The CSV URL timed out.',
+      message: DATASET_ERROR_COPY.URL_TIMEOUT,
     })
 
     const notFound: typeof fetch = vi.fn(async () => new Response('missing', { status: 404, headers: { 'content-type': 'text/plain' } }))
@@ -33,5 +33,19 @@ describe('public CSV fetch errors', () => {
     const fetchMock = vi.fn(async () => { throw new Error('should not fetch') })
     await expect(fetchPublicCsv('http://example.com/data.csv', { fetch: fetchMock })).rejects.toMatchObject({ code: 'URL_NOT_HTTPS' })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an oversized stream without Content-Length before buffering the whole body', async () => {
+    const chunk = new Uint8Array(64 * 1024)
+    const oversize: typeof fetch = vi.fn(async () => new Response(new ReadableStream({
+      pull(controller) {
+        controller.enqueue(chunk)
+      },
+    }), { status: 200, headers: { 'content-type': 'text/csv' } }))
+    await expect(fetchPublicCsv('https://example.com/huge.csv', { fetch: oversize, lookup: async () => ['93.184.216.34'] })).rejects.toBeInstanceOf(DatasetError)
+    await expect(fetchPublicCsv('https://example.com/huge.csv', { fetch: oversize, lookup: async () => ['93.184.216.34'] })).rejects.toMatchObject({
+      code: 'CSV_TOO_LARGE',
+      statusCode: 413,
+    })
   })
 })
