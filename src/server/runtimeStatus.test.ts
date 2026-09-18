@@ -22,5 +22,10 @@ describe('dataset intake status', () => {
       sampleAvailable: true,
       missingEnv: ['CONVEX_WRITE_SECRET', 'UPLOADTHING_TOKEN'],
     })
+    expect(readDatasetIntakeStatus({
+      CONVEX_URL: 'https://demo.convex.cloud',
+      CONVEX_WRITE_SECRET: 'write-secret',
+      UPLOADTHING_SECRET: 'sk_live_secret',
+    })).toEqual({ convex: true, uploadThing: true, sampleAvailable: true })
   })
 })
