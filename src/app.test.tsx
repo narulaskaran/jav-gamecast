@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, type AnalysisApiClient } from './App'
+import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, queryRunFooter, type AnalysisApiClient } from './App'
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballTimeline'
 import { asAnalysisRow } from './shared/dataset'
 import type { AnalysisDraftResult, AnalysisSnapshot } from './shared/analysis'
@@ -113,6 +113,12 @@ describe('Jev playground flow', () => {
     expect(canConfirmJevRun({ query: '  ', starting: false })).toBe(false)
     expect(canConfirmJevRun({ query: '{not-json', starting: false })).toBe(false)
     expect(canConfirmJevRun({ query: SAMPLE_WIN_LIKELIHOOD_TASK, starting: false })).toBe(false)
+    expect(queryRunFooter({ query: draft.query, starting: false, hasSnapshot: false })).toBe('Review the JSON, then Run Jev.')
+    expect(queryRunFooter({ query: draft.query, starting: true, hasSnapshot: false })).toBe('Starting…')
+    expect(queryRunFooter({ query: draft.query, starting: false, hasSnapshot: true })).toBeUndefined()
+    expect(queryRunFooter({ query: '{not-json', starting: false, hasSnapshot: false })).toBe('Valid Jev JSON required.')
+    expect(queryRunFooter({ query: '', starting: false, hasSnapshot: false })).toBe('Enter Jev query JSON before running.')
+    expect(queryRunFooter({ query: '', starting: true, hasSnapshot: false })).toBe('Starting…')
   })
 
   it('does not fetch on sample task editing, and enables Run Jev after draft without a query edit', async () => {
@@ -150,6 +156,27 @@ describe('Jev playground flow', () => {
     expect(document.querySelector('[data-stage="run"]')).toBeTruthy()
     expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: draftQueryJson, classes: draft.metadata.classes, questionKind: 'choice' })
     expect(api.draft).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Starting… in the query footer while Run is in flight', async () => {
+    let finish: ((value: AnalysisSnapshot) => void) | undefined
+    const pending = new Promise<AnalysisSnapshot>((resolve) => { finish = resolve })
+    const api = makeApi({
+      start: vi.fn(() => pending),
+    })
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    await screen.findByLabelText(/^Jev query JSON$/i)
+    expect(screen.getByText(/review the json, then run jev/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
+    expect(await screen.findByRole('button', { name: /starting/i })).toBeDisabled()
+    expect(document.querySelector('.query-card .form-footer span')).toHaveTextContent('Starting…')
+    expect(screen.queryByText(/enter jev query json before running/i)).not.toBeInTheDocument()
+    finish?.(snapshot({ status: 'queued', progress: { completedRows: 0, totalRows: 71, completedCalls: 0, totalCalls: 71 }, resultRows: [], currentFixtureRow: { rowIndex: 0, input } }))
+    await waitFor(() => expect(document.querySelector('[data-stage="run"]')).toBeTruthy())
+    expect(screen.queryByText(/enter jev query json before running/i)).not.toBeInTheDocument()
+    expect(document.querySelector('.query-card .form-footer span')).toHaveTextContent('')
   })
 
   it('drafts the Jev query JSON into the editor, not a prose paraphrase of the task', async () => {

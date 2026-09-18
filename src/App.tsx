@@ -82,6 +82,22 @@ export const hasRunnableQuery = (query: string): boolean => looksLikeJevQueryJso
 export const canConfirmJevRun = ({ query, starting }: { query: string; starting: boolean }): boolean =>
   hasRunnableQuery(query) && !starting
 
+export const queryRunFooter = ({
+  query,
+  starting,
+  hasSnapshot,
+}: {
+  query: string
+  starting: boolean
+  hasSnapshot: boolean
+}): string | undefined => {
+  if (starting) return 'Starting…'
+  if (hasSnapshot) return undefined
+  if (hasRunnableQuery(query)) return 'Review the JSON, then Run Jev.'
+  if (query.trim().length > 0) return 'Valid Jev JSON required.'
+  return 'Enter Jev query JSON before running.'
+}
+
 const shortError = (error: unknown, fallback: string) => {
   if (error instanceof DatasetError) return error.message.trim() || plainDatasetError(error.code, fallback)
   if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) return plainDatasetError(error.message, `${fallback} (${error.message})`)
@@ -383,7 +399,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
                 {starting ? <Thinking>Starting run…</Thinking> : null}
               </CardContent>
               <CardFooter className="form-footer">
-                <span>{canRun ? 'Review the JSON, then Run Jev.' : queryInvalid ? 'Valid Jev JSON required.' : 'Enter Jev query JSON before running.'}</span>
+                <span>{queryRunFooter({ query, starting, hasSnapshot: Boolean(snapshot) }) ?? ''}</span>
                 <Button
                   className="run-button"
                   variant="run"
