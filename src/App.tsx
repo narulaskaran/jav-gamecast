@@ -31,7 +31,7 @@ const apiError = async (response: Response): Promise<Error> => {
     if (typeof body.error === 'string' && /^[A-Z0-9_]+$/.test(body.error)) code = body.error
     if (typeof body.message === 'string') {
       const trimmed = body.message.trim()
-      if (trimmed && trimmed.length <= 240 && !/sk_|UPLOADTHING_TOKEN|UPLOADTHING_SECRET/i.test(trimmed)) message = trimmed
+      if (trimmed && trimmed.length <= 240 && !/\bsk_|bearer\s/i.test(trimmed)) message = trimmed
     }
   } catch { /* Keep a stable client-side error when the body is not JSON. */ }
   if (message && code in DATASET_ERROR_COPY) {
