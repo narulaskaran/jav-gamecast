@@ -34,14 +34,19 @@ const parseScoreCriteria = (value: unknown): string[] | undefined => {
 }
 
 const parseChoiceCriteria = (value: unknown): Record<string, string> | undefined => {
+  if (Array.isArray(value)) {
+    const names = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean)
+    return names.length > 0 ? Object.fromEntries(names.map((name) => [name, `the ${name} class`])) : undefined
+  }
   if (!isRecord(value)) return undefined
   const criteria: Record<string, string> = {}
   for (const [key, description] of Object.entries(value)) {
     const name = key.trim()
-    if (!name || typeof description !== 'string' || !description.trim()) continue
-    criteria[name] = description.trim()
+    if (!name) continue
+    const text = typeof description === 'string' && description.trim() ? description.trim() : `the ${name} class`
+    criteria[name] = text
   }
-  return criteria
+  return Object.keys(criteria).length > 0 ? criteria : undefined
 }
 
 export const classesFromJevQuery = (query: JevQueryJson): string[] => {

@@ -3,19 +3,91 @@ import { parseJevQueryJson } from './jevQuery.js'
 export const FIXTURE_PLAYER_CLASSES = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'] as const
 export const SAMPLE_WIN_LIKELIHOOD_TASK = 'Win likelihood of the game per play.'
 export const SAMPLE_WIN_NOUL_QUERY = 'Will SEA win given this play state?'
+export const INVALID_CLASSES_COPY = "Couldn't draft classes for that CSV — try a clearer question."
 
 export const JEV_QUESTION_KINDS = ['noul', 'score', 'choice'] as const
 export type JevQuestionKind = typeof JEV_QUESTION_KINDS[number]
 export type ChartVisualKind = 'series' | 'bars'
 
-const WIN_LIKELIHOOD_RE = /win[-\s]?likelihood|\bp\s*\(\s*win|will\s+(?:sea|the\s+seahawks|seattle|this\s+team|the\s+home\s+team)\s+win|probability\s+(?:that\s+)?(?:sea|the\s+seahawks|seattle)?\s*(?:will\s+)?win|chance\s+(?:that\s+)?(?:sea|the\s+seahawks)?\s*(?:wins|of winning)/i
+const WIN_LIKELIHOOD_RE = /win[-\s]?likelihood|\bp\s*\(\s*win\s*\)|will\s+(?:sea|the\s+seahawks|seattle|this\s+team|the\s+home\s+team)\s+win|(?:probability|chance)\s+(?:that\s+)?(?:sea|the\s+seahawks|seattle)\s+(?:will\s+)?win|chance\s+(?:that\s+)?(?:sea|the\s+seahawks|seattle)\s+(?:wins|of winning)/i
 const FIXTURE_PLAYER_RE = /k\.?\s*walker|c\.?\s*kupp|j\.?\s*smith-?njigba|scrimmage\s+yards|leading\s+(?:player|rusher|receiver)/i
+const CLASS_LIST_SPLIT_RE = /\s*(?:,|\bor\b|\band\b|\bvs\.?\b|\bversus\b|\/)\s*/i
+const CLASS_CLAUSE_RE = /\b(?:as|into)\s+(.+?)(?:\s+(?:using|with|from|given|based|via)\b|[.?!]|$)/i
+const CLASS_LABEL_RE = /^[A-Za-z][\w./+-]{0,39}(?:\s+[A-Za-z][\w./+-]{0,39}){0,2}$/
+const CLASS_STOPWORDS = new Set([
+  'a', 'an', 'and', 'as', 'based', 'class', 'classes', 'classify', 'classification',
+  'column', 'columns', 'csv', 'data', 'each', 'every', 'field', 'fields', 'from',
+  'given', 'into', 'it', 'its', 'label', 'labels', 'or', 'per', 'row', 'rows',
+  'text', 'the', 'these', 'this', 'those', 'using', 'via', 'visible', 'vs',
+  'versus', 'with',
+])
+const LABEL_COLUMN_RE = /(?:^|_)(label|labels|class|classes|category|categories|target|hint|species)(?:_|$)/i
+const CLASS_MAX_LENGTH = 80
+const CLASS_MAX_COUNT = 32
 
 export const parseQuestionKind = (value: unknown): JevQuestionKind | undefined => (
   value === 'noul' || value === 'score' || value === 'choice' ? value : undefined
 )
 
 export const looksLikeWinLikelihood = (text: string): boolean => WIN_LIKELIHOOD_RE.test(text.trim())
+
+export const isSampleDefaultWinTask = (task: string): boolean => (
+  task.trim().toLowerCase() === SAMPLE_WIN_LIKELIHOOD_TASK.trim().toLowerCase()
+)
+
+const uniqueClassLabels = (values: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const classes: string[] = []
+  for (const value of values) {
+    const name = value.trim()
+    if (!name || name.length > CLASS_MAX_LENGTH || name.includes('\u0000')) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    classes.push(name)
+    if (classes.length >= CLASS_MAX_COUNT) break
+  }
+  return classes
+}
+
+const classLabelFromToken = (value: string): string | undefined => {
+  const name = value.replace(/^['"`]+|['"`]+$/g, '').trim()
+  if (!name || !CLASS_LABEL_RE.test(name)) return undefined
+  if (CLASS_STOPWORDS.has(name.toLowerCase())) return undefined
+  return name
+}
+
+export const classesFromTask = (task: string): string[] => {
+  const text = task.trim()
+  if (!text) return []
+  const clause = text.match(CLASS_CLAUSE_RE)?.[1] ?? ''
+  const colon = text.match(/:\s*([^.?!]+)/)?.[1] ?? ''
+  const vs = text.match(/\b([A-Za-z][\w./+-]{0,39})\s+(?:vs\.?|versus)\s+([A-Za-z][\w./+-]{0,39})\b/i)
+  const tokens = [...clause.split(CLASS_LIST_SPLIT_RE), ...colon.split(CLASS_LIST_SPLIT_RE)]
+  if (vs) tokens.push(vs[1], vs[2])
+  return uniqueClassLabels(tokens.map((token) => classLabelFromToken(token) ?? '').filter(Boolean))
+}
+
+export const classesFromLabelColumns = (
+  columns: readonly string[] = [],
+  rows: readonly Record<string, unknown>[] = [],
+): string[] => {
+  for (const column of columns) {
+    if (!LABEL_COLUMN_RE.test(column)) continue
+    const values: string[] = []
+    for (const row of rows) {
+      const value = row[column]
+      if (typeof value === 'string' && value.trim()) values.push(value.trim())
+    }
+    const classes = uniqueClassLabels(values)
+    if (classes.length >= 2) return classes
+  }
+  return []
+}
+
+export const mergeClassLists = (...lists: Array<readonly string[] | undefined>): string[] => (
+  uniqueClassLabels(lists.flatMap((list) => list ?? []))
+)
 
 export const isPlayerClassifierQuery = (query: string): boolean => FIXTURE_PLAYER_RE.test(query)
 
@@ -67,6 +139,12 @@ export const inferQuestionKind = (
   return 'choice'
 }
 
+export const isCannedSampleWinQuery = (text: string): boolean => {
+  const parsed = parseJevQueryJson(text)
+  const instructions = (parsed?.instructions ?? text).trim()
+  return instructions === SAMPLE_WIN_NOUL_QUERY
+}
+
 export const resolveDraftedQuery = (input: {
   task: string
   query: string
@@ -76,9 +154,10 @@ export const resolveDraftedQuery = (input: {
   const query = input.query.trim()
   const task = input.task.trim()
   const parsedKind = parseQuestionKind(input.questionKind)
-  const rawClasses = [...new Set((input.classes ?? []).map((item) => item.trim()).filter(Boolean))]
+  const rawClasses = uniqueClassLabels(input.classes ?? [])
+  const taskClasses = classesFromTask(task)
 
-  if (looksLikeWinLikelihood(task) || looksLikeWinLikelihood(query)) {
+  if (looksLikeWinLikelihood(task) && !userAskedForFixturePlayers(task)) {
     const leftoverPlayerDraft = isPlayerClassifierQuery(query) || query.length === 0
     return {
       query: leftoverPlayerDraft ? SAMPLE_WIN_NOUL_QUERY : query,
@@ -87,20 +166,24 @@ export const resolveDraftedQuery = (input: {
     }
   }
 
-  if (parsedKind === 'noul') {
-    return { query, questionKind: 'noul', classes: [] }
+  const leftoverCannedWin = isCannedSampleWinQuery(query) || looksLikeWinLikelihood(query)
+  const honoredQuery = leftoverCannedWin ? task : query
+  const honoredKind = leftoverCannedWin ? undefined : parsedKind
+  const dropFixtureFallback = isFixturePlayerClassList(rawClasses) && !userAskedForFixturePlayers(task)
+  const providerClasses = dropFixtureFallback ? [] : rawClasses
+  const classes = providerClasses.length >= 2 ? providerClasses : mergeClassLists(providerClasses, taskClasses)
+
+  if (honoredKind === 'noul' && classes.length < 2) {
+    return { query: honoredQuery, questionKind: 'noul', classes: [] }
   }
 
-  const dropFixtureFallback = isFixturePlayerClassList(rawClasses) && !userAskedForFixturePlayers(task)
-  const classes = dropFixtureFallback ? [] : rawClasses
-
-  if (parsedKind === 'score') {
-    return { query, questionKind: 'score', classes: classes.length >= 2 ? classes : ['Low', 'Medium', 'High'] }
+  if (honoredKind === 'score') {
+    return { query: honoredQuery, questionKind: 'score', classes: classes.length >= 2 ? classes : ['Low', 'Medium', 'High'] }
   }
 
   return {
-    query,
-    questionKind: parsedKind === 'choice' || classes.length >= 2 ? 'choice' : inferQuestionKind(query, classes),
+    query: honoredQuery,
+    questionKind: honoredKind === 'choice' || classes.length >= 2 ? 'choice' : inferQuestionKind(honoredQuery, classes),
     classes,
   }
 }

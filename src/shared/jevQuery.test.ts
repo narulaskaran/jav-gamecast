@@ -55,4 +55,25 @@ describe('Jev query JSON', () => {
     expect(classesFromJevQuery(parsed!)).toEqual(['gold', 'silver'])
     expect(buildJevQuery({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }).type).toBe('noul')
   })
+
+  it('accepts Choice criteria as a label list or with empty descriptions', () => {
+    expect(parseJevQueryJson(JSON.stringify({
+      type: 'choice',
+      instructions: 'Classify each row as fruit or vehicle.',
+      criteria: ['fruit', 'vehicle'],
+    }))).toEqual({
+      type: 'choice',
+      instructions: 'Classify each row as fruit or vehicle.',
+      criteria: { fruit: 'the fruit class', vehicle: 'the vehicle class' },
+    })
+    expect(parseJevQueryJson(JSON.stringify({
+      type: 'choice',
+      instructions: 'Classify each row as fruit or vehicle.',
+      criteria: { fruit: '', vehicle: 'a car or truck' },
+    }))).toEqual({
+      type: 'choice',
+      instructions: 'Classify each row as fruit or vehicle.',
+      criteria: { fruit: 'the fruit class', vehicle: 'a car or truck' },
+    })
+  })
 })

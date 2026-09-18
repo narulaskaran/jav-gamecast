@@ -4,7 +4,7 @@ import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, queryRunFo
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballTimeline'
 import { asAnalysisRow } from './shared/dataset'
 import type { AnalysisDraftResult, AnalysisSnapshot } from './shared/analysis'
-import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from './shared/questionKind'
+import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY, INVALID_CLASSES_COPY } from './shared/questionKind'
 import { formatDraftQueryForEditor, parseJevQueryJson } from './shared/jevQuery'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
 
@@ -484,6 +484,74 @@ describe('Jev playground flow', () => {
     expect(screen.getByRole('button', { name: /row 1 of 2/i })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: /current row inspector/i })).not.toBeInTheDocument()
     expect(document.querySelector('[data-class="gold"]')).toHaveAttribute('data-count', '1')
+  })
+
+  it('shows a fruit/vehicle Choice draft with JSON edit and Run after BYOD upload', async () => {
+    const classify = {
+      ...uploaded,
+      datasetId: 'dataset-classify-1',
+      displayName: 'classify.csv',
+      columns: [
+        { name: 'id', normalizedName: 'id', inferredType: 'number' as const },
+        { name: 'text', normalizedName: 'text', inferredType: 'string' as const },
+        { name: 'label_hint', normalizedName: 'label_hint', inferredType: 'string' as const },
+      ],
+      acceptedRowCount: 10,
+      previewRows: [{ id: 1, text: 'apple', label_hint: 'fruit' }],
+    }
+    const fruitQuery = formatDraftQueryForEditor({
+      query: 'Classify each row as fruit or vehicle using text.',
+      questionKind: 'choice',
+      classes: ['fruit', 'vehicle'],
+    })
+    const api = makeApi({
+      createFromCsv: vi.fn(async () => classify),
+      draft: vi.fn(async () => ({
+        fixtureId: classify.datasetId,
+        datasetId: classify.datasetId,
+        sourceType: 'upload' as const,
+        query: fruitQuery,
+        metadata: {
+          provider: 'openrouter',
+          model: 'openai/gpt-4o-mini',
+          rowCount: 10,
+          questionKind: 'choice' as const,
+          classes: ['fruit', 'vehicle'],
+          columns: ['id', 'text', 'label_hint'],
+          displayName: 'classify.csv',
+        },
+      })),
+    })
+    render(<App api={api} />)
+    const file = new File(['id,text,label_hint\n1,apple,fruit\n'], 'classify.csv', { type: 'text/csv' })
+    fireEvent.change(screen.getByLabelText(/upload csv/i), { target: { files: [file] } })
+    expect(await screen.findByRole('heading', { name: 'classify.csv' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/^Analysis task$/i), {
+      target: { value: 'classify each row as fruit or vehicle using text' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    const editor = await screen.findByLabelText(/^Jev query JSON$/i)
+    expect(parseJevQueryJson((editor as HTMLTextAreaElement).value)).toEqual({
+      type: 'choice',
+      instructions: 'Classify each row as fruit or vehicle using text.',
+      criteria: { fruit: 'the fruit class', vehicle: 'the vehicle class' },
+    })
+    expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
+    expect(screen.queryByText(/INVALID_CLASSES/)).not.toBeInTheDocument()
+  })
+
+  it('shows a plain draft-classes message instead of raw INVALID_CLASSES', async () => {
+    const api = makeApi({
+      draft: vi.fn(async () => { throw new Error('INVALID_CLASSES') }),
+    })
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(INVALID_CLASSES_COPY)
+    expect(alert).toHaveTextContent(/couldn't draft/i)
+    expect(alert).not.toHaveTextContent('INVALID_CLASSES')
+    expect(screen.queryByLabelText(/^Jev query JSON$/i)).not.toBeInTheDocument()
   })
 
   it('keeps idle intake quiet when durable storage is down, and still lets sample start', async () => {

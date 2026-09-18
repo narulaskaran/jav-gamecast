@@ -113,6 +113,142 @@ describe('analysis domain contract', () => {
     expect(draftCalls).toHaveLength(0)
   })
 
+  it('does not return the cached sample noul for an unrelated fixture prompt', async () => {
+    const draftCalls: Array<{ task: string }> = []
+    const service = serviceWith(makeClassifier([]), {
+      async draft(input) {
+        draftCalls.push(input)
+        return {
+          query: JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }),
+          model: 'openrouter/test',
+          questionKind: 'noul',
+        }
+      },
+    })
+    const task = 'Classify each play as run or pass using the visible columns.'
+    const drafted = await service.draft({ fixtureId: FOOTBALL_FIXTURE_ID, task })
+    expect(draftCalls).toEqual([expect.objectContaining({ task })])
+    expect(parseJevQueryJson(drafted.query)).toEqual({
+      type: 'choice',
+      instructions: task,
+      criteria: { run: 'the run class', pass: 'the pass class' },
+    })
+    expect(drafted.metadata.questionKind).toBe('choice')
+    expect(drafted.metadata.classes).toEqual(['run', 'pass'])
+    expect(drafted.metadata.model).toBe('openrouter/test')
+    expect(JSON.stringify(drafted)).not.toContain(SAMPLE_WIN_NOUL_QUERY)
+  })
+
+  it('drafts fruit/vehicle Choice classes when the provider returns a single class', async () => {
+    const classifyDataset = {
+      datasetId: 'classify',
+      fixtureId: 'classify',
+      sourceType: 'upload' as const,
+      displayName: 'classify.csv',
+      columns: ['id', 'text', 'label_hint'],
+      rows: [
+        { id: 1, text: 'apple', label_hint: 'fruit' },
+        { id: 2, text: 'truck', label_hint: 'vehicle' },
+      ],
+    }
+    const service = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      classifier: makeClassifier([]),
+      draftProvider: {
+        async draft() {
+          return {
+            query: JSON.stringify({ type: 'choice', instructions: 'Classify the row.', criteria: { fruit: '' } }),
+            model: 'openrouter/test',
+            questionKind: 'choice' as const,
+            classes: ['fruit'],
+          }
+        },
+      },
+      datasets: new InMemoryDatasetSource([classifyDataset]),
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'classify-1',
+    })
+    const drafted = await service.draft({
+      datasetId: 'classify',
+      task: 'classify each row as fruit or vehicle using text',
+    })
+    expect(drafted.metadata.questionKind).toBe('choice')
+    expect(drafted.metadata.classes).toEqual(['fruit', 'vehicle'])
+    expect(parseJevQueryJson(drafted.query)).toEqual({
+      type: 'choice',
+      instructions: 'Classify the row.',
+      criteria: { fruit: 'the fruit class', vehicle: 'the vehicle class' },
+    })
+  })
+
+  it('recovers Choice classes from label_hint when the task has no class names', async () => {
+    const classifyDataset = {
+      datasetId: 'classify',
+      fixtureId: 'classify',
+      sourceType: 'upload' as const,
+      displayName: 'classify.csv',
+      columns: ['id', 'text', 'label_hint'],
+      rows: [
+        { id: 1, text: 'apple', label_hint: 'fruit' },
+        { id: 2, text: 'truck', label_hint: 'vehicle' },
+      ],
+    }
+    const service = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      classifier: makeClassifier([]),
+      draftProvider: {
+        async draft() {
+          return {
+            query: JSON.stringify({ type: 'choice', instructions: 'Classify each row.', criteria: {} }),
+            model: 'openrouter/test',
+            questionKind: 'choice' as const,
+          }
+        },
+      },
+      datasets: new InMemoryDatasetSource([classifyDataset]),
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'classify-2',
+    })
+    const drafted = await service.draft({
+      datasetId: 'classify',
+      task: 'Classify each row using the visible columns.',
+    })
+    expect(drafted.metadata.questionKind).toBe('choice')
+    expect(drafted.metadata.classes).toEqual(['fruit', 'vehicle'])
+  })
+
+  it('throws INVALID_CLASSES when a Choice draft has exactly one unrecoverable class', async () => {
+    const numbersDataset = {
+      datasetId: 'scores',
+      fixtureId: 'scores',
+      sourceType: 'upload' as const,
+      displayName: 'scores.csv',
+      columns: ['id', 'value'],
+      rows: [{ id: 1, value: 3 }, { id: 2, value: 7 }],
+    }
+    const service = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      classifier: makeClassifier([]),
+      draftProvider: {
+        async draft() {
+          return {
+            query: JSON.stringify({ type: 'choice', instructions: 'Classify the row.', criteria: { odd: 'odd numbers' } }),
+            model: 'openrouter/test',
+            questionKind: 'choice' as const,
+            classes: ['odd'],
+          }
+        },
+      },
+      datasets: new InMemoryDatasetSource([numbersDataset]),
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'scores-1',
+    })
+    await expect(service.draft({
+      datasetId: 'scores',
+      task: 'Classify each row using the visible columns.',
+    })).rejects.toMatchObject({ code: 'INVALID_CLASSES' })
+  })
+
   it('starts a Noul run from edited Jev query JSON', async () => {
     const jsonQuery = JSON.stringify({ type: 'noul', instructions: SAMPLE_WIN_NOUL_QUERY }, null, 2)
     const service = serviceWith(makeClassifier([]))

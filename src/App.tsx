@@ -17,6 +17,7 @@ import type {
 } from './shared/analysis'
 import {
   SAMPLE_WIN_LIKELIHOOD_TASK,
+  INVALID_CLASSES_COPY,
 } from './shared/questionKind'
 import {
   classesFromJevQuery,
@@ -95,9 +96,15 @@ export const queryRunFooter = ({
   return 'Enter Jev query JSON before running.'
 }
 
+const ANALYSIS_ERROR_COPY: Record<string, string> = {
+  INVALID_CLASSES: INVALID_CLASSES_COPY,
+}
+
 const shortError = (error: unknown, fallback: string) => {
   if (error instanceof DatasetError) return error.message.trim() || plainDatasetError(error.code, fallback)
-  if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) return plainDatasetError(error.message, `${fallback} (${error.message})`)
+  if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) {
+    return ANALYSIS_ERROR_COPY[error.message] ?? plainDatasetError(error.message, fallback)
+  }
   return fallback
 }
 
@@ -451,7 +458,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
         </StageFold>
         {!isShareView && error && (dataset || !showIntake) && (
           <div className="error-banner" role="alert">
-            <b>Couldn't run</b>
+            <b>{error === INVALID_CLASSES_COPY ? "Couldn't draft" : "Couldn't run"}</b>
             <span>{error}</span>
           </div>
         )}

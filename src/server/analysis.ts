@@ -25,7 +25,9 @@ import {
   fixtureAnalysisSliceFor,
   inferQuestionKind,
   isFixturePlayerClassList,
-  looksLikeWinLikelihood,
+  isSampleDefaultWinTask,
+  classesFromLabelColumns,
+  mergeClassLists,
   resolveDraftedQuery,
   SAMPLE_WIN_NOUL_QUERY,
   userAskedForFixturePlayers,
@@ -299,7 +301,7 @@ export class AnalysisService {
     const task = input.task.trim()
     const datasetClasses = datasetDraftClasses(dataset)
     const questionKindHint = inferQuestionKind(task, datasetClasses)
-    if (dataset.sourceType === 'fixture' && looksLikeWinLikelihood(task) && !userAskedForFixturePlayers(task)) {
+    if (dataset.sourceType === 'fixture' && isSampleDefaultWinTask(task) && !userAskedForFixturePlayers(task)) {
       return {
         fixtureId: dataset.fixtureId,
         datasetId: dataset.datasetId,
@@ -336,18 +338,33 @@ export class AnalysisService {
       questionKind: parsedDraft?.type ?? draft.questionKind ?? questionKindHint,
       classes: parsedDraft && parsedDraft.type !== 'noul' ? classesFromJevQuery(parsedDraft) : draft.classes,
     })
-    const classes = resolved.questionKind === 'choice' || resolved.questionKind === 'score'
-      ? normalizeClasses(resolved.classes, [])
-      : []
+    const recovered = mergeClassLists(
+      resolved.classes,
+      datasetClasses,
+      classesFromLabelColumns(dataset.columns, dataset.rows),
+    )
+    const questionKind = resolved.questionKind
+    let classes: string[] = []
+    if (questionKind === 'score') {
+      classes = recovered.length >= 2 ? normalizeClasses(recovered) : ['Low', 'Medium', 'High']
+    } else if (questionKind === 'choice') {
+      if (recovered.length === 1) {
+        throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
+      }
+      if (recovered.length >= 2) classes = normalizeClasses(recovered)
+    }
+    const parsedCriteriaUsable = parsedDraft?.type === questionKind && (
+      parsedDraft.type === 'noul' || classesFromJevQuery(parsedDraft).length >= 2
+    )
     return {
       fixtureId: dataset.fixtureId,
       datasetId: dataset.datasetId,
       sourceType: dataset.sourceType,
       query: stringifyJevQuery(buildJevQuery({
-        type: resolved.questionKind,
+        type: questionKind,
         instructions: resolved.query,
         classes,
-        criteria: parsedDraft?.type === resolved.questionKind ? parsedDraft : undefined,
+        criteria: parsedCriteriaUsable ? parsedDraft : undefined,
       })),
       metadata: {
         provider: 'openrouter',
@@ -356,11 +373,11 @@ export class AnalysisService {
         classes,
         columns: [...dataset.columns],
         displayName: dataset.displayName,
-        questionKind: resolved.questionKind,
+        questionKind,
         ...(dataset.sourceType === 'fixture' && fixtureAnalysisSliceFor({
           task,
           query: resolved.query,
-          questionKind: resolved.questionKind,
+          questionKind,
           classes,
         }) === 'halftime-eval' ? { inputHalf: 'H1' as const, labelHalf: 'H2' as const } : {}),
       },

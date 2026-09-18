@@ -44,7 +44,9 @@ Request JSON (sample or BYOD):
 {"datasetId":"seahawks-super-bowl-2026-jev-v1","task":"Win likelihood of the game per play."}
 ```
 
-`fixtureId` remains accepted for the sample dataset. The route calls the server-only OpenRouter adapter using `OPENROUTER_KEY`. It returns an editable **Jev query JSON** object (Noul / Choice / Score) and safe metadata. Draft honors the user task: a win-likelihood prompt is a Jev Noul, not leftover fixture player-yard classes.
+`fixtureId` remains accepted for the sample dataset. The route calls the server-only OpenRouter adapter using `OPENROUTER_KEY`. It returns an editable **Jev query JSON** object (Noul / Choice / Score) and safe metadata. Draft honors the user task. The cached sample Noul (`Will SEA win given this play state?`) is used only for the exact default sample task (`Win likelihood of the game per play.`) on the fixture. Any other prompt calls OpenRouter. Choice drafts recover class labels from the task text (for example fruit/vehicle) and from label-like columns when the model returns fewer than two classes. Content-hash run reuse still keys only on identical `datasetId` + canonical query.
+
+OpenRouter errors are returned as stable error codes with 4xx/5xx status. Provider response bodies and credentials are not returned. The UI must not surface internal codes such as `INVALID_CLASSES` verbatim.
 
 ```json
 {
@@ -64,9 +66,6 @@ Request JSON (sample or BYOD):
 }
 ```
 
-OpenRouter errors are returned as stable error codes with 4xx/5xx status. Provider response bodies and credentials are not returned.
-
-## Start a Jev run
 
 `POST /api/analysis/run`
 
@@ -82,7 +81,7 @@ Request JSON:
 
 Before minting a new `analysisId`, `start()` looks up an existing **complete** snapshot by content key: SHA-256 of `{ v: 1, datasetId, query, questionKind, classes }`. `datasetId` is the fixture id for the sample dataset. `query` is the canonical Jev query JSON (plain-text instructions and pretty-printed JSON with the same type/instructions/classes hash equal). Lookup uses Convex `analyses:authorizedGetCompleteAnalysisByContentKey` (`by_content_key_status` on `contentKey` + `status`). A hit returns that snapshot with HTTP `200` and does **not** call Jev or write another analysis document. Existing `/share/{analysisId}` links keep working. Queued, running, and error snapshots are not reused; those still create a new run. `forceNew: true` skips the content-key lookup (same `analysisId` remains idempotent). Default is reuse for every source.
 
-The sample default draft (`Win likelihood of the game per play.` on the fixture) returns the cached Noul query without calling OpenRouter.
+The sample default draft (`Win likelihood of the game per play.` on the fixture) returns the cached Noul query without calling OpenRouter. Other sample prompts are drafted from the task text.
 
 A newly queued run still returns `202` and starts execution through the server-only Jev adapter. This is the only route that can start Jev execution. Drafting, editing the query, page load, status reads, and share reads do not call Jev.
 

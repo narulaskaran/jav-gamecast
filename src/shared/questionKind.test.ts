@@ -3,8 +3,12 @@ import {
   SAMPLE_WIN_LIKELIHOOD_TASK,
   SAMPLE_WIN_NOUL_QUERY,
   chartVisualFor,
+  classesFromLabelColumns,
+  classesFromTask,
   fixtureAnalysisSliceFor,
   inferQuestionKind,
+  isSampleDefaultWinTask,
+  looksLikeWinLikelihood,
   resolveDraftedQuery,
   seriesValueFromRow,
 } from './questionKind'
@@ -47,7 +51,7 @@ describe('draft honors the user prompt', () => {
     })).toEqual({
       query: 'Classify each ticket as urgent or routine using message and tier.',
       questionKind: 'choice',
-      classes: [],
+      classes: ['urgent', 'routine'],
     })
   })
 
@@ -58,6 +62,48 @@ describe('draft honors the user prompt', () => {
       questionKind: 'choice',
       classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'],
     }).classes).toEqual(['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'])
+  })
+
+  it('does not keep the canned sample noul when the task is unrelated', () => {
+    expect(resolveDraftedQuery({
+      task: 'Classify each play as run or pass using the visible columns.',
+      query: SAMPLE_WIN_NOUL_QUERY,
+      questionKind: 'noul',
+      classes: [],
+    })).toEqual({
+      query: 'Classify each play as run or pass using the visible columns.',
+      questionKind: 'choice',
+      classes: ['run', 'pass'],
+    })
+  })
+
+  it('pulls fruit/vehicle classes out of a classify task even when the model returns one label', () => {
+    expect(classesFromTask('classify each row as fruit or vehicle using text')).toEqual(['fruit', 'vehicle'])
+    expect(resolveDraftedQuery({
+      task: 'classify each row as fruit or vehicle using text',
+      query: 'Classify the row.',
+      questionKind: 'choice',
+      classes: ['fruit'],
+    })).toEqual({
+      query: 'Classify the row.',
+      questionKind: 'choice',
+      classes: ['fruit', 'vehicle'],
+    })
+  })
+
+  it('reads classes from label-like columns', () => {
+    expect(classesFromLabelColumns(
+      ['id', 'text', 'label_hint'],
+      [{ id: 1, text: 'apple', label_hint: 'fruit' }, { id: 2, text: 'truck', label_hint: 'vehicle' }],
+    )).toEqual(['fruit', 'vehicle'])
+  })
+
+  it('caches the sample noul only for the exact default task, not a broad win regex', () => {
+    expect(isSampleDefaultWinTask(SAMPLE_WIN_LIKELIHOOD_TASK)).toBe(true)
+    expect(isSampleDefaultWinTask('Will SEA win given this play state?')).toBe(false)
+    expect(looksLikeWinLikelihood('probability will win')).toBe(false)
+    expect(looksLikeWinLikelihood('chance of winning the raffle')).toBe(false)
+    expect(looksLikeWinLikelihood(SAMPLE_WIN_LIKELIHOOD_TASK)).toBe(true)
   })
 })
 
