@@ -329,6 +329,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
       <header className="site-header">
         <a className="brand" href="/" aria-label="Jev playground home">Jev</a>
         <div className="site-header-actions">
+          {isShareView ? <Badge variant="secondary">Public snapshot</Badge> : null}
           <ThemeToggle />
         </div>
       </header>

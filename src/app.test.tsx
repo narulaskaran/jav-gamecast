@@ -43,7 +43,7 @@ const draft: AnalysisDraftResult = {
   datasetId: FOOTBALL_FIXTURE_ID,
   sourceType: 'fixture',
   query: draftQueryJson,
-  metadata: { provider: 'openrouter', model: 'openai/gpt-4o-mini', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2', questionKind: 'choice', classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'], columns: ['play_id'], displayName: '2026 Super Bowl Demo' },
+  metadata: { provider: 'openrouter', model: 'openai/gpt-4o-mini', rowCount: 39, inputHalf: 'H1', labelHalf: 'H2', questionKind: 'choice', classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'], columns: ['play_id'], displayName: 'Super Bowl Seahawks demo' },
 }
 
 const uploaded: DatasetPreview = {
@@ -94,7 +94,7 @@ describe('Jev playground flow', () => {
     expect(screen.getByRole('heading', { name: /run jev on a csv/i })).toBeInTheDocument()
     expect(screen.queryByText(/bring a dataset\. ask a question\. see jev classify every row/i)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /choose a dataset/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /2026 super bowl demo/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /super bowl seahawks demo/i })).toBeInTheDocument()
     expect(screen.queryByText(/football is the sample, not the product/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/same live chart as the sample/i)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /upload \.csv or public https csv url/i })).toBeInTheDocument()
@@ -142,9 +142,9 @@ describe('Jev playground flow', () => {
     expect(screen.getByText(/^\d+ columns$/)).toBeInTheDocument()
     expect(screen.queryByText(/delimiter/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/not evidence of model quality/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /^source$/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /^license$/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: /2026 super bowl demo/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^source$/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^license$/i })).toBeInTheDocument()
+    expect(screen.getByText('71 rows')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'posteam_score' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'defteam_score' })).toBeInTheDocument()
     expect(api.draft).not.toHaveBeenCalled()
@@ -281,7 +281,6 @@ describe('Jev playground flow', () => {
     expect(screen.queryByRole('table', { name: /incremental analysis results/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /incremental results/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
-    expect(screen.queryByText(/open public snapshot/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /switch to (dark|light) theme/i })).toBeInTheDocument()
   })
 
@@ -504,9 +503,6 @@ describe('Jev playground flow', () => {
       expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
       const rail = screen.getByRole('complementary', { name: /processed rows/i })
       expect(within(rail).getByRole('button', { name: new RegExp(`row 1 of 39 ${input.play_id} · Q${input.qtr} · K\\.Walker`, 'i') })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
-      expect(screen.queryByText(/public snapshot/i)).not.toBeInTheDocument()
-      expect(screen.queryByText(/open public snapshot/i)).not.toBeInTheDocument()
       expect(screen.queryByLabelText(/^Analysis task$/i)).not.toBeInTheDocument()
     } finally {
       window.history.pushState({}, '', '/')

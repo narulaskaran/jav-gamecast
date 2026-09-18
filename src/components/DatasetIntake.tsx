@@ -1,4 +1,3 @@
-import { SAMPLE_DATASET_NAME } from '../dataset/sampleDataset'
 import { plainDatasetError } from '../dataset/csvTypes'
 import type { DatasetIntakeStatus } from '../shared/dataset'
 import { Button } from './ui/button'
@@ -30,7 +29,7 @@ export const DatasetIntake = ({
         <Card className="intake-card">
           <CardHeader>
             <p className="eyebrow">Try sample</p>
-            <CardTitle>{SAMPLE_DATASET_NAME}</CardTitle>
+            <CardTitle>Super Bowl Seahawks demo</CardTitle>
           </CardHeader>
           <CardContent>
             <Button type="button" onClick={onTrySample} disabled={disabled}>Try sample</Button>

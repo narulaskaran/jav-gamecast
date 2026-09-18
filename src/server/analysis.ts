@@ -39,7 +39,6 @@ import {
   stringifyJevQuery,
 } from '../shared/jevQuery.js'
 import { asAnalysisRow } from '../shared/dataset.js'
-import { SAMPLE_DATASET_NAME } from '../dataset/sampleDataset.js'
 import {
   FOOTBALL_FIXTURE_ID,
   footballFixture,
@@ -157,7 +156,7 @@ export const fixtureAnalysisDataset = (slice: FixtureAnalysisSlice = 'win-likeli
     datasetId: FOOTBALL_FIXTURE_ID,
     fixtureId: FOOTBALL_FIXTURE_ID,
     sourceType: 'fixture',
-    displayName: SAMPLE_DATASET_NAME,
+    displayName: 'Super Bowl Seahawks demo',
     columns: [...(winLikelihood ? footballFixtureWinLikelihoodInputFields : footballFixtureModelInputFields)],
     rows,
   }

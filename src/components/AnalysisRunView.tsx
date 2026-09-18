@@ -85,7 +85,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
         <div className="analysis-actions">
           <StatusBadge status={snapshot.status} />
           <Button variant="ghost" size="sm" type="button" onClick={onCopyShare} disabled={!shareUrl} aria-label="Copy shareable public URL">
-            {shareMessage || 'Share'}
+            Share
           </Button>
         </div>
       </CardHeader>
@@ -124,6 +124,10 @@ export const AnalysisRunView = memo(function AnalysisRunView({
             chartKind={chartKind}
             onSelect={handleSeek}
           />
+        </div>
+        <div className="share-footer">
+          <span>{shareMessage}</span>
+          {shareUrl ? <a href={shareUrl} target="_blank" rel="noreferrer">Open public snapshot</a> : null}
         </div>
       </CardContent>
     </Card>
