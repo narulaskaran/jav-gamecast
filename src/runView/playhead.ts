@@ -5,6 +5,16 @@ export const clampPlayhead = (index: number, completedCount: number): number => 
   return Math.max(0, Math.min(Math.trunc(index), completedCount - 1))
 }
 
+export const playDomainCount = (totalRows: number, completedCount: number): number => (
+  Math.max(1, totalRows, completedCount)
+)
+
+export const playIndexFromRatio = (t: number, totalRows: number, completedCount: number): number => {
+  const domain = playDomainCount(totalRows, completedCount)
+  const raw = Math.round(Math.min(1, Math.max(0, t)) * (domain - 1))
+  return clampPlayhead(raw, completedCount)
+}
+
 export const isLiveEdge = (index: number, completedCount: number): boolean => {
   if (completedCount <= 0) return true
   return index >= completedCount - 1

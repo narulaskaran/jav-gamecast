@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useRef, type CSSProperties, type PointerEve
 import { classDistribution, distributionAt } from '../dataset/classDistribution'
 import { classColor } from '../runView/classColor'
 import { areChartPropsEqual, barWidth } from '../runView/chartProps'
-import { clampPlayhead, type PlayheadMotion } from '../runView/playhead'
+import { clampPlayhead, playDomainCount, playIndexFromRatio, type PlayheadMotion } from '../runView/playhead'
 import { areaPath, formatPercentTick, jevSeriesPoints, linePath, seriesX } from '../runView/seriesPath'
 import { chartVisualFor, inferQuestionKind, type ChartVisualKind, type JevQuestionKind } from '../shared/questionKind'
 import type { AnalysisResultRow } from '../shared/analysis'
@@ -59,6 +59,7 @@ export const ResultsChart = memo(function ResultsChart({
 }) {
   const plotRef = useRef<HTMLDivElement>(null)
   const completedCount = rows.length
+  const domainCount = playDomainCount(totalRows, completedCount)
   const prefixCount = completedCount === 0 ? 0 : playheadIndex + 1
   const kind = questionKind
     ?? rows.find((row) => row.questionKind)?.questionKind
@@ -69,8 +70,8 @@ export const ResultsChart = memo(function ResultsChart({
     [classes, completedCount, prefixCount, rows, visual],
   )
   const series = useMemo(
-    () => (visual === 'series' ? jevSeriesPoints(rows, prefixCount, Math.max(totalRows, completedCount, 1)) : []),
-    [completedCount, prefixCount, rows, totalRows, visual],
+    () => (visual === 'series' ? jevSeriesPoints(rows, prefixCount, domainCount) : []),
+    [domainCount, prefixCount, rows, visual],
   )
   const classified = visual === 'bars' ? values.reduce((sum, item) => sum + item.count, 0) : series.length
   const scale = Math.max(totalRows, classified, 1)
@@ -93,36 +94,40 @@ export const ResultsChart = memo(function ResultsChart({
     if (!node || completedCount === 0) return 0
     const rect = node.getBoundingClientRect()
     if (rect.width <= 0) return 0
-    const t = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-    return clampPlayhead(Math.round(t * (completedCount - 1)), completedCount)
-  }, [completedCount])
+    const t = (clientX - rect.left) / rect.width
+    return playIndexFromRatio(t, totalRows, completedCount)
+  }, [completedCount, totalRows])
+
+  const emitSeek = (index: number, phase?: 'scrub' | 'release') => {
+    onSeek(clampPlayhead(index, completedCount), phase)
+  }
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (completedCount === 0 || event.button !== 0) return
     event.currentTarget.setPointerCapture(event.pointerId)
-    onSeek(indexFromClientX(event.clientX), 'scrub')
+    emitSeek(indexFromClientX(event.clientX), 'scrub')
   }
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (completedCount === 0 || !event.currentTarget.hasPointerCapture(event.pointerId)) return
-    onSeek(indexFromClientX(event.clientX), 'scrub')
+    emitSeek(indexFromClientX(event.clientX), 'scrub')
   }
 
   const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
     if (completedCount === 0 || !event.currentTarget.hasPointerCapture(event.pointerId)) return
     event.currentTarget.releasePointerCapture(event.pointerId)
-    onSeek(indexFromClientX(event.clientX), 'release')
+    emitSeek(indexFromClientX(event.clientX), 'release')
   }
 
   const handleRange = (event: SyntheticEvent<HTMLInputElement>) => {
-    onSeek(Number(event.currentTarget.value), 'scrub')
+    emitSeek(Number(event.currentTarget.value), 'scrub')
   }
 
   const handleRangeCommit = (event: SyntheticEvent<HTMLInputElement>) => {
-    onSeek(Number(event.currentTarget.value), 'release')
+    emitSeek(Number(event.currentTarget.value), 'release')
   }
 
-  const cursorX = seriesX(playheadIndex, Math.max(totalRows, completedCount, 1))
+  const cursorX = seriesX(playheadIndex, domainCount)
 
   return (
     <section className="distribution-card chart-hero" aria-labelledby="distribution-heading">
@@ -189,13 +194,13 @@ export const ResultsChart = memo(function ResultsChart({
             aria-valuetext={completedCount ? `Row ${playheadIndex + 1} of ${totalRows || completedCount}` : 'Waiting'}
             type="range"
             min={0}
-            max={Math.max(0, completedCount - 1)}
+            max={completedCount ? Math.max(0, domainCount - 1) : 0}
             value={completedCount ? playheadIndex : 0}
             disabled={!completedCount}
             onChange={handleRange}
             onPointerDown={(event) => {
               if (!completedCount) return
-              onSeek(Number(event.currentTarget.value), 'scrub')
+              emitSeek(Number(event.currentTarget.value), 'scrub')
             }}
             onPointerUp={handleRangeCommit}
             onKeyUp={handleRangeCommit}

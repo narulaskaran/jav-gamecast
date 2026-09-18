@@ -12,14 +12,28 @@ const row = (rowIndex: number, selectedClass: string): AnalysisResultRow => ({
   selectedClass,
 })
 
-const ChartHarness = ({ rows }: { rows: readonly AnalysisResultRow[] }) => {
+const NoulHarness = ({ rows, totalRows }: { rows: readonly AnalysisResultRow[]; totalRows: number }) => {
+  const { index, motion, seek } = useRunPlayhead(rows.length, 'noul-run')
+  return (
+    <ResultsChart
+      rows={rows}
+      playheadIndex={index}
+      totalRows={totalRows}
+      motion={motion}
+      questionKind="noul"
+      onSeek={seek}
+    />
+  )
+}
+
+const ChartHarness = ({ rows, totalRows = 10 }: { rows: readonly AnalysisResultRow[]; totalRows?: number }) => {
   const { index, motion, seek } = useRunPlayhead(rows.length, 'run-1')
   return (
     <ResultsChart
       rows={rows}
       playheadIndex={index}
       classes={['gold', 'silver']}
-      totalRows={10}
+      totalRows={totalRows}
       motion={motion}
       onSeek={seek}
     />
@@ -137,6 +151,30 @@ describe('ResultsChart motion', () => {
     expect(shell).toHaveAttribute('data-motion', 'seek')
     expect(document.querySelector('[data-class="silver"]')).toHaveAttribute('data-count', '0')
   })
+
+  it('scrubs a 71-play P(win) series on the full-game index without new chrome', () => {
+    const rows = Array.from({ length: 12 }, (_, rowIndex) => ({
+      rowIndex,
+      input: { wpa: 0.91 },
+      model: 'jev',
+      value: 0.4,
+      questionKind: 'noul' as const,
+    }))
+    render(<NoulHarness rows={rows} totalRows={71} />)
+    const slider = screen.getByRole('slider', { name: /chart playhead/i })
+    expect(slider).toHaveAttribute('max', '70')
+    expect(slider).toHaveAttribute('aria-valuetext', 'Row 12 of 71')
+    expect(screen.getByText(/71 total/i)).toBeInTheDocument()
+    expect(document.querySelector('.series-line')).toBeTruthy()
+    expect(document.querySelector('.series-fill')).toBeTruthy()
+    expect(document.querySelector('[data-play-cursor="true"]')).toBeTruthy()
+    expect(document.querySelectorAll('.chart-scrubber input')).toHaveLength(1)
+    expect(document.querySelector('.chart-x-ticks')).toBeNull()
+    fireEvent.change(slider, { target: { value: '40' } })
+    expect(slider).toHaveAttribute('aria-valuetext', 'Row 12 of 71')
+    fireEvent.change(slider, { target: { value: '4' } })
+    expect(slider).toHaveAttribute('aria-valuetext', 'Row 5 of 71')
+  })
 })
 
 describe('AnalysisRunView tick isolation', () => {
@@ -165,5 +203,44 @@ describe('AnalysisRunView tick isolation', () => {
     expect(document.querySelector('.analysis-card')).toBe(card)
     expect(document.querySelector('[data-class="gold"]')).toBe(gold)
     expect(document.querySelector('[data-class="silver"]')).toHaveAttribute('data-count', '1')
+  })
+
+  it('scales Row X of Y to the full-game count and keeps the existing series scrubber', () => {
+    const noulSnapshot: AnalysisSnapshot = {
+      analysisId: 'analysis-noul-71',
+      fixtureId: 'seahawks-super-bowl-2026-jev-v1',
+      datasetId: 'seahawks-super-bowl-2026-jev-v1',
+      sourceType: 'fixture',
+      query: '{"type":"noul","instructions":"Will SEA win given this play state?"}',
+      status: 'running',
+      createdAt: '2026-09-17T18:00:00.000Z',
+      updatedAt: '2026-09-17T18:01:00.000Z',
+      progress: { completedRows: 12, totalRows: 71, completedCalls: 12, totalCalls: 71 },
+      questionKind: 'noul',
+      classes: [],
+      columns: ['play_id', 'posteam_score', 'defteam_score'],
+      resultRows: Array.from({ length: 12 }, (_, rowIndex) => ({
+        rowIndex,
+        input: { play_id: rowIndex, wpa: 0.9, posteam_score: 3, defteam_score: 0 },
+        model: 'jev-latest',
+        questionKind: 'noul',
+        value: 0.42,
+      })),
+    }
+    render(<AnalysisRunView snapshot={noulSnapshot} shareUrl="" shareMessage="" onCopyShare={() => undefined} />)
+    expect(screen.getByRole('heading', { name: 'Row 12 of 71' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /row 1 of 71/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /row 12 of 71/i })).toBeInTheDocument()
+    expect(screen.getByText('12 / 71 rows')).toBeInTheDocument()
+    const slider = screen.getByRole('slider', { name: /chart playhead/i })
+    expect(slider).toHaveAttribute('max', '70')
+    expect(document.querySelector('.series-line')).toBeTruthy()
+    expect(document.querySelector('.series-fill')).toBeTruthy()
+    expect(document.querySelectorAll('.chart-scrubber input')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: /row 1 of 71/i }))
+    expect(screen.getByRole('heading', { name: 'Row 1 of 71' })).toBeInTheDocument()
+    fireEvent.change(slider, { target: { value: '11' } })
+    fireEvent.pointerUp(slider)
+    expect(screen.getByRole('heading', { name: 'Row 12 of 71' })).toBeInTheDocument()
   })
 })

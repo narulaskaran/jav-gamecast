@@ -25,6 +25,21 @@ describe('Jev series path', () => {
     expect(points.every((point) => point.yValue !== 0.99 && point.yValue !== 0.5 && point.yValue !== 0.01)).toBe(true)
   })
 
+  it('keeps a denser 71-play domain so a mid-run prefix does not stretch to the right edge', () => {
+    expect(seriesX(0, 71)).toBe(0)
+    expect(seriesX(70, 71)).toBe(1)
+    expect(seriesX(2, 71)).toBeCloseTo(2 / 70)
+    expect(seriesX(1, 71)).toBeLessThan(seriesX(1, 39))
+    const points = jevSeriesPoints([row(0, 0.2), row(1, 0.4), row(2, 0.6)], 3, 71)
+    expect(points).toHaveLength(3)
+    expect(points[0]?.x).toBe(0)
+    expect(points.at(-1)?.x).toBeCloseTo(2 / 70)
+    expect(points.at(-1)?.x).toBeLessThan(1)
+    expect(linePath(points).startsWith('M0 ')).toBe(true)
+    expect(areaPath(points).endsWith('Z')).toBe(true)
+    expect(linePath(points)).toContain('L')
+  })
+
   it('builds a left-to-right area and line that grow with persisted Jev values', () => {
     const points = jevSeriesPoints([row(0, 0.2), row(1, 0.8)], 2, 3)
     expect(linePath(points)).toBe('M0 0.8 L0.5 0.2')

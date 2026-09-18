@@ -24,7 +24,7 @@ export const jevSeriesPoints = (
   for (const row of prefix) {
     const yValue = seriesValueFromRow(row)
     if (yValue === undefined) continue
-    points.push({ x: seriesX(row.rowIndex, Math.max(totalRows, rows.length, 1)), yValue, rowIndex: row.rowIndex })
+    points.push({ x: seriesX(row.rowIndex, Math.max(1, totalRows, rows.length)), yValue, rowIndex: row.rowIndex })
   }
   return points
 }
