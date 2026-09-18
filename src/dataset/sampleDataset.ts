@@ -5,7 +5,6 @@ import {
   footballFixtureWinLikelihoodInputFields,
   getWinLikelihoodModelInput,
 } from '../fixtures/footballTimeline'
-import { CSV_PREVIEW_ROWS } from './csvTypes'
 import { asAnalysisRow, type DatasetPreview } from '../shared/dataset'
 import { inferSampleColumns } from './sampleColumns'
 import { SAMPLE_DATASET_NAME } from '../shared/sampleDatasetName'
@@ -25,7 +24,7 @@ export const getSampleDatasetPreview = (): DatasetPreview => ({
   delimiter: ',',
   columns: inferSampleColumns(rows, [...footballFixtureWinLikelihoodInputFields]),
   acceptedRowCount: rows.length,
-  previewRows: rows.slice(0, CSV_PREVIEW_ROWS),
+  previewRows: rows,
   validationWarnings: [],
   publicDataWarning: 'Sample rows are a checked-in demo fixture. They are public.',
   attribution: {

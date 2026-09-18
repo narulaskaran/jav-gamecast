@@ -108,5 +108,9 @@ describe('sample dataset preview', () => {
       'defteam_score',
       'score_differential',
     ])
+    expect(preview.columns).toHaveLength(26)
+    expect(preview.previewRows).toHaveLength(71)
+    expect(preview.previewRows).toHaveLength(preview.acceptedRowCount)
+    expect(preview.displayName).toBe('2026 Super Bowl Demo')
   })
 })

@@ -80,7 +80,9 @@ export class DatasetIntakeService {
     if (!this.options.convexConfigured) throw new AnalysisError('ANALYSIS_STORAGE_NOT_CONFIGURED', 'Durable storage is not configured on this deployment.', 503, true)
     const dataset = await this.options.datasets.get(datasetId)
     if (!dataset) throw new DatasetError('DATASET_NOT_FOUND', 'That dataset was not found.', 404)
-    return toDatasetPreview(dataset)
+    const rows = await this.options.datasets.getRows(datasetId)
+    const preview = toDatasetPreview(dataset)
+    return rows.length > 0 ? { ...preview, previewRows: [...rows] } : preview
   }
 
   async listPublic() {
@@ -119,7 +121,7 @@ export class DatasetIntakeService {
       if (error instanceof AnalysisError) throw error
       wrapConvexPutError(error)
     }
-    return { ...toDatasetPreview(record), publicDataWarning: PUBLIC_DATA_WARNING }
+    return { ...toDatasetPreview(record), previewRows: input.validated.rows, publicDataWarning: PUBLIC_DATA_WARNING }
   }
 }
 

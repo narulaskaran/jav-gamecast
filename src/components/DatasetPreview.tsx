@@ -14,14 +14,8 @@ const sourceLabel = (sourceType: DatasetPreview['sourceType']) => {
   return 'Public CSV'
 }
 
-export const previewRowCapCopy = (shown: number, total: number): string | undefined => {
-  if (shown < 1 || shown >= total) return undefined
-  return `Showing first ${shown} of ${total}`
-}
-
 export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPreview; onChange?: () => void }) => {
   const columns = dataset.columns
-  const cap = previewRowCapCopy(dataset.previewRows.length, dataset.acceptedRowCount)
   return (
     <Card className="dataset-preview" aria-labelledby="dataset-heading">
       <CardHeader className="section-heading flex-row items-start justify-between space-y-0">
@@ -33,11 +27,7 @@ export const DatasetPreviewCard = ({ dataset, onChange }: { dataset: DatasetPrev
       </CardHeader>
       <CardContent>
         {columns.length > 0 ? (
-          <p className="preview-meta">
-            {columns.length} columns{cap ? ` · ${cap}` : ''}
-          </p>
-        ) : cap ? (
-          <p className="preview-meta">{cap}</p>
+          <p className="preview-meta">{columns.length} columns</p>
         ) : null}
         <div className="table-scroll preview-table">
           <table aria-label="Dataset preview">

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DatasetError } from '../dataset/csvTypes'
+import { CSV_PREVIEW_ROWS, DatasetError } from '../dataset/csvTypes'
 import { DatasetIntakeService } from './datasetIntake'
 import { InMemoryDatasetStore } from './datasetStore'
 import { InMemoryBlobStore, UnconfiguredBlobStore } from './uploadthing'
@@ -39,10 +39,29 @@ describe('dataset intake', () => {
     expect(uploaded.sourceType).toBe('upload')
     expect(uploaded.acceptedRowCount).toBe(2)
     expect(uploaded.previewRows[0]).toEqual({ label: 'urgent', count: 2 })
+    expect(uploaded.previewRows).toHaveLength(2)
     const fromUrl = await intake.fromPublicUrl({ url: 'https://example.com/data.csv' })
     expect(fromUrl.sourceType).toBe('public_url')
     expect(fromUrl.acceptedRowCount).toBe(2)
+    expect(fromUrl.previewRows).toHaveLength(2)
     expect(store.get(fromUrl.datasetId)?.sourceUrl).toBe('https://example.com/data.csv')
+  })
+
+  it('returns the full accepted table on intake and get without enlarging stored previewRows', async () => {
+    const store = new InMemoryDatasetStore()
+    const intake = new DatasetIntakeService({
+      datasets: store,
+      blobs: new InMemoryBlobStore(),
+      convexConfigured: true,
+    })
+    const csvText = ['id,name', ...Array.from({ length: 20 }, (_, index) => `${index},n${index}`)].join('\n')
+    const uploaded = await intake.fromCsvText({ csvText, filename: 'wide.csv' })
+    expect(uploaded.previewRows).toHaveLength(20)
+    expect(uploaded.acceptedRowCount).toBe(20)
+    expect(store.get(uploaded.datasetId)?.previewRows).toHaveLength(CSV_PREVIEW_ROWS)
+    expect(store.getRows(uploaded.datasetId)).toHaveLength(20)
+    const readBack = await intake.get(uploaded.datasetId)
+    expect(readBack.previewRows).toHaveLength(20)
   })
 
   it('rejects private URLs before fetch', async () => {
