@@ -48,7 +48,7 @@ Dataset intake:
 
 Analysis:
 
-- `POST /api/analysis/draft` — server-only OpenRouter drafts an editable query
+- `POST /api/analysis/draft` — server-only OpenRouter drafts an editable query; identical dataset+task hits the durable draft cache
 - `POST /api/analysis/run` — starts a bounded Jev run (the only path that calls Jev)
 - `GET /api/analysis/<id>` — progress snapshot
 - `GET /api/share/<id>` — public readback; no provider call

@@ -31,8 +31,10 @@ export const parseQuestionKind = (value: unknown): JevQuestionKind | undefined =
 
 export const looksLikeWinLikelihood = (text: string): boolean => WIN_LIKELIHOOD_RE.test(text.trim())
 
+export const normalizeAnalysisTask = (task: string): string => task.trim().replace(/\s+/g, ' ').toLowerCase()
+
 export const isSampleDefaultWinTask = (task: string): boolean => (
-  task.trim().toLowerCase() === SAMPLE_WIN_LIKELIHOOD_TASK.trim().toLowerCase()
+  normalizeAnalysisTask(task) === normalizeAnalysisTask(SAMPLE_WIN_LIKELIHOOD_TASK)
 )
 
 const uniqueClassLabels = (values: readonly string[]): string[] => {

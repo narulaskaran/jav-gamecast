@@ -33,7 +33,7 @@ import {
   userAskedForFixturePlayers,
   type FixtureAnalysisSlice,
 } from '../shared/questionKind.js'
-import { analysisContentKey, analysisContentKeyFromSnapshot } from './analysisContentKey.js'
+import { analysisContentKey, analysisContentKeyFromSnapshot, draftContentKey } from './analysisContentKey.js'
 import {
   buildJevQuery,
   classesFromJevQuery,
@@ -112,9 +112,19 @@ export class AnalysisError extends Error {
   }
 }
 
+const cloneDraftResult = (draft: AnalysisDraftResult): AnalysisDraftResult => JSON.parse(JSON.stringify(draft)) as AnalysisDraftResult
+
+const reusableStatusRank = (status: AnalysisSnapshot['status']): number | undefined => {
+  if (status === 'complete') return 0
+  if (status === 'running') return 1
+  if (status === 'queued') return 2
+  return undefined
+}
+
 export class InMemoryAnalysisStore implements AnalysisStorage {
   private readonly snapshots = new Map<string, AnalysisSnapshot>()
   private readonly claims = new Map<string, { ownerToken: string; leaseExpiresAt: number }>()
+  private readonly drafts = new Map<string, AnalysisDraftResult>()
 
   get(analysisId: string): AnalysisSnapshot | undefined {
     const snapshot = this.snapshots.get(analysisId)
@@ -126,13 +136,23 @@ export class InMemoryAnalysisStore implements AnalysisStorage {
   }
 
   findCompleteByContentKey(contentKey: string): AnalysisSnapshot | undefined {
-    let latest: AnalysisSnapshot | undefined
-    for (const snapshot of this.snapshots.values()) {
-      if (snapshot.status !== 'complete') continue
-      if (analysisContentKeyFromSnapshot(snapshot) !== contentKey) continue
-      if (!latest || snapshot.updatedAt > latest.updatedAt) latest = snapshot
-    }
-    return latest ? cloneAnalysisSnapshot(normalizeSnapshot(latest)) : undefined
+    return this.findReusableByContentKey(contentKey, ['complete'])
+  }
+
+  claimByContentKey(contentKey: string, snapshot: AnalysisSnapshot): AnalysisSnapshot {
+    const reusable = this.findReusableByContentKey(contentKey, ['complete', 'running', 'queued'])
+    if (reusable) return reusable
+    this.put(snapshot)
+    return cloneAnalysisSnapshot(normalizeSnapshot(snapshot))
+  }
+
+  getDraftByContentKey(contentKey: string): AnalysisDraftResult | undefined {
+    const draft = this.drafts.get(contentKey)
+    return draft ? cloneDraftResult(draft) : undefined
+  }
+
+  putDraft(contentKey: string, draft: AnalysisDraftResult): void {
+    this.drafts.set(contentKey, cloneDraftResult(draft))
   }
 
   getPublic(analysisId: string): AnalysisSnapshot | undefined {
@@ -151,6 +171,23 @@ export class InMemoryAnalysisStore implements AnalysisStorage {
 
   release(analysisId: string, ownerToken: string): void {
     if (this.claims.get(analysisId)?.ownerToken === ownerToken) this.claims.delete(analysisId)
+  }
+
+  private findReusableByContentKey(contentKey: string, statuses: readonly AnalysisSnapshot['status'][]): AnalysisSnapshot | undefined {
+    const allowed = new Set(statuses)
+    let latest: AnalysisSnapshot | undefined
+    let latestRank = Number.POSITIVE_INFINITY
+    for (const snapshot of this.snapshots.values()) {
+      if (!allowed.has(snapshot.status)) continue
+      if (analysisContentKeyFromSnapshot(snapshot) !== contentKey) continue
+      const rank = reusableStatusRank(snapshot.status)
+      if (rank === undefined) continue
+      if (!latest || rank < latestRank || (rank === latestRank && snapshot.updatedAt > latest.updatedAt)) {
+        latest = snapshot
+        latestRank = rank
+      }
+    }
+    return latest ? cloneAnalysisSnapshot(normalizeSnapshot(latest)) : undefined
   }
 }
 
@@ -366,6 +403,8 @@ export class AnalysisService {
   private readonly idFactory: () => string
   private readonly datasets: AnalysisDatasetSource
   private readonly inFlight = new Map<string, Promise<AnalysisSnapshot>>()
+  private readonly draftInFlight = new Map<string, Promise<AnalysisDraftResult>>()
+  private readonly startInFlight = new Map<string, Promise<AnalysisSnapshot>>()
 
   constructor(private readonly options: AnalysisServiceOptions) {
     this.now = options.now ?? Date.now
@@ -374,13 +413,117 @@ export class AnalysisService {
   }
 
   async draft(input: AnalysisDraftInput): Promise<AnalysisDraftResult> {
-    const dataset = await this.requireDataset(input)
     if (!validText(input.task, ANALYSIS_MAX_TASK_LENGTH)) throw new AnalysisError('INVALID_TASK', 'Task must be non-empty and within the size limit')
+    const datasetHint = typeof input.datasetId === 'string' && input.datasetId.trim()
+      ? input.datasetId.trim()
+      : typeof input.fixtureId === 'string' && input.fixtureId.trim() ? input.fixtureId.trim() : ''
+    const contentKey = draftContentKey({ datasetId: datasetHint, task: input.task })
+    const existingDraft = this.draftInFlight.get(contentKey)
+    if (existingDraft) return existingDraft
+    const pending = this.draftOnce(input, contentKey)
+    this.draftInFlight.set(contentKey, pending)
+    try {
+      return await pending
+    } finally {
+      if (this.draftInFlight.get(contentKey) === pending) this.draftInFlight.delete(contentKey)
+    }
+  }
+
+  async start(input: AnalysisStartInput): Promise<AnalysisSnapshot> {
+    const query = this.requireQuery(input.query)
+    const parsedQuery = parseJevQueryJson(query)
+    const dataset = await this.requireDataset({
+      ...input,
+      query,
+      questionKind: parsedQuery?.type ?? input.questionKind,
+    })
+    const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
+    if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
+    const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
+    const lookupClasses = questionKind === 'noul'
+      ? []
+      : [...(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes ?? dataset.classes ?? [])]
+        .map((item) => typeof item === 'string' ? item.trim() : '')
+        .filter(Boolean)
+    if (requestedAnalysisId) {
+      if (!validText(requestedAnalysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
+      const existing = await this.options.store.get(requestedAnalysisId)
+      if (existing) return this.resumeExisting(existing, dataset.datasetId, query, input.resume === true)
+    }
+    const canReuse = input.forceNew !== true && (questionKind !== 'choice' || lookupClasses.length >= 2)
+    const contentKey = analysisContentKey({
+      datasetId: dataset.datasetId,
+      query,
+      questionKind,
+      classes: lookupClasses,
+    })
+    if (canReuse) {
+      const cached = await this.options.store.findCompleteByContentKey(contentKey)
+      if (cached?.status === 'complete') return cloneAnalysisSnapshot(normalizeSnapshot(cached))
+      const inFlightStart = this.startInFlight.get(contentKey)
+      if (inFlightStart) return inFlightStart
+      const pending = this.createOrJoin({
+        contentKey,
+        dataset,
+        query,
+        questionKind,
+        lookupClasses,
+        requestedAnalysisId,
+        parsedQuery,
+        inputClasses: input.classes,
+      })
+      this.startInFlight.set(contentKey, pending)
+      try {
+        return await pending
+      } finally {
+        if (this.startInFlight.get(contentKey) === pending) this.startInFlight.delete(contentKey)
+      }
+    }
+    return this.createQueuedSnapshot({
+      dataset,
+      query,
+      questionKind,
+      lookupClasses,
+      requestedAnalysisId,
+      parsedQuery,
+      inputClasses: input.classes,
+    })
+  }
+
+  async run(analysisId: string): Promise<AnalysisSnapshot> {
+    const existingRun = this.inFlight.get(analysisId)
+    if (existingRun) return existingRun
+    const execution = this.execute(analysisId)
+    this.inFlight.set(analysisId, execution)
+    try {
+      return await execution
+    } finally {
+      if (this.inFlight.get(analysisId) === execution) this.inFlight.delete(analysisId)
+    }
+  }
+
+  async get(analysisId: string): Promise<AnalysisSnapshot> {
+    const snapshot = await this.options.store.get(analysisId)
+    if (!snapshot) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
+    return cloneAnalysisSnapshot(normalizeSnapshot(snapshot))
+  }
+
+  async share(analysisId: string): Promise<AnalysisSnapshot> {
+    const snapshot = await (this.options.store.getPublic?.(analysisId) ?? this.options.store.get(analysisId))
+    if (!snapshot) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
+    return cloneAnalysisSnapshot(normalizeSnapshot(snapshot))
+  }
+
+  private async draftOnce(input: AnalysisDraftInput, flightKey: string): Promise<AnalysisDraftResult> {
+    const dataset = await this.requireDataset(input)
     const task = input.task.trim()
+    const contentKey = draftContentKey({ datasetId: dataset.datasetId, task })
+    const cached = await this.readDraftCache(contentKey)
+    if (cached) return cached
     const datasetClasses = datasetDraftClasses(dataset)
     const questionKindHint = inferQuestionKind(task, datasetClasses)
     if (dataset.sourceType === 'fixture' && isSampleDefaultWinTask(task) && !userAskedForFixturePlayers(task)) {
-      return {
+      const canned = {
         fixtureId: dataset.fixtureId,
         datasetId: dataset.datasetId,
         sourceType: dataset.sourceType,
@@ -392,9 +535,11 @@ export class AnalysisService {
           classes: [],
           columns: [...dataset.columns],
           displayName: dataset.displayName,
-          questionKind: 'noul',
+          questionKind: 'noul' as const,
         },
       }
+      await this.writeDraftCache(contentKey || flightKey, canned)
+      return canned
     }
     const draft = await this.options.draftProvider.draft({
       fixtureId: dataset.fixtureId,
@@ -434,7 +579,7 @@ export class AnalysisService {
     const parsedCriteriaUsable = parsedDraft?.type === questionKind && (
       parsedDraft.type === 'noul' || classesFromJevQuery(parsedDraft).length >= 2
     )
-    return {
+    const result: AnalysisDraftResult = {
       fixtureId: dataset.fixtureId,
       datasetId: dataset.datasetId,
       sourceType: dataset.sourceType,
@@ -460,89 +605,86 @@ export class AnalysisService {
         }) === 'halftime-eval' ? { inputHalf: 'H1' as const, labelHalf: 'H2' as const } : {}),
       },
     }
+    await this.writeDraftCache(contentKey, result)
+    return result
   }
 
-  async start(input: AnalysisStartInput): Promise<AnalysisSnapshot> {
-    const query = this.requireQuery(input.query)
-    const parsedQuery = parseJevQueryJson(query)
-    const dataset = await this.requireDataset({
+  private async createOrJoin(input: {
+    contentKey: string
+    dataset: ResolvedAnalysisDataset
+    query: string
+    questionKind: JevQuestionKind
+    lookupClasses: readonly string[]
+    requestedAnalysisId?: string
+    parsedQuery: ReturnType<typeof parseJevQueryJson>
+    inputClasses?: readonly string[]
+  }): Promise<AnalysisSnapshot> {
+    const cached = await this.options.store.findCompleteByContentKey(input.contentKey)
+    if (cached?.status === 'complete') return cloneAnalysisSnapshot(normalizeSnapshot(cached))
+    const snapshot = await this.createQueuedSnapshot({
       ...input,
-      query,
-      questionKind: parsedQuery?.type ?? input.questionKind,
+      joinContentKey: input.contentKey,
     })
-    const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
-    if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
-    const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
-    const lookupClasses = questionKind === 'noul'
-      ? []
-      : [...(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes ?? dataset.classes ?? [])]
-        .map((item) => typeof item === 'string' ? item.trim() : '')
-        .filter(Boolean)
-    if (requestedAnalysisId) {
-      if (!validText(requestedAnalysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
-      const existing = await this.options.store.get(requestedAnalysisId)
-      if (existing) return this.resumeExisting(existing, dataset.datasetId, query, input.resume === true)
-    }
-    if (input.forceNew !== true && (questionKind !== 'choice' || lookupClasses.length >= 2)) {
-      // Same datasetId + canonical query is reused for every source (fixture and BYOD).
-      const cached = await this.options.store.findCompleteByContentKey(analysisContentKey({
-        datasetId: dataset.datasetId,
-        query,
-        questionKind,
-        classes: lookupClasses,
-      }))
-      if (cached?.status === 'complete') return cloneAnalysisSnapshot(normalizeSnapshot(cached))
-    }
-    const analysisId = requestedAnalysisId || this.idFactory()
+    return this.resumeExisting(snapshot, snapshot.datasetId, snapshot.query, false)
+  }
+
+  private async createQueuedSnapshot(input: {
+    dataset: ResolvedAnalysisDataset
+    query: string
+    questionKind: JevQuestionKind
+    lookupClasses: readonly string[]
+    requestedAnalysisId?: string
+    parsedQuery: ReturnType<typeof parseJevQueryJson>
+    inputClasses?: readonly string[]
+    joinContentKey?: string
+  }): Promise<AnalysisSnapshot> {
+    const analysisId = input.requestedAnalysisId || this.idFactory()
     if (!validText(analysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const existing = await this.options.store.get(analysisId)
-    if (existing) return this.resumeExisting(existing, dataset.datasetId, query, input.resume === true)
-    const classes = questionKind === 'noul' ? [] : normalizeClasses(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes, dataset.classes ?? [])
-    if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
-    if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
+    if (existing) return this.resumeExisting(existing, input.dataset.datasetId, input.query, false)
+    const classes = input.questionKind === 'noul' ? [] : normalizeClasses(input.parsedQuery ? classesFromJevQuery(input.parsedQuery) : input.inputClasses, input.dataset.classes ?? [])
+    if (input.questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
+    if (input.dataset.rows.length > ANALYSIS_MAX_ROWS || input.dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
     this.options.classifier.assertConfigured?.()
     const timestamp = nowIso(this.now)
     const snapshot: AnalysisSnapshot = {
       analysisId,
-      fixtureId: dataset.fixtureId,
-      datasetId: dataset.datasetId,
-      sourceType: dataset.sourceType,
-      query,
+      fixtureId: input.dataset.fixtureId,
+      datasetId: input.dataset.datasetId,
+      sourceType: input.dataset.sourceType,
+      query: input.query,
       status: 'queued',
       createdAt: timestamp,
       updatedAt: timestamp,
-      progress: { completedRows: 0, totalRows: dataset.rows.length, completedCalls: 0, totalCalls: dataset.rows.length },
-      questionKind,
+      progress: { completedRows: 0, totalRows: input.dataset.rows.length, completedCalls: 0, totalCalls: input.dataset.rows.length },
+      questionKind: input.questionKind,
       classes,
-      columns: [...dataset.columns],
+      columns: [...input.dataset.columns],
       resultRows: [],
+    }
+    if (input.joinContentKey) {
+      const claimed = await this.options.store.claimByContentKey(input.joinContentKey, snapshot)
+      return cloneAnalysisSnapshot(normalizeSnapshot(claimed))
     }
     await this.options.store.put(snapshot)
     return cloneAnalysisSnapshot(snapshot)
   }
 
-  async run(analysisId: string): Promise<AnalysisSnapshot> {
-    const existingRun = this.inFlight.get(analysisId)
-    if (existingRun) return existingRun
-    const execution = this.execute(analysisId)
-    this.inFlight.set(analysisId, execution)
+  private async readDraftCache(contentKey: string): Promise<AnalysisDraftResult | undefined> {
     try {
-      return await execution
-    } finally {
-      if (this.inFlight.get(analysisId) === execution) this.inFlight.delete(analysisId)
+      const cached = await this.options.store.getDraftByContentKey(contentKey)
+      return cached ? cloneDraftResult(cached) : undefined
+    } catch {
+      return undefined
     }
   }
 
-  async get(analysisId: string): Promise<AnalysisSnapshot> {
-    const snapshot = await this.options.store.get(analysisId)
-    if (!snapshot) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
-    return cloneAnalysisSnapshot(normalizeSnapshot(snapshot))
-  }
-
-  async share(analysisId: string): Promise<AnalysisSnapshot> {
-    const snapshot = await (this.options.store.getPublic?.(analysisId) ?? this.options.store.get(analysisId))
-    if (!snapshot) throw new AnalysisError('ANALYSIS_NOT_FOUND', 'Analysis was not found', 404)
-    return cloneAnalysisSnapshot(normalizeSnapshot(snapshot))
+  private async writeDraftCache(contentKey: string, draft: AnalysisDraftResult): Promise<void> {
+    try {
+      await this.options.store.putDraft(contentKey, cloneDraftResult(draft))
+    } catch {
+      // Durable cache is best-effort; a successful draft still returns to the caller.
+    }
   }
 
   private async execute(analysisId: string): Promise<AnalysisSnapshot> {
