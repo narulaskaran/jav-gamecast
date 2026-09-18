@@ -49,7 +49,7 @@ describe('dataset API error shaping', () => {
     errorSpy.mockRestore()
   })
 
-  it('logs uncaught throws and returns a failure code instead of a silent 500', async () => {
+  it('maps Convex persist throws to CONVEX_PUT_FAILED instead of UNCAUGHT', async () => {
     const intake = new DatasetIntakeService({
       datasets: {
         get: () => undefined,
@@ -66,11 +66,12 @@ describe('dataset API error shaping', () => {
     await createDatasetFromUrlHandler(intake)({ method: 'POST', body: { url: 'https://example.com/data.csv' } }, response(state))
     expect(state.body).toEqual({
       error: 'DATASET_INTAKE_UNAVAILABLE',
-      failure: 'UNCAUGHT',
-      message: 'CSV intake failed on this deployment.',
+      failure: 'CONVEX_PUT_FAILED',
+      message: 'Convex dataset put failed: convex exploded',
     })
     expect(errorSpy).toHaveBeenCalled()
-    expect(JSON.stringify(errorSpy.mock.calls[0])).toContain('UNCAUGHT')
+    expect(JSON.stringify(errorSpy.mock.calls[0])).toContain('CONVEX_PUT_FAILED')
+    expect(JSON.stringify(errorSpy.mock.calls[0])).not.toContain('UNCAUGHT')
     errorSpy.mockRestore()
   })
 

@@ -47,19 +47,22 @@ export type DatasetFailure =
   | 'TOKEN_MISSING_APP_REGION'
   | 'INGEST_HTTP'
   | 'INGEST_RUNTIME'
+  | 'CONVEX_PUT_FAILED'
   | 'UNCAUGHT'
 
 export class DatasetError extends Error {
   readonly code: DatasetValidationError['code']
   readonly statusCode: number
   readonly failure?: DatasetFailure
+  readonly cause?: unknown
 
-  constructor(code: DatasetValidationError['code'], message: string, statusCode = 400, failure?: DatasetFailure) {
+  constructor(code: DatasetValidationError['code'], message: string, statusCode = 400, failure?: DatasetFailure, cause?: unknown) {
     super(message)
     this.name = 'DatasetError'
     this.code = code
     this.statusCode = statusCode
     if (failure) this.failure = failure
+    if (cause !== undefined) this.cause = cause
   }
 }
 

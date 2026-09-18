@@ -1,5 +1,6 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from './convexGenerated.js'
+import { DatasetError } from '../dataset/csvTypes.js'
 import {
   cloneAnalysisSnapshot,
   normalizeSnapshot,
@@ -8,7 +9,8 @@ import {
   type AnalysisStorage,
 } from '../shared/analysis.js'
 import type { DatasetRecord } from '../shared/dataset.js'
-import { hashRow, type DatasetStorage } from './datasetStore.js'
+import { toConvexDatasetPutArgs, wrapConvexPutError } from './convexDatasetPut.js'
+import { type DatasetStorage } from './datasetStore.js'
 
 /**
  * Server-only durable analysis boundary. Authenticated actions are used for
@@ -62,7 +64,9 @@ export class ConvexDatasetStore implements DatasetStorage {
   }
 
   private authToken(): string {
-    if (!this.writeSecret) throw new Error('Convex write authorization is not configured')
+    if (!this.writeSecret) {
+      throw new DatasetError('DATASET_INTAKE_UNAVAILABLE', 'Convex write authorization is not configured.', 503, 'CONVEX_PUT_FAILED')
+    }
     return this.writeSecret
   }
 
@@ -72,11 +76,14 @@ export class ConvexDatasetStore implements DatasetStorage {
   }
 
   async put(dataset: DatasetRecord, rows: readonly AnalysisRowInput[]): Promise<void> {
-    await this.client.action(api.datasets.authorizedPutDataset, {
-      authToken: this.authToken(),
-      dataset,
-      rows: rows.map((values, rowIndex) => ({ rowIndex, rowHash: hashRow(values), values })),
-    })
+    try {
+      await this.client.action(api.datasets.authorizedPutDataset, {
+        authToken: this.authToken(),
+        ...toConvexDatasetPutArgs(dataset, rows),
+      })
+    } catch (error) {
+      wrapConvexPutError(error)
+    }
   }
 
   async getRows(datasetId: string): Promise<readonly AnalysisRowInput[]> {

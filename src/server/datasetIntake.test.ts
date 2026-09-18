@@ -55,4 +55,25 @@ describe('dataset intake', () => {
     await expect(intake.fromPublicUrl({ url: 'https://127.0.0.1/secret.csv' })).rejects.toBeInstanceOf(DatasetError)
     await expect(intake.fromPublicUrl({ url: 'http://example.com/data.csv' })).rejects.toMatchObject({ code: 'URL_NOT_PUBLIC' })
   })
+
+  it('maps datasets.put throws to CONVEX_PUT_FAILED instead of UNCAUGHT', async () => {
+    const intake = new DatasetIntakeService({
+      datasets: {
+        get: () => undefined,
+        put: async () => { throw new Error('undefined is not a valid Convex value') },
+        getRows: () => [],
+      },
+      blobs: new InMemoryBlobStore(),
+      convexConfigured: true,
+    })
+    const error = await intake.fromCsvText({ csvText: csv, filename: 'n.csv' }).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(DatasetError)
+    expect(error).toMatchObject({
+      code: 'DATASET_INTAKE_UNAVAILABLE',
+      failure: 'CONVEX_PUT_FAILED',
+      statusCode: 503,
+      message: 'Convex rejected undefined fields in the dataset payload.',
+    })
+    expect((error as DatasetError).failure).not.toBe('UNCAUGHT')
+  })
 })

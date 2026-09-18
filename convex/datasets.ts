@@ -4,6 +4,14 @@ import { v } from 'convex/values'
 
 const MAX_ROWS = 5_000
 const MAX_ID_LENGTH = 200
+const MAX_METADATA_JSON = 400_000
+const ROW_WRITE_BATCH = 200
+
+const datasetRowValidator = v.object({
+  rowIndex: v.number(),
+  rowHash: v.string(),
+  values: v.any(),
+})
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -33,7 +41,7 @@ type DurableDataset = {
   rows: Array<{ rowIndex: number; rowHash: string; values: unknown }>
 }
 
-function validateDataset(value: unknown): asserts value is DurableDataset {
+function validateDatasetMeta(value: unknown): asserts value is Omit<DurableDataset, 'rows'> {
   if (!isRecord(value) || typeof value.datasetId !== 'string' || value.datasetId.length < 1 || value.datasetId.length > MAX_ID_LENGTH) throw new Error('Invalid dataset')
   if (!['fixture', 'upload', 'public_url'].includes(value.sourceType as string)) throw new Error('Invalid dataset source')
   if (typeof value.displayName !== 'string' || value.displayName.length < 1 || value.displayName.length > 200) throw new Error('Invalid dataset name')
@@ -44,17 +52,48 @@ function validateDataset(value: unknown): asserts value is DurableDataset {
   if (!Array.isArray(value.previewRows) || value.previewRows.length > 16) throw new Error('Invalid dataset preview')
   if (!Array.isArray(value.validationWarnings)) throw new Error('Invalid dataset warnings')
   if (value.visibility !== 'published' || typeof value.createdAt !== 'number') throw new Error('Invalid dataset visibility')
-  if (!Array.isArray(value.rows) || value.rows.length !== value.acceptedRowCount || value.rows.length > MAX_ROWS) throw new Error('Invalid dataset rows')
-  if (JSON.stringify(value).length > 1_500_000) throw new Error('Dataset is too large')
+  const { rows: _ignoredRows, publicDataWarning: _ignoredWarning, attribution: _ignoredAttribution, ...meta } = value
+  if (JSON.stringify(meta).length > MAX_METADATA_JSON) throw new Error('Dataset metadata is too large')
 }
 
-const publicDataset = (document: Record<string, unknown>, previewOnly = true) => ({
+function validateDataset(value: unknown): asserts value is DurableDataset {
+  if (!isRecord(value)) throw new Error('Invalid dataset')
+  const rows = value.rows
+  validateDatasetMeta(value)
+  if (!Array.isArray(rows) || rows.length !== value.acceptedRowCount || rows.length > MAX_ROWS) throw new Error('Invalid dataset rows')
+}
+
+const datasetDocument = (dataset: Omit<DurableDataset, 'rows'>) => ({
+  datasetId: dataset.datasetId,
+  sourceType: dataset.sourceType,
+  displayName: dataset.displayName,
+  ...(dataset.fixtureKey === undefined ? {} : { fixtureKey: dataset.fixtureKey }),
+  ...(dataset.blobKey === undefined ? {} : { blobKey: dataset.blobKey }),
+  ...(dataset.sourceUrl === undefined ? {} : { sourceUrl: dataset.sourceUrl }),
+  byteSize: dataset.byteSize,
+  contentHash: dataset.contentHash,
+  encoding: dataset.encoding,
+  delimiter: dataset.delimiter,
+  columns: dataset.columns,
+  acceptedRowCount: dataset.acceptedRowCount,
+  previewRows: dataset.previewRows,
+  validationWarnings: dataset.validationWarnings,
+  visibility: 'published' as const,
+  createdAt: dataset.createdAt,
+  ...(dataset.publishedAt === undefined ? {} : { publishedAt: dataset.publishedAt }),
+})
+
+const optionalField = (key: string, value: unknown): Record<string, unknown> => (
+  value === undefined ? {} : { [key]: value }
+)
+
+const publicDataset = (document: Record<string, unknown>) => ({
   datasetId: document.datasetId,
   sourceType: document.sourceType,
   displayName: document.displayName,
-  fixtureKey: document.fixtureKey,
-  blobKey: document.blobKey,
-  sourceUrl: document.sourceUrl,
+  ...optionalField('fixtureKey', document.fixtureKey),
+  ...optionalField('blobKey', document.blobKey),
+  ...optionalField('sourceUrl', document.sourceUrl),
   byteSize: document.byteSize,
   contentHash: document.contentHash,
   encoding: document.encoding,
@@ -65,9 +104,8 @@ const publicDataset = (document: Record<string, unknown>, previewOnly = true) =>
   validationWarnings: document.validationWarnings,
   visibility: document.visibility,
   createdAt: document.createdAt,
-  publishedAt: document.publishedAt,
+  ...optionalField('publishedAt', document.publishedAt),
   publicDataWarning: 'This playground publishes datasets and results. Do not upload secrets or personal data.',
-  ...(previewOnly ? {} : {}),
 })
 
 const findDataset = async (ctx: { db: any }, datasetId: string) => await ctx.db.query('datasets').withIndex('by_dataset_id', (q: any) => q.eq('datasetId', datasetId)).unique()
@@ -114,45 +152,35 @@ export const getDatasetSharePreview = query({
   },
 })
 
-export const putDatasetInternal = internalMutation({
-  args: {
-    dataset: v.any(),
-    rows: v.array(v.object({
-      rowIndex: v.number(),
-      rowHash: v.string(),
-      values: v.any(),
-    })),
-  },
-  handler: async (ctx, { dataset, rows }) => {
-    validateDataset({ ...dataset, rows })
+export const putDatasetMetaInternal = internalMutation({
+  args: { dataset: v.any() },
+  handler: async (ctx, { dataset }) => {
+    validateDatasetMeta(dataset)
     const existing = await findDataset(ctx, dataset.datasetId)
-    const document = {
-      datasetId: dataset.datasetId,
-      sourceType: dataset.sourceType,
-      displayName: dataset.displayName,
-      ...(dataset.fixtureKey === undefined ? {} : { fixtureKey: dataset.fixtureKey }),
-      ...(dataset.blobKey === undefined ? {} : { blobKey: dataset.blobKey }),
-      ...(dataset.sourceUrl === undefined ? {} : { sourceUrl: dataset.sourceUrl }),
-      byteSize: dataset.byteSize,
-      contentHash: dataset.contentHash,
-      encoding: dataset.encoding,
-      delimiter: dataset.delimiter,
-      columns: dataset.columns,
-      acceptedRowCount: dataset.acceptedRowCount,
-      previewRows: dataset.previewRows,
-      validationWarnings: dataset.validationWarnings,
-      visibility: 'published' as const,
-      createdAt: dataset.createdAt,
-      ...(dataset.publishedAt === undefined ? {} : { publishedAt: dataset.publishedAt }),
-    }
+    const document = datasetDocument(dataset)
     if (existing) await ctx.db.replace(existing._id, document)
     else await ctx.db.insert('datasets', document)
-    const currentRows = await ctx.db.query('datasetRows').withIndex('by_dataset_row', (q: any) => q.eq('datasetId', dataset.datasetId)).take(MAX_ROWS)
+    return publicDataset(document)
+  },
+})
+
+export const replaceDatasetRowsInternal = internalMutation({
+  args: { datasetId: v.string(), rows: v.array(datasetRowValidator) },
+  handler: async (ctx, { datasetId, rows }) => {
+    const currentRows = await ctx.db.query('datasetRows').withIndex('by_dataset_row', (q: any) => q.eq('datasetId', datasetId)).take(MAX_ROWS)
     for (const row of currentRows) await ctx.db.delete(row._id)
     for (const row of rows) {
-      await ctx.db.insert('datasetRows', { datasetId: dataset.datasetId, rowIndex: row.rowIndex, rowHash: row.rowHash, values: row.values })
+      await ctx.db.insert('datasetRows', { datasetId, rowIndex: row.rowIndex, rowHash: row.rowHash, values: row.values })
     }
-    return publicDataset(document)
+  },
+})
+
+export const appendDatasetRowsInternal = internalMutation({
+  args: { datasetId: v.string(), rows: v.array(datasetRowValidator) },
+  handler: async (ctx, { datasetId, rows }) => {
+    for (const row of rows) {
+      await ctx.db.insert('datasetRows', { datasetId, rowIndex: row.rowIndex, rowHash: row.rowHash, values: row.values })
+    }
   },
 })
 
@@ -176,14 +204,23 @@ export const authorizedPutDataset = action({
   args: {
     authToken: v.string(),
     dataset: v.any(),
-    rows: v.array(v.object({
-      rowIndex: v.number(),
-      rowHash: v.string(),
-      values: v.any(),
-    })),
+    rows: v.array(datasetRowValidator),
   },
   handler: async (ctx: any, { authToken, dataset, rows }: { authToken: string; dataset: unknown; rows: Array<{ rowIndex: number; rowHash: string; values: unknown }> }): Promise<unknown> => {
     authorizeWrite(authToken)
-    return await ctx.runMutation(internal.datasets.putDatasetInternal, { dataset, rows })
+    if (!isRecord(dataset)) throw new Error('Invalid dataset')
+    validateDataset({ ...dataset, rows })
+    const datasetId = dataset.datasetId
+    if (typeof datasetId !== 'string') throw new Error('Invalid dataset')
+    const stored = await ctx.runMutation(internal.datasets.putDatasetMetaInternal, { dataset })
+    for (let offset = 0; offset < rows.length; offset += ROW_WRITE_BATCH) {
+      const batch = rows.slice(offset, offset + ROW_WRITE_BATCH)
+      if (offset === 0) {
+        await ctx.runMutation(internal.datasets.replaceDatasetRowsInternal, { datasetId, rows: batch })
+      } else {
+        await ctx.runMutation(internal.datasets.appendDatasetRowsInternal, { datasetId, rows: batch })
+      }
+    }
+    return stored
   },
 })
