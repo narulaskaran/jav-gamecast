@@ -53,6 +53,8 @@ Analysis:
 - `GET /api/analysis/<id>` — progress snapshot
 - `GET /api/share/<id>` — public readback; no provider call
 
+After a complete run, **Download CSV** exports `row_id,probability` (Noul/Score) or `row_id,selected_class,<class…>` (Choice). Formula-like cells are escaped. Dataset-load failures show next to the chooser, not as “Couldn't run”.
+
 Payload shapes and error codes live in `docs/analysis-api.md`.
 
 ## Operator deploy
