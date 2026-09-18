@@ -59,6 +59,12 @@ export const defaultAnalysisApi: AnalysisApiClient = {
 }
 
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
+
+export const hasRunnableQuery = (query: string): boolean => query.trim().length > 0
+
+export const canConfirmJevRun = ({ query, starting }: { query: string; starting: boolean }): boolean =>
+  hasRunnableQuery(query) && !starting
+
 const shortError = (error: unknown, fallback: string) => {
   if (error instanceof DatasetError) return error.message.trim() || plainDatasetError(error.code, fallback)
   if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) return plainDatasetError(error.message, `${fallback} (${error.message})`)
@@ -157,7 +163,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   }
 
   const handleRun = async () => {
-    if (!draft || !query.trim() || !queryEdited || !datasetId) return
+    if (!draft || !hasRunnableQuery(query) || !datasetId) return
     setStarting(true); setError(undefined); setSnapshot(undefined); setShareMessage('')
     try {
       setSnapshot(await api.start({
@@ -252,7 +258,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
           )}
           {!isShareView && dataset && <>
             <section className="task-card" aria-labelledby="task-heading"><div className="section-heading"><div><p className="eyebrow">01 · Prompt</p><h2 id="task-heading">Describe the analysis task</h2></div><span className="step-mark">DRAFT</span></div><label htmlFor="analysis-task">Analysis task</label><textarea id="analysis-task" value={task} onChange={(event) => setTask(event.target.value)} rows={3} placeholder="What should Jev classify?" /><div className="form-footer"><span>Task is sent only when you choose Draft task.</span><button className="primary-button" type="button" onClick={() => void handleDraft()} disabled={drafting}>{drafting ? 'Drafting…' : 'Draft task'}</button></div></section>
-            {draft && <section className="query-card" aria-labelledby="query-heading"><div className="section-heading"><div><p className="eyebrow">02 · Edit</p><h2 id="query-heading">Jev classifier query</h2></div><span className="step-mark">EDITABLE</span></div><label htmlFor="jev-query">Generated query</label><textarea id="jev-query" value={query} onChange={(event) => { setQuery(event.target.value); setQueryEdited(true) }} rows={5} /><div className="query-meta"><span>{draft.metadata.rowCount} rows · {draft.metadata.classes.length} classes · {draft.metadata.model}</span><span>Provider: {draft.metadata.provider}</span></div><div className="form-footer"><span>{queryEdited ? 'Query changed. Ready for an explicit run.' : 'Edit the query before running Jev.'}</span><button className="primary-button run-button" type="button" onClick={() => void handleRun()} disabled={!query.trim() || !queryEdited || starting}>{starting ? 'Starting…' : 'Run Jev'}</button></div></section>}
+            {draft && <section className="query-card" aria-labelledby="query-heading"><div className="section-heading"><div><p className="eyebrow">02 · Edit</p><h2 id="query-heading">Jev classifier query</h2></div><span className="step-mark">EDITABLE</span></div><label htmlFor="jev-query">Generated query</label><textarea id="jev-query" value={query} onChange={(event) => { setQuery(event.target.value); setQueryEdited(true) }} rows={5} /><div className="query-meta"><span>{draft.metadata.rowCount} rows · {draft.metadata.classes.length} classes · {draft.metadata.model}</span><span>Provider: {draft.metadata.provider}</span></div><div className="form-footer"><span>{hasRunnableQuery(query) ? (queryEdited ? 'Query changed. Ready for an explicit run.' : 'Review the query, then confirm Run Jev.') : 'Enter a query before running Jev.'}</span><button className="primary-button run-button" type="button" onClick={() => void handleRun()} disabled={!canConfirmJevRun({ query, starting })}>{starting ? 'Starting…' : 'Run Jev'}</button></div></section>}
             {error && <div className="error-banner" role="alert"><b>Action needs attention</b><span>{error}</span></div>}
           </>}
           {isShareView && shareLoading && <p className="empty-copy" role="status">Loading public snapshot…</p>}

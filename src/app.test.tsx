@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { App, defaultAnalysisApi, type AnalysisApiClient } from './App'
+import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, type AnalysisApiClient } from './App'
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballTimeline'
 import { asAnalysisRow } from './shared/dataset'
 import type { AnalysisDraftResult, AnalysisSnapshot } from './shared/analysis'
@@ -64,7 +64,6 @@ const startSampleRun = async (api: AnalysisApiClient) => {
   fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
   fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
   await screen.findByDisplayValue(draft.query)
-  fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: 'Edited query.' } })
   fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
 }
 
@@ -89,7 +88,16 @@ describe('Jev playground flow', () => {
     await waitFor(() => expect(api.intakeStatus).toHaveBeenCalled())
   })
 
-  it('does not fetch on sample task editing, and requires draft then edit then run', async () => {
+  it('unlocks Run Jev from existing Edit query text without another Draft or forced edit', () => {
+    expect(hasRunnableQuery('')).toBe(false)
+    expect(hasRunnableQuery('   ')).toBe(false)
+    expect(hasRunnableQuery(draft.query)).toBe(true)
+    expect(canConfirmJevRun({ query: draft.query, starting: false })).toBe(true)
+    expect(canConfirmJevRun({ query: draft.query, starting: true })).toBe(false)
+    expect(canConfirmJevRun({ query: '  ', starting: false })).toBe(false)
+  })
+
+  it('does not fetch on sample task editing, and runs from the drafted Edit query', async () => {
     const api = makeApi()
     render(<App api={api} />)
     fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
@@ -101,8 +109,26 @@ describe('Jev playground flow', () => {
     await screen.findByDisplayValue(draft.query)
     expect(api.draft).toHaveBeenCalledTimes(1)
     expect(api.start).not.toHaveBeenCalled()
+    const runButton = screen.getByRole('button', { name: /run jev/i })
+    expect(runButton).toBeEnabled()
+    expect(screen.getByText(/review the query, then confirm run jev/i)).toBeInTheDocument()
+    fireEvent.click(runButton)
+    await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1))
+    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: draft.query, classes: draft.metadata.classes })
+    expect(api.draft).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Run Jev disabled when Edit query text is cleared, and still accepts a manual edit', async () => {
+    const api = makeApi()
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    await screen.findByDisplayValue(draft.query)
+    fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: '   ' } })
+    expect(screen.getByRole('button', { name: /run jev/i })).toBeDisabled()
+    expect(screen.getByText(/enter a query before running jev/i)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: 'Use only visible columns.' } })
-    expect(api.start).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
     await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1))
     expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: 'Use only visible columns.', classes: draft.metadata.classes })
@@ -240,8 +266,14 @@ describe('Jev playground flow', () => {
     expect(await screen.findByRole('heading', { name: 'tickets.csv' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
     await screen.findByDisplayValue(draft.query)
-    fireEvent.change(screen.getByLabelText(/^Generated query$/i), { target: { value: 'Classify the ticket tier.' } })
+    expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
+    await waitFor(() => expect(api.start).toHaveBeenCalledWith({
+      datasetId: uploaded.datasetId,
+      fixtureId: undefined,
+      query: draft.query,
+      classes: ['gold', 'silver'],
+    }))
     expect(await screen.findByText('1 / 2 rows')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
     expect(screen.getByRole('slider', { name: /chart playhead/i })).toBeInTheDocument()
