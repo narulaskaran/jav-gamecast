@@ -20,17 +20,17 @@ import {
   type AnalysisStartInput,
   type AnalysisStorage,
   type DatasetSourceType,
-} from '../shared/analysis'
-import { asAnalysisRow } from '../shared/dataset'
+} from '../shared/analysis.js'
+import { asAnalysisRow } from '../shared/dataset.js'
 import {
   FOOTBALL_FIXTURE_ID,
   footballFixture,
   footballFixtureModelInputFields,
   getHalftimeModelInput,
-} from '../fixtures/footballTimeline'
+} from '../fixtures/footballTimeline.js'
 
-export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis'
-export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, ANALYSIS_MAX_ROWS, ANALYSIS_MAX_TASK_LENGTH } from '../shared/analysis'
+export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis.js'
+export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, ANALYSIS_MAX_ROWS, ANALYSIS_MAX_TASK_LENGTH } from '../shared/analysis.js'
 
 export interface ResolvedAnalysisDataset {
   datasetId: string

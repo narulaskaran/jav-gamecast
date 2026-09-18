@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({ result: undefined as any }))
-vi.mock('../../src/server/liveConfig', () => ({
+vi.mock('../../../src/server/liveConfig', () => ({
   readLiveRuntimeConfig: () => ({ convexUrl: 'https://demo.convex.cloud', convexWriteSecret: 'write-secret', typesafeApiKey: 'provider-key', cronSecret: 'cron-secret', featuredGameId: 'featured' }),
 }))
-vi.mock('../../src/server/convexStore', () => ({ ConvexForecastStore: class {} }))
-vi.mock('../../src/server/orchestrator', () => ({ runForecastCycle: async () => state.result }))
+vi.mock('../../../src/server/convexStore', () => ({ ConvexForecastStore: class {} }))
+vi.mock('../../../src/server/orchestrator', () => ({ runForecastCycle: async () => state.result }))
 
 import handler from './forecast'
 

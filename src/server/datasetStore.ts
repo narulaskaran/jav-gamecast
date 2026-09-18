@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { AnalysisRowInput } from '../shared/analysis'
-import type { DatasetPreview, DatasetRecord, DatasetSourceType } from '../shared/dataset'
-import { PUBLIC_DATA_WARNING } from '../dataset/csvTypes'
-import type { ValidatedDataset } from '../dataset/csvTypes'
-import type { AnalysisDatasetSource, ResolvedAnalysisDataset } from './analysis'
+import type { AnalysisRowInput } from '../shared/analysis.js'
+import type { DatasetPreview, DatasetRecord, DatasetSourceType } from '../shared/dataset.js'
+import { PUBLIC_DATA_WARNING } from '../dataset/csvTypes.js'
+import type { ValidatedDataset } from '../dataset/csvTypes.js'
+import type { AnalysisDatasetSource, ResolvedAnalysisDataset } from './analysis.js'
 
 export interface DatasetStorage {
   get(datasetId: string): Promise<DatasetRecord | undefined> | DatasetRecord | undefined

@@ -2,9 +2,9 @@ import type {
   AnalysisRowInput,
   DatasetColumn,
   DatasetSourceType,
-} from '../dataset/csvTypes'
+} from '../dataset/csvTypes.js'
 
-export type { AnalysisRowInput, DatasetColumn, DatasetSourceType } from '../dataset/csvTypes'
+export type { AnalysisRowInput, DatasetColumn, DatasetSourceType } from '../dataset/csvTypes.js'
 export {
   CSV_MAX_BYTES,
   CSV_MAX_COLUMNS,
@@ -13,7 +13,7 @@ export {
   DATASET_ERROR_COPY,
   PUBLIC_DATA_WARNING,
   plainDatasetError,
-} from '../dataset/csvTypes'
+} from '../dataset/csvTypes.js'
 
 export interface DatasetAttribution {
   disclosure: string

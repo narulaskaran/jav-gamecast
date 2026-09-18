@@ -6,8 +6,8 @@ import {
   type DatasetColumnType,
   type ParsedCsv,
   type ValidatedDataset,
-} from './csvTypes'
-import { parseCsvBytes, parseCsvText } from './parseCsv'
+} from './csvTypes.js'
+import { parseCsvBytes, parseCsvText } from './parseCsv.js'
 
 const normalizeName = (name: string): string => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'column'
 

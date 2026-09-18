@@ -1,6 +1,6 @@
-import { ConvexForecastStore } from '../src/server/convexStore'
-import { readPublicRuntimeConfig } from '../src/server/liveConfig'
-import type { ForecastRecord } from '../src/shared/forecastRecords'
+import { ConvexForecastStore } from '../../src/server/convexStore'
+import { readPublicRuntimeConfig } from '../../src/server/liveConfig'
+import type { ForecastRecord } from '../../src/shared/forecastRecords'
 
 type Request = { method?: string; headers: Record<string, string | string[] | undefined>; query?: Record<string, string | string[] | undefined> }
 type Response = { status: (code: number) => Response; json: (body: unknown) => Response; setHeader: (name: string, value: string) => Response; end: () => void }

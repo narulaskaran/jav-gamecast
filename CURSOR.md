@@ -21,7 +21,7 @@ Audience: engineers playing with Jev. This is a technical demo / playground, not
 - Server routes under `api/analysis/*`, `api/datasets/*`, `api/share/*`, and `api/browse`. Drafting uses OpenRouter; only run may call Jev.
 - UploadThing stores original CSV blobs; Convex stores dataset metadata, immutable row refs, run progress, and incremental predictions.
 - Production fails closed without `CONVEX_URL` + `CONVEX_WRITE_SECRET`. BYOD upload/URL also fails closed without `UPLOADTHING_TOKEN`. Sample on-ramp does not need UploadThing.
-- Historical Gamecast forecast/ESPN cron code still exists. Do not treat it as the active product surface.
+- Historical Gamecast forecast/ESPN cron code still exists under `historical/api` and `src/server` forecast/ESPN modules. Those routes are not shipped as Vercel functions. Do not treat them as the active product surface.
 
 ## Boundaries
 

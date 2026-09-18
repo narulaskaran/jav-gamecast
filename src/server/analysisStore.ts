@@ -1,14 +1,14 @@
 import { ConvexHttpClient } from 'convex/browser'
-import { api } from '../../convex/_generated/api'
+import { api } from './convexGenerated.js'
 import {
   cloneAnalysisSnapshot,
   normalizeSnapshot,
   type AnalysisRowInput,
   type AnalysisSnapshot,
   type AnalysisStorage,
-} from '../shared/analysis'
-import type { DatasetRecord } from '../shared/dataset'
-import { hashRow, type DatasetStorage } from './datasetStore'
+} from '../shared/analysis.js'
+import type { DatasetRecord } from '../shared/dataset.js'
+import { hashRow, type DatasetStorage } from './datasetStore.js'
 
 /**
  * Server-only durable analysis boundary. Authenticated actions are used for

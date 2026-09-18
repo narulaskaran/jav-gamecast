@@ -1,10 +1,10 @@
-import { DatasetError, PUBLIC_DATA_WARNING } from '../dataset/csvTypes'
-import { validateCsvBytes, validateCsvText } from '../dataset/validateDataset'
-import type { DatasetIntakeStatus, DatasetPreview } from '../shared/dataset'
-import { AnalysisError } from './analysis'
-import { fetchPublicCsv, type DatasetFetchOptions } from './datasetFetch'
-import { analysisSourceFromDatasetStore, hashBytes, toDatasetPreview, toDatasetRecord, type DatasetStorage } from './datasetStore'
-import { UnconfiguredBlobStore, type CsvBlobStore } from './uploadthing'
+import { DatasetError, PUBLIC_DATA_WARNING } from '../dataset/csvTypes.js'
+import { validateCsvBytes, validateCsvText } from '../dataset/validateDataset.js'
+import type { DatasetIntakeStatus, DatasetPreview } from '../shared/dataset.js'
+import { AnalysisError } from './analysis.js'
+import { fetchPublicCsv, type DatasetFetchOptions } from './datasetFetch.js'
+import { analysisSourceFromDatasetStore, hashBytes, toDatasetPreview, toDatasetRecord, type DatasetStorage } from './datasetStore.js'
+import { UnconfiguredBlobStore, type CsvBlobStore } from './uploadthing.js'
 
 export interface DatasetIntakeServiceOptions {
   datasets: DatasetStorage

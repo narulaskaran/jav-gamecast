@@ -1,6 +1,6 @@
-import { DatasetError } from '../dataset/csvTypes'
-import { AnalysisError, type AnalysisService } from './analysis'
-import type { AnalysisSnapshot } from '../shared/analysis'
+import { DatasetError } from '../dataset/csvTypes.js'
+import { AnalysisError, type AnalysisService } from './analysis.js'
+import type { AnalysisSnapshot } from '../shared/analysis.js'
 
 export interface AnalysisApiRequest {
   method?: string
@@ -36,14 +36,21 @@ const applyHeaders = (response: AnalysisApiResponse): void => {
   response.setHeader('Content-Type', 'application/json')
 }
 
-const errorResponse = (response: AnalysisApiResponse, error: unknown): void => {
-  if (error instanceof DatasetError) {
-    response.status(error.statusCode).json({ error: error.code })
-    return
+const errorShape = (error: unknown): { statusCode: number; code: string } | undefined => {
+  if (error instanceof DatasetError || error instanceof AnalysisError) {
+    return { statusCode: error.statusCode, code: error.code }
   }
-  const statusCode = error instanceof AnalysisError ? error.statusCode : 500
-  const code = error instanceof AnalysisError ? error.code : 'ANALYSIS_UNAVAILABLE'
-  response.status(statusCode).json({ error: code })
+  if (typeof error === 'object' && error !== null && 'statusCode' in error && 'code' in error) {
+    const statusCode = error.statusCode
+    const code = error.code
+    if (typeof statusCode === 'number' && typeof code === 'string') return { statusCode, code }
+  }
+  return undefined
+}
+
+const errorResponse = (response: AnalysisApiResponse, error: unknown): void => {
+  const shaped = errorShape(error)
+  response.status(shaped?.statusCode ?? 500).json({ error: shaped?.code ?? 'ANALYSIS_UNAVAILABLE' })
 }
 
 const snapshotBody = (snapshot: AnalysisSnapshot): AnalysisSnapshot => snapshot

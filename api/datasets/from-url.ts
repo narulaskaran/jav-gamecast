@@ -1,4 +1,4 @@
-import { createDatasetFromUrlHandler } from '../../src/server/datasetApi'
-import { datasetIntake } from '../../src/server/analysisRuntime'
+import { createDatasetFromUrlHandler } from '../../src/server/datasetApi.js'
+import { datasetIntake } from '../../src/server/analysisRuntime.js'
 
 export default createDatasetFromUrlHandler(datasetIntake)

@@ -13,9 +13,9 @@ import {
   ANALYSIS_CLASS_NAMES,
   ANALYSIS_MAX_QUERY_LENGTH,
   type AnalysisClassification,
-} from '../shared/analysis'
-import { AnalysisError, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis'
-import { createTypeSafeSdkConfig, hasTypeSafeApiKey, JEV_MODEL } from './jev'
+} from '../shared/analysis.js'
+import { AnalysisError, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis.js'
+import { createTypeSafeSdkConfig, hasTypeSafeApiKey, JEV_MODEL } from './jev.js'
 
 export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 export const OPENROUTER_MODEL = 'openai/gpt-4o-mini'

@@ -1,5 +1,5 @@
-import { createDatasetFromCsvHandler } from '../../src/server/datasetApi'
-import { datasetIntake } from '../../src/server/analysisRuntime'
+import { createDatasetFromCsvHandler } from '../../src/server/datasetApi.js'
+import { datasetIntake } from '../../src/server/analysisRuntime.js'
 
 export const config = {
   api: {

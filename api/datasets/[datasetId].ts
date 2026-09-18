@@ -1,4 +1,4 @@
-import { createDatasetReadHandler } from '../../src/server/datasetApi'
-import { datasetIntake } from '../../src/server/analysisRuntime'
+import { createDatasetReadHandler } from '../../src/server/datasetApi.js'
+import { datasetIntake } from '../../src/server/analysisRuntime.js'
 
 export default createDatasetReadHandler(datasetIntake)

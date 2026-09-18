@@ -1,4 +1,4 @@
-import type { FeedStatus, GameState, GameStatus } from '../types'
+import type { FeedStatus, GameState, GameStatus } from '../types.js'
 
 /**
  * The only state accepted by the forecast worker: the server-normalized

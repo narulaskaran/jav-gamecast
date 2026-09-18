@@ -1,4 +1,4 @@
-import { DatasetError } from '../dataset/csvTypes'
+import { DatasetError } from '../dataset/csvTypes.js'
 
 export interface StoredCsvBlob {
   blobKey: string

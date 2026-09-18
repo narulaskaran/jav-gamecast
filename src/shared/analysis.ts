@@ -1,5 +1,5 @@
-import type { FootballModelInput } from '../fixtures/footballTimeline'
-import type { AnalysisRowInput, DatasetSourceType } from './dataset'
+import type { FootballModelInput } from '../fixtures/footballTimeline.js'
+import type { AnalysisRowInput, DatasetSourceType } from './dataset.js'
 
 export const ANALYSIS_MAX_CALLS = 5_000
 export const ANALYSIS_MAX_ROWS = 5_000

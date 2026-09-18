@@ -1,4 +1,4 @@
-import rawFixture from './data/seahawks-super-bowl-2026.json'
+import rawFixture from './data/seahawks-super-bowl-2026.json' with { type: 'json' }
 
 export const FOOTBALL_FIXTURE_ID = 'seahawks-super-bowl-2026-jev-v1'
 export const FOOTBALL_GAME_ID = '2025_22_SEA_NE'

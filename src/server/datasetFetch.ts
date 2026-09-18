@@ -1,6 +1,6 @@
-import { CSV_MAX_BYTES, DatasetError } from '../dataset/csvTypes'
-import { assertPublicHttpsCsvUrl, isResolvedAddressSafe } from '../dataset/urlSafety'
-import { sniffCsvContentType } from '../dataset/validateDataset'
+import { CSV_MAX_BYTES, DatasetError } from '../dataset/csvTypes.js'
+import { assertPublicHttpsCsvUrl, isResolvedAddressSafe } from '../dataset/urlSafety.js'
+import { sniffCsvContentType } from '../dataset/validateDataset.js'
 
 const FETCH_TIMEOUT_MS = 12_000
 const MAX_REDIRECTS = 3

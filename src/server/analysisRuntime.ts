@@ -1,10 +1,10 @@
-import { AnalysisError, AnalysisService, type AnalysisStorage } from './analysis'
-import { ConvexAnalysisStore, ConvexDatasetStore } from './analysisStore'
-import { OpenRouterDraftProvider, TypeSafeClassifierProvider } from './analysisProviders'
-import { isConvexWriteConfigured, readConvexRuntimeConfig } from './liveConfig'
-import { DatasetIntakeService, unconfiguredIntake } from './datasetIntake'
-import { analysisSourceFromDatasetStore, type DatasetStorage } from './datasetStore'
-import { createCsvBlobStore } from './uploadthing'
+import { AnalysisError, AnalysisService, type AnalysisStorage } from './analysis.js'
+import { ConvexAnalysisStore, ConvexDatasetStore } from './analysisStore.js'
+import { OpenRouterDraftProvider, TypeSafeClassifierProvider } from './analysisProviders.js'
+import { isConvexWriteConfigured, readConvexRuntimeConfig } from './liveConfig.js'
+import { DatasetIntakeService, unconfiguredIntake } from './datasetIntake.js'
+import { analysisSourceFromDatasetStore, type DatasetStorage } from './datasetStore.js'
+import { createCsvBlobStore } from './uploadthing.js'
 
 class UnconfiguredAnalysisStore implements AnalysisStorage {
   private unavailable(): never {

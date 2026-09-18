@@ -6,7 +6,7 @@ import {
   CSV_MAX_ROWS,
   DatasetError,
   type ParsedCsv,
-} from './csvTypes'
+} from './csvTypes.js'
 
 const UTF8_BOM = '\uFEFF'
 const DELIMITERS = [',', '\t', ';', '|'] as const

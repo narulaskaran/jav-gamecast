@@ -1,4 +1,4 @@
-import { DatasetError } from './csvTypes'
+import { DatasetError } from './csvTypes.js'
 
 const BLOCKED_HOSTS = new Set([
   'localhost',
