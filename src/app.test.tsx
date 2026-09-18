@@ -167,7 +167,7 @@ describe('Jev playground flow', () => {
     expect(api.start).not.toHaveBeenCalled()
     const runButton = screen.getByRole('button', { name: /run jev/i })
     expect(runButton).toBeEnabled()
-    expect(screen.getByText('Analyzing H1 plays (39 of 71)')).toBeInTheDocument()
+    expect(screen.getByText('Classifying 39 of 71 rows (H1 plays).')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^copy$/i })).toBeInTheDocument()
     expect(document.querySelector('[data-stage="query"]')).toBeTruthy()
     expect(screen.getByRole('button', { name: /^try sample$/i })).toBeInTheDocument()
@@ -277,7 +277,7 @@ describe('Jev playground flow', () => {
     })) })
     await startSampleRun(api)
     expect(await screen.findByText('12 / 39 rows')).toBeInTheDocument()
-    expect(screen.getAllByText(/analyzing h1 plays \(39 of 71\)/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/classifying 39 of 71 rows \(h1 plays\)/i).length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { level: 2, name: 'Results' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Class distribution' })).toBeInTheDocument()
     expect(screen.getByText('Running')).toBeInTheDocument()
@@ -759,14 +759,15 @@ describe('Jev playground flow', () => {
     }
   })
 
-  it('labels an immediate complete start as a saved run', async () => {
+  it('shows classified subset copy on a completed run without a saved-share sentence', async () => {
     const api = makeApi({
       start: vi.fn(async () => snapshot({ status: 'complete' })),
       read: vi.fn(async () => snapshot({ status: 'complete' })),
     })
     await startSampleRun(api)
-    expect(await screen.findByText(/saved\. share copies a public link/i)).toBeInTheDocument()
+    expect(await screen.findByText('Classified 39 of 71 rows (H1 plays).')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
+    expect(screen.queryByText(/saved\. share copies a public link/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/^saved run\.$/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/can take a few minutes/i)).not.toBeInTheDocument()
   })
@@ -782,7 +783,7 @@ describe('Jev playground flow', () => {
       read: vi.fn(async () => running),
     })
     await startSampleRun(api)
-    expect(await screen.findByText(/live run/i)).toHaveTextContent(/analyzing h1 plays \(39 of 71\)/i)
+    expect(await screen.findByText(/live run/i)).toHaveTextContent(/classifying 39 of 71 rows \(h1 plays\)/i)
     expect(screen.getByText(/live run/i)).toHaveTextContent(/can take a few minutes/i)
   })
 

@@ -48,7 +48,7 @@ export const resumeRunLabel = (completedRows: number): string => (
   completedRows > 0 ? `Resume from row ${completedRows + 1}` : 'Retry'
 )
 
-export const savedRunCopy = (): string => 'Saved. Share copies a public link.'
+export const savedRunCopy = (): string => ''
 
 export const runSubsetCopy = ({
   analyzedRows,
@@ -70,9 +70,9 @@ export const runSubsetCopy = ({
     half = half ?? 'H1'
   }
   if (!rows || analyzedRows < 1 || analyzedRows >= rows) return undefined
-  const verb = tense === 'analyzed' ? 'Analyzed' : 'Analyzing'
-  if (half === 'H1') return `${verb} H1 plays (${analyzedRows} of ${rows})`
-  return `${verb} a subset (${analyzedRows} of ${rows} rows)`
+  const verb = tense === 'analyzed' ? 'Classified' : 'Classifying'
+  if (half === 'H1') return `${verb} ${analyzedRows} of ${rows} rows (H1 plays).`
+  return `${verb} ${analyzedRows} of ${rows} rows.`
 }
 
 export const percent = (value: number | undefined): string => (

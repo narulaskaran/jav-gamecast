@@ -46,13 +46,13 @@ describe('run view copy', () => {
       detail: 'Jev returned a response this run could not use. Saved rows are kept. You can resume from row 32.',
     })
     expect(resumeRunLabel(31)).toBe('Resume from row 32')
-    expect(savedRunCopy()).toMatch(/share copies a public link/i)
+    expect(savedRunCopy()).toBe('')
   })
 
   it('explains fixture H1 subset runs without changing the 39 vs 71 split', () => {
-    expect(runSubsetCopy({ analyzedRows: 39, datasetRows: 71, sourceType: 'fixture', inputHalf: 'H1' })).toBe('Analyzing H1 plays (39 of 71)')
-    expect(runSubsetCopy({ analyzedRows: 39, sourceType: 'fixture', tense: 'analyzed' })).toBe('Analyzed H1 plays (39 of 71)')
+    expect(runSubsetCopy({ analyzedRows: 39, datasetRows: 71, sourceType: 'fixture', inputHalf: 'H1' })).toBe('Classifying 39 of 71 rows (H1 plays).')
+    expect(runSubsetCopy({ analyzedRows: 39, sourceType: 'fixture', tense: 'analyzed' })).toBe('Classified 39 of 71 rows (H1 plays).')
     expect(runSubsetCopy({ analyzedRows: 71, datasetRows: 71, sourceType: 'fixture' })).toBeUndefined()
-    expect(runSubsetCopy({ analyzedRows: 10, datasetRows: 40, sourceType: 'upload' })).toBe('Analyzing a subset (10 of 40 rows)')
+    expect(runSubsetCopy({ analyzedRows: 10, datasetRows: 40, sourceType: 'upload' })).toBe('Classifying 10 of 40 rows.')
   })
 })
