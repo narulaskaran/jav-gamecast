@@ -22,6 +22,7 @@ const analysisArgs = {
     completedCalls: v.number(),
     totalCalls: v.number(),
   }),
+  questionKind: v.optional(v.union(v.literal('noul'), v.literal('score'), v.literal('choice'))),
   classes: v.optional(v.array(v.string())),
   columns: v.optional(v.array(v.string())),
   currentFixtureRow: v.optional(v.any()),
@@ -41,6 +42,7 @@ type DurableSnapshot = {
   createdAt: string
   updatedAt: string
   progress: { completedRows: number; totalRows: number; completedCalls: number; totalCalls: number }
+  questionKind?: 'noul' | 'score' | 'choice'
   classes?: string[]
   columns?: string[]
   currentFixtureRow?: unknown
@@ -93,6 +95,7 @@ const snapshotDocument = (snapshot: {
   createdAt: string
   updatedAt: string
   progress: { completedRows: number; totalRows: number; completedCalls: number; totalCalls: number }
+  questionKind?: 'noul' | 'score' | 'choice'
   classes?: string[]
   columns?: string[]
   currentFixtureRow?: unknown
@@ -107,6 +110,7 @@ const snapshotDocument = (snapshot: {
   createdAt: snapshot.createdAt,
   updatedAt: snapshot.updatedAt,
   progress: snapshot.progress,
+  ...(snapshot.questionKind === undefined ? {} : { questionKind: snapshot.questionKind }),
   ...(snapshot.classes === undefined ? {} : { classes: snapshot.classes }),
   ...(snapshot.columns === undefined ? {} : { columns: snapshot.columns }),
   ...(snapshot.currentFixtureRow === undefined ? {} : { currentFixtureRow: snapshot.currentFixtureRow }),
@@ -123,6 +127,7 @@ const publicSnapshot = (document: Record<string, unknown>, rows: unknown[]) => (
   createdAt: document.createdAt,
   updatedAt: document.updatedAt,
   progress: document.progress,
+  questionKind: document.questionKind,
   classes: document.classes ?? [],
   columns: document.columns ?? [],
   ...(document.currentFixtureRow === undefined ? {} : { currentFixtureRow: document.currentFixtureRow }),
@@ -168,7 +173,7 @@ export const putAnalysisSnapshotInternal = internalMutation({
     const currentRows = await ctx.db.query('analysisRows').withIndex('by_analysis_row', (q: any) => q.eq('analysisId', snapshot.analysisId)).take(MAX_ROWS)
     for (const row of currentRows) await ctx.db.delete(row._id)
     for (const row of snapshot.resultRows) {
-      const durableRow = row as { rowIndex: number; input: unknown; model: string; selectedClass?: string; probabilities?: unknown; confidence?: number; error?: { code: string; retryable: boolean } }
+      const durableRow = row as { rowIndex: number; input: unknown; model: string; selectedClass?: string; probabilities?: unknown; confidence?: number; value?: number; questionKind?: 'noul' | 'score' | 'choice'; error?: { code: string; retryable: boolean } }
       await ctx.db.insert('analysisRows', { analysisId: snapshot.analysisId, ...durableRow })
     }
     return publicSnapshot(document, snapshot.resultRows)

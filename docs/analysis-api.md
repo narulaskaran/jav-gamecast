@@ -1,6 +1,6 @@
 # Jev Data Analysis API contract
 
-The playground accepts three dataset sources: the checked-in sample fixture, a CSV file upload, and a public HTTPS CSV URL. All three use the same draft → edit query → run worker and the same live class-distribution chart. The browser never calls Jev, OpenRouter, UploadThing, or privileged Convex writes.
+The playground accepts three dataset sources: the checked-in sample fixture, a CSV file upload, and a public HTTPS CSV URL. All three use the same draft → edit query → run worker. Chart type follows the drafted query: Noul/Score render a live series; Choice renders class-distribution bars. The sample default task is win likelihood per play (Jev Noul). The browser never calls Jev, OpenRouter, UploadThing, or privileged Convex writes.
 
 The checked-in football fixture is `seahawks-super-bowl-2026-jev-v1`; it has 39 H1 input rows and 32 H2 evaluation rows. H2 rows, labels, final scores, and postgame fields are never sent to Jev. Super Bowl copy is illustrative sample data only.
 
@@ -41,24 +41,25 @@ Public URLs must be HTTPS, have no credentials, return CSV directly, and must no
 Request JSON (sample or BYOD):
 
 ```json
-{"datasetId":"seahawks-super-bowl-2026-jev-v1","task":"Classify each row using the visible columns."}
+{"datasetId":"seahawks-super-bowl-2026-jev-v1","task":"Win likelihood of the game per play."}
 ```
 
-`fixtureId` remains accepted for the sample dataset. The route calls the server-only OpenRouter adapter using `OPENROUTER_KEY`. It returns an editable query and safe metadata:
+`fixtureId` remains accepted for the sample dataset. The route calls the server-only OpenRouter adapter using `OPENROUTER_KEY`. It returns an editable query and safe metadata. Draft honors the user task: a win-likelihood prompt is a Jev Noul, not leftover fixture player-yard classes.
 
 ```json
 {
   "fixtureId":"seahawks-super-bowl-2026-jev-v1",
   "datasetId":"seahawks-super-bowl-2026-jev-v1",
   "sourceType":"fixture",
-  "query":"Classify each row using the visible columns.",
+  "query":"Will SEA win given this play state?",
   "metadata":{
     "provider":"openrouter",
     "model":"openai/gpt-4o-mini",
     "rowCount":39,
     "inputHalf":"H1",
     "labelHalf":"H2",
-    "classes":["K.Walker","C.Kupp","J.Smith-Njigba","Other/Tie"],
+    "questionKind":"noul",
+    "classes":[],
     "columns":["play_id"],
     "displayName":"Super Bowl Seahawks demo"
   }
@@ -74,7 +75,7 @@ OpenRouter errors are returned as stable error codes with 4xx/5xx status. Provid
 Request JSON:
 
 ```json
-{"datasetId":"seahawks-super-bowl-2026-jev-v1","query":"Classify each row using the visible columns.","classes":["K.Walker","C.Kupp","J.Smith-Njigba","Other/Tie"]}
+{"datasetId":"seahawks-super-bowl-2026-jev-v1","query":"Will SEA win given this play state?","questionKind":"noul"}
 ```
 
 `analysisId` is optional. Supplying it again with the same fixture and query is idempotent; it does not create another run. The route returns `202` with a queued snapshot and starts execution through the server-only Jev adapter. This is the only route that can start Jev execution. Drafting, editing the query, page load, status reads, and share reads do not call Jev.
@@ -93,19 +94,20 @@ A bounded snapshot has this shape:
   "fixtureId":"seahawks-super-bowl-2026-jev-v1",
   "datasetId":"seahawks-super-bowl-2026-jev-v1",
   "sourceType":"fixture",
-  "query":"...",
+  "query":"Will SEA win given this play state?",
   "status":"queued",
   "createdAt":"...",
   "updatedAt":"...",
   "progress":{"completedRows":0,"totalRows":39,"completedCalls":0,"totalCalls":39},
-  "classes":["K.Walker","C.Kupp","J.Smith-Njigba","Other/Tie"],
+  "questionKind":"noul",
+  "classes":[],
   "columns":["play_id"],
   "currentFixtureRow":{"rowIndex":0,"input":{"play_id":57,"qtr":1}},
   "resultRows":[]
 }
 ```
 
-`status` is one of `queued`, `running`, `complete`, or `error`. Result rows are sorted by `rowIndex` on every read. Each completed row contains the H1 input plus the Jev model, selected class, per-class probabilities, and optional confidence. Errors expose only a stable code and retryability flag; partial result rows remain bounded and readable.
+`status` is one of `queued`, `running`, `complete`, or `error`. Result rows are sorted by `rowIndex` on every read. Each completed row contains the H1 input plus the Jev model and the typed answer: Noul/Score store `value` (P(win) or normalized score); Choice stores selected class, per-class probabilities, and optional confidence. CSV columns such as `wpa` are inputs, not Jev outputs. Errors expose only a stable code and retryability flag; partial result rows remain bounded and readable.
 
 ## Public share read
 

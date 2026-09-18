@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from '
 import { classColor } from '../runView/classColor'
 import { areRailPropsEqual } from '../runView/chartProps'
 import { RAIL_ITEM_SIZE, railWindow } from '../runView/railWindow'
+import type { ChartVisualKind } from '../shared/questionKind'
 import type { AnalysisResultRow } from '../shared/analysis'
 
 const RailItem = memo(function RailItem({
@@ -44,12 +45,14 @@ export const RowRail = memo(function RowRail({
   totalRows,
   playheadIndex,
   classes = [],
+  chartKind = 'bars',
   onSelect,
 }: {
   rows: readonly AnalysisResultRow[]
   totalRows: number
   playheadIndex: number
   classes?: readonly string[]
+  chartKind?: ChartVisualKind
   onSelect: (index: number) => void
 }) {
   const listRef = useRef<HTMLUListElement>(null)
@@ -105,7 +108,7 @@ export const RowRail = memo(function RowRail({
               key={row.rowIndex}
               index={index}
               label={`Row ${row.rowIndex + 1} of ${totalRows}`}
-              selectedClass={row.selectedClass}
+              selectedClass={chartKind === 'series' ? undefined : row.selectedClass}
               selected={index === playheadIndex}
               color={row.selectedClass ? classColor(row.selectedClass, classes) : ''}
               onSelect={onSelect}

@@ -1,4 +1,5 @@
 import type { AnalysisResultRow } from '../shared/analysis'
+import type { ChartVisualKind, JevQuestionKind } from '../shared/questionKind'
 import type { PlayheadMotion } from './playhead'
 
 export const barWidth = (count: number, scale: number): string => {
@@ -16,6 +17,8 @@ type ChartVisual = {
   classes?: readonly string[]
   totalRows?: number
   motion?: PlayheadMotion
+  questionKind?: JevQuestionKind
+  chartKind?: ChartVisualKind
 }
 
 export const areChartPropsEqual = (prev: ChartVisual, next: ChartVisual): boolean => (
@@ -23,9 +26,13 @@ export const areChartPropsEqual = (prev: ChartVisual, next: ChartVisual): boolea
   && prev.motion === next.motion
   && prev.totalRows === next.totalRows
   && prev.rows.length === next.rows.length
+  && prev.questionKind === next.questionKind
+  && prev.chartKind === next.chartKind
   && sameStringList(prev.classes, next.classes)
   && prev.rows[prev.playheadIndex]?.selectedClass === next.rows[next.playheadIndex]?.selectedClass
+  && prev.rows[prev.playheadIndex]?.value === next.rows[next.playheadIndex]?.value
   && prev.rows[prev.rows.length - 1]?.rowIndex === next.rows[next.rows.length - 1]?.rowIndex
+  && prev.rows[prev.rows.length - 1]?.value === next.rows[next.rows.length - 1]?.value
 )
 
 type RailVisual = {
@@ -33,13 +40,16 @@ type RailVisual = {
   playheadIndex: number
   totalRows: number
   classes?: readonly string[]
+  chartKind?: ChartVisualKind
 }
 
 export const areRailPropsEqual = (prev: RailVisual, next: RailVisual): boolean => (
   prev.playheadIndex === next.playheadIndex
   && prev.totalRows === next.totalRows
   && prev.rows.length === next.rows.length
+  && prev.chartKind === next.chartKind
   && sameStringList(prev.classes, next.classes)
   && prev.rows[prev.playheadIndex]?.selectedClass === next.rows[next.playheadIndex]?.selectedClass
+  && prev.rows[prev.playheadIndex]?.value === next.rows[next.playheadIndex]?.value
   && prev.rows[prev.rows.length - 1]?.rowIndex === next.rows[next.rows.length - 1]?.rowIndex
 )

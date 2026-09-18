@@ -1,5 +1,12 @@
 import type { FootballModelInput } from '../fixtures/footballTimeline.js'
 import type { AnalysisRowInput, DatasetSourceType } from './dataset.js'
+import type { JevQuestionKind } from './questionKind.js'
+
+export type { JevQuestionKind } from './questionKind.js'
+export {
+  SAMPLE_WIN_LIKELIHOOD_TASK,
+  SAMPLE_WIN_NOUL_QUERY,
+} from './questionKind.js'
 
 export const ANALYSIS_MAX_CALLS = 5_000
 export const ANALYSIS_MAX_ROWS = 5_000
@@ -24,18 +31,22 @@ export interface AnalysisProgress {
 
 export interface AnalysisClassification {
   model: string
-  selectedClass: string
-  probabilities: Record<string, number>
+  questionKind?: JevQuestionKind
+  selectedClass?: string
+  probabilities?: Record<string, number>
   confidence?: number
+  value?: number
 }
 
 export interface AnalysisResultRow {
   rowIndex: number
   input: AnalysisRowInput
   model: string
+  questionKind?: JevQuestionKind
   selectedClass?: string
   probabilities?: Record<string, number>
   confidence?: number
+  value?: number
   error?: { code: string; retryable: boolean }
 }
 
@@ -49,6 +60,7 @@ export interface AnalysisSnapshot {
   createdAt: string
   updatedAt: string
   progress: AnalysisProgress
+  questionKind?: JevQuestionKind
   classes: readonly string[]
   columns: readonly string[]
   currentFixtureRow?: { rowIndex: number; input: AnalysisRowInput }
@@ -74,6 +86,7 @@ export interface AnalysisDraftResult {
     classes: readonly string[]
     columns: readonly string[]
     displayName: string
+    questionKind?: JevQuestionKind
     inputHalf?: 'H1'
     labelHalf?: 'H2'
   }
@@ -85,6 +98,7 @@ export interface AnalysisStartInput {
   query: string
   analysisId?: string
   classes?: readonly string[]
+  questionKind?: JevQuestionKind
 }
 
 export interface AnalysisStorage {
@@ -109,7 +123,8 @@ export const normalizeSnapshot = (snapshot: AnalysisSnapshot): AnalysisSnapshot 
     datasetId,
     fixtureId: snapshot.fixtureId || datasetId,
     sourceType: snapshot.sourceType ?? 'fixture',
-    classes: snapshot.classes && snapshot.classes.length > 0 ? snapshot.classes : [...ANALYSIS_CLASS_NAMES],
+    questionKind: snapshot.questionKind,
+    classes: snapshot.classes ?? [],
     columns: snapshot.columns ?? [],
   }
 }

@@ -3,6 +3,8 @@ import { classDistribution, distributionAt } from '../dataset/classDistribution'
 import { classColor } from '../runView/classColor'
 import { areChartPropsEqual, barWidth } from '../runView/chartProps'
 import { clampPlayhead, type PlayheadMotion } from '../runView/playhead'
+import { areaPath, formatPercentTick, jevSeriesPoints, linePath, seriesX } from '../runView/seriesPath'
+import { chartVisualFor, inferQuestionKind, type ChartVisualKind, type JevQuestionKind } from '../shared/questionKind'
 import type { AnalysisResultRow } from '../shared/analysis'
 
 const EMPTY_CLASSES: readonly string[] = []
@@ -42,6 +44,8 @@ export const ResultsChart = memo(function ResultsChart({
   classes = EMPTY_CLASSES,
   totalRows = 0,
   motion = 'tick',
+  questionKind,
+  chartKind,
   onSeek,
 }: {
   rows: readonly AnalysisResultRow[]
@@ -49,19 +53,40 @@ export const ResultsChart = memo(function ResultsChart({
   classes?: readonly string[]
   totalRows?: number
   motion?: PlayheadMotion
+  questionKind?: JevQuestionKind
+  chartKind?: ChartVisualKind
   onSeek: (index: number, phase?: 'scrub' | 'release') => void
 }) {
   const plotRef = useRef<HTMLDivElement>(null)
   const completedCount = rows.length
   const prefixCount = completedCount === 0 ? 0 : playheadIndex + 1
+  const kind = questionKind
+    ?? rows.find((row) => row.questionKind)?.questionKind
+    ?? inferQuestionKind('', classes)
+  const visual = chartKind ?? chartVisualFor(kind)
   const values = useMemo(
-    () => (completedCount === 0 ? classDistribution([], classes) : distributionAt(rows, prefixCount, classes)),
-    [classes, completedCount, prefixCount, rows],
+    () => (visual === 'bars' ? (completedCount === 0 ? classDistribution([], classes) : distributionAt(rows, prefixCount, classes)) : []),
+    [classes, completedCount, prefixCount, rows, visual],
   )
-  const classified = values.reduce((sum, item) => sum + item.count, 0)
+  const series = useMemo(
+    () => (visual === 'series' ? jevSeriesPoints(rows, prefixCount, Math.max(totalRows, completedCount, 1)) : []),
+    [completedCount, prefixCount, rows, totalRows, visual],
+  )
+  const classified = visual === 'bars' ? values.reduce((sum, item) => sum + item.count, 0) : series.length
   const scale = Math.max(totalRows, classified, 1)
   const waiting = classified === 0
-  const latestLabel = completedCount === 0 ? 'Waiting' : `Through row ${prefixCount}`
+  const playheadValue = series.find((point) => point.rowIndex === playheadIndex)?.yValue
+  const latestLabel = completedCount === 0
+    ? 'Waiting'
+    : visual === 'series'
+      ? `Play ${prefixCount}${playheadValue === undefined ? '' : ` · ${formatPercentTick(playheadValue)}`}`
+      : `Through row ${prefixCount}`
+  const heading = visual === 'series' ? 'Win probability' : 'Class distribution'
+  const aria = waiting
+    ? 'Waiting for the first row'
+    : visual === 'series'
+      ? 'Win probability over play index'
+      : 'Class distribution visualization'
 
   const indexFromClientX = useCallback((clientX: number) => {
     const node = plotRef.current
@@ -97,12 +122,14 @@ export const ResultsChart = memo(function ResultsChart({
     onSeek(Number(event.currentTarget.value), 'release')
   }
 
+  const cursorX = seriesX(playheadIndex, Math.max(totalRows, completedCount, 1))
+
   return (
     <section className="distribution-card chart-hero" aria-labelledby="distribution-heading">
       <div className="section-heading">
         <div>
           <p className="eyebrow">Live chart</p>
-          <h3 id="distribution-heading">Class distribution</h3>
+          <h3 id="distribution-heading">{heading}</h3>
         </div>
         <span className="table-count">{latestLabel}{totalRows ? ` · ${totalRows} total` : ''}</span>
       </div>
@@ -110,8 +137,9 @@ export const ResultsChart = memo(function ResultsChart({
         className="chart-shell"
         data-motion={motion}
         data-waiting={waiting ? 'true' : 'false'}
+        data-chart-kind={visual}
         role="img"
-        aria-label={waiting ? 'Waiting for the first row' : 'Class distribution visualization'}
+        aria-label={aria}
       >
         <div
           ref={plotRef}
@@ -125,8 +153,22 @@ export const ResultsChart = memo(function ResultsChart({
             <span className="chart-y-axis" />
             <span className="chart-x-axis" />
           </div>
+          {visual === 'series' ? (
+            <div className="chart-y-ticks" aria-hidden="true">
+              <span>100%</span>
+              <span>50%</span>
+              <span>0%</span>
+            </div>
+          ) : null}
           {waiting ? <p className="chart-empty">Waiting for the first row…</p> : null}
-          {values.length > 0 ? (
+          {visual === 'series' && series.length > 0 ? (
+            <svg className="series-svg" viewBox="0 0 1 1" preserveAspectRatio="none" data-series-points={series.length}>
+              <path className="series-fill" d={areaPath(series)} />
+              <path className="series-line" d={linePath(series)} />
+              <line className="series-cursor" data-play-cursor="true" x1={cursorX} x2={cursorX} y1="0" y2="1" />
+            </svg>
+          ) : null}
+          {visual === 'bars' && values.length > 0 ? (
             <div className="distribution-chart" data-waiting={waiting ? 'true' : 'false'}>
               {values.map(({ name, count }) => (
                 <ClassBar

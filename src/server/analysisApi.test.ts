@@ -11,6 +11,7 @@ const response = (state: ResponseState) => ({
   end() { return this },
 })
 const query = 'Classify H1 rows.'
+const choiceClasses = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie']
 const service = () => new AnalysisService({
   store: new InMemoryAnalysisStore(),
   draftProvider: { async draft() { return { query, model: 'openrouter/test' } } } satisfies AnalysisDraftProvider,
@@ -37,7 +38,7 @@ describe('analysis API contract', () => {
   it('starts a run with queued status and reads it without starting another provider call', async () => {
     const instance = service()
     const runState: ResponseState = { headers: {} }
-    await createAnalysisRunHandler(instance)({ method: 'POST', headers: {}, body: { fixtureId: FOOTBALL_FIXTURE_ID, query } }, response(runState))
+    await createAnalysisRunHandler(instance)({ method: 'POST', headers: {}, body: { fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses } }, response(runState))
     expect(runState.code).toBe(202)
     const analysisId = (runState.body as { analysisId: string }).analysisId
     const readState: ResponseState = { headers: {} }
@@ -49,7 +50,7 @@ describe('analysis API contract', () => {
   it('supports the public share read path with GET only', async () => {
     const instance = service()
     const runState: ResponseState = { headers: {} }
-    await createAnalysisRunHandler(instance)({ method: 'POST', headers: {}, body: { fixtureId: FOOTBALL_FIXTURE_ID, query } }, response(runState))
+    await createAnalysisRunHandler(instance)({ method: 'POST', headers: {}, body: { fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses } }, response(runState))
     const analysisId = (runState.body as { analysisId: string }).analysisId
     const shareState: ResponseState = { headers: {} }
     await createAnalysisReadHandler(instance, { share: true })({ method: 'GET', headers: {}, query: { analysisId } }, response(shareState))

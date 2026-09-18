@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { footballFixture, getHalftimeModelInput, FOOTBALL_FIXTURE_ID, FOOTBALL_FIXTURE_SCHEMA } from '../fixtures/footballTimeline'
+import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
 import {
   ANALYSIS_MAX_CALLS,
   ANALYSIS_MAX_ROWS,
@@ -13,6 +14,7 @@ import {
 } from './analysis'
 
 const query = 'Classify the most likely leading player from the visible first-half play inputs.'
+const choiceClasses = ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie']
 const classification = (selectedClass = 'K.Walker') => ({
   model: 'jev-latest',
   selectedClass,
@@ -59,10 +61,55 @@ describe('analysis domain contract', () => {
     expect(classifierCalls).toHaveLength(0)
   })
 
+  it('honors a win-likelihood prompt instead of the fixture player-class fallback', async () => {
+    const draftCalls: Array<{ task: string; classes?: readonly string[] }> = []
+    const service = serviceWith(makeClassifier([]), {
+      async draft(input) {
+        draftCalls.push(input)
+        return {
+          query: 'Classify the most likely leading player from K.Walker, C.Kupp, J.Smith-Njigba, or Other.',
+          model: 'openrouter/test',
+          questionKind: 'choice',
+          classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'],
+        }
+      },
+    })
+    const drafted = await service.draft({ fixtureId: FOOTBALL_FIXTURE_ID, task: SAMPLE_WIN_LIKELIHOOD_TASK })
+    expect(drafted.query).toBe(SAMPLE_WIN_NOUL_QUERY)
+    expect(drafted.metadata.questionKind).toBe('noul')
+    expect(drafted.metadata.classes).toEqual([])
+    expect(JSON.stringify(drafted)).not.toMatch(/K\.Walker|C\.Kupp|Smith-Njigba|Other\/Tie/)
+    expect(draftCalls[0]?.task).toBe(SAMPLE_WIN_LIKELIHOOD_TASK)
+    expect(draftCalls[0]?.classes ?? []).toEqual([])
+  })
+
+  it('runs a Noul win-likelihood analysis from Jev values, not CSV wpa', async () => {
+    const calls: Array<{ questionKind?: string; row: Record<string, unknown> }> = []
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        calls.push({ questionKind: input.questionKind, row: input.row })
+        return { model: 'jev-latest', questionKind: 'noul', value: 0.41 }
+      },
+    }
+    const service = serviceWith(classifier)
+    const started = await service.start({
+      fixtureId: FOOTBALL_FIXTURE_ID,
+      query: SAMPLE_WIN_NOUL_QUERY,
+      questionKind: 'noul',
+    })
+    const completed = await service.run(started.analysisId)
+    expect(started.questionKind).toBe('noul')
+    expect(completed.resultRows[0]).toEqual(expect.objectContaining({ value: 0.41 }))
+    expect(completed.resultRows[0]?.selectedClass).toBeUndefined()
+    expect(calls[0]?.questionKind).toBe('noul')
+    expect(calls[0]?.row).toHaveProperty('wpa')
+    expect(completed.resultRows.every((row) => row.value === 0.41 && row.value !== row.input.wpa)).toBe(true)
+  })
+
   it('runs only H1 rows, reports bounded progress, and sorts replay rows deterministically', async () => {
     const calls: unknown[] = []
     const service = serviceWith(makeClassifier(calls))
-    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses })
     expect(started.status).toBe('queued')
     expect(started.progress).toEqual({ completedRows: 0, totalRows: 39, completedCalls: 0, totalCalls: 39 })
 
@@ -93,7 +140,7 @@ describe('analysis domain contract', () => {
       }),
     }
     const service = serviceWith(classifier)
-    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses })
     const first = service.run(started.analysisId)
     const second = service.run(started.analysisId)
     await vi.waitFor(() => expect(classifier.classify).toHaveBeenCalledTimes(1))
@@ -106,16 +153,16 @@ describe('analysis domain contract', () => {
   it('rejects an invalid fixture and invalid query before any provider call', async () => {
     const calls: unknown[] = []
     const service = serviceWith(makeClassifier(calls))
-    await expect(service.start({ fixtureId: 'not-the-fixture', query })).rejects.toMatchObject({ code: 'DATASET_NOT_FOUND', statusCode: 404 })
-    await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: '  ' })).rejects.toMatchObject({ code: 'INVALID_QUERY', statusCode: 400 })
-    await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: 'x'.repeat(20_001) })).rejects.toMatchObject({ code: 'INVALID_QUERY', statusCode: 400 })
+    await expect(service.start({ fixtureId: 'not-the-fixture', query, classes: choiceClasses })).rejects.toMatchObject({ code: 'DATASET_NOT_FOUND', statusCode: 404 })
+    await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: '  ', classes: choiceClasses })).rejects.toMatchObject({ code: 'INVALID_QUERY', statusCode: 400 })
+    await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: 'x'.repeat(20_001), classes: choiceClasses })).rejects.toMatchObject({ code: 'INVALID_QUERY', statusCode: 400 })
     expect(calls).toHaveLength(0)
   })
 
   it('returns a bounded share snapshot without invoking a provider', async () => {
     const calls: unknown[] = []
     const service = serviceWith(makeClassifier(calls))
-    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses })
     const shared = await service.share(started.analysisId)
     expect(shared).toEqual(expect.objectContaining({ analysisId: started.analysisId, fixtureId: FOOTBALL_FIXTURE_ID, status: 'queued' }))
     expect(JSON.stringify(shared)).not.toContain('OPENROUTER_KEY')
@@ -172,7 +219,7 @@ describe('analysis domain contract', () => {
       },
     }
     const service = serviceWith(classifier)
-    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'recoverable-analysis' })
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'recoverable-analysis', classes: choiceClasses })
     const failed = await service.run(started.analysisId)
     expect(failed).toMatchObject({ status: 'error', progress: { completedRows: 1 }, error: { code: 'JEV_TIMEOUT', retryable: true } })
     const recovered = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: started.analysisId })
@@ -189,7 +236,7 @@ describe('analysis domain contract', () => {
       idFactory: () => 'stale-analysis',
       now: () => 1_800_000_000_000,
     })
-    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })
+    const started = await service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, classes: choiceClasses })
     store.put({ ...started, status: 'running', updatedAt: new Date(1_800_000_000_000 - 16 * 60_000).toISOString(), progress: { ...started.progress, completedRows: 2, completedCalls: 2 }, resultRows: [{ ...classification(), rowIndex: 0, input: getHalftimeModelInput(footballFixture)[0] }, { ...classification(), rowIndex: 1, input: getHalftimeModelInput(footballFixture)[1] }] })
     await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query })).resolves.toMatchObject({ status: 'queued', progress: { completedRows: 2 }, resultRows: expect.any(Array) })
   })
@@ -208,7 +255,7 @@ describe('analysis domain contract', () => {
     const make = () => new AnalysisService({ store, classifier, draftProvider: makeDraftProvider([]), idFactory: () => `owner-${calls}`, now: () => 1_800_000_000_000 })
     const firstService = make()
     const secondService = make()
-    const started = await firstService.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'claimed-analysis' })
+    const started = await firstService.start({ fixtureId: FOOTBALL_FIXTURE_ID, query, analysisId: 'claimed-analysis', classes: choiceClasses })
     const first = firstService.run(started.analysisId)
     await vi.waitFor(() => expect(calls).toBe(1))
     await expect(secondService.run(started.analysisId)).resolves.toMatchObject({ status: 'running' })

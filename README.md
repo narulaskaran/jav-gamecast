@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL. The landing page has two equal cards: **Try sample** (the checked-in Seahawks fixture) and **Bring your own** (CSV upload or public HTTPS CSV URL). Draft a classifier query, edit it, then confirm **Run Jev**.
+Open the Vite URL. The landing page has two equal cards: **Try sample** (the checked-in Seahawks fixture; default task is win likelihood per play) and **Bring your own** (CSV upload or public HTTPS CSV URL). Draft a Jev query, edit it, then confirm **Run Jev**.
 
 Visiting or sharing a page never starts a paid Jev run. The browser never calls Jev, OpenRouter, ESPN, UploadThing, or privileged Convex writes. Tests never make a paid provider request.
 

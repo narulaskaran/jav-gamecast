@@ -98,6 +98,7 @@ export const createAnalysisRunHandler = (service: AnalysisService, options: { sc
       query: body.query as string,
       analysisId: body.analysisId as string | undefined,
       classes: Array.isArray(body.classes) ? body.classes as string[] : undefined,
+      questionKind: body.questionKind === 'noul' || body.questionKind === 'score' || body.questionKind === 'choice' ? body.questionKind : undefined,
     })
     const execution = service.run(snapshot.analysisId)
     if (options.schedule) {

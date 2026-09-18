@@ -3,6 +3,7 @@ import { ResultsChart } from './ResultsChart'
 import { ResultsTable } from './ResultsTable'
 import { RowRail } from './RowRail'
 import { useRunPlayhead } from '../runView/playhead'
+import { chartVisualFor, inferQuestionKind } from '../shared/questionKind'
 import type { AnalysisSnapshot, AnalysisStatus } from '../shared/analysis'
 
 const statusLabels: Record<AnalysisStatus, string> = {
@@ -71,6 +72,8 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     seekRef.current(next, phase)
   }, [])
   const deferredRows = useDeferredValue(rows)
+  const questionKind = inferQuestionKind(snapshot.query, snapshot.classes, snapshot.questionKind)
+  const chartKind = chartVisualFor(questionKind)
 
   return (
     <section className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
@@ -106,6 +109,8 @@ export const AnalysisRunView = memo(function AnalysisRunView({
             classes={snapshot.classes}
             totalRows={snapshot.progress.totalRows}
             motion={motion}
+            questionKind={questionKind}
+            chartKind={chartKind}
             onSeek={handleSeek}
           />
         </div>
@@ -114,6 +119,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
           totalRows={snapshot.progress.totalRows}
           playheadIndex={index}
           classes={snapshot.classes}
+          chartKind={chartKind}
           onSelect={handleSeek}
         />
       </div>

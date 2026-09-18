@@ -3,17 +3,21 @@ import {
   APIError,
   APITimeoutError,
   choice,
+  noul,
+  score,
   TypeSafeClient,
   type EntryType,
   type RequestOptions,
+  type ScoreCriteria,
   type SystemOneRequest,
   type TypeSafeClientConfig,
 } from '@typesafe-ai/sdk'
 import {
-  ANALYSIS_CLASS_NAMES,
   ANALYSIS_MAX_QUERY_LENGTH,
   type AnalysisClassification,
+  type JevQuestionKind,
 } from '../shared/analysis.js'
+import { inferQuestionKind, parseQuestionKind } from '../shared/questionKind.js'
 import { AnalysisError, type AnalysisClassifier, type AnalysisDraftProvider } from './analysis.js'
 import { createTypeSafeSdkConfig, hasTypeSafeApiKey, JEV_MODEL } from './jev.js'
 
@@ -53,12 +57,13 @@ const parseDraftClasses = (value: unknown): string[] | undefined => {
   return classes.length >= 2 ? classes : undefined
 }
 
-const contentDraft = (content: unknown): { query: string; classes?: string[] } | undefined => {
-  const fromRecord = (value: unknown): { query: string; classes?: string[] } | undefined => {
+const contentDraft = (content: unknown): { query: string; classes?: string[]; questionKind?: JevQuestionKind } | undefined => {
+  const fromRecord = (value: unknown): { query: string; classes?: string[]; questionKind?: JevQuestionKind } | undefined => {
     if (!isRecord(value)) return undefined
     const query = parseDraftQuery(value.query)
     if (!query) return undefined
-    return { query, classes: parseDraftClasses(value.classes) }
+    const levels = parseDraftClasses(value.levels) ?? parseDraftClasses(value.classes)
+    return { query, classes: levels, questionKind: parseQuestionKind(value.questionKind) }
   }
   if (isRecord(content)) return fromRecord(content)
   if (typeof content !== 'string') return undefined
@@ -97,7 +102,16 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
     this.fetcher = options.fetch ?? globalThis.fetch
   }
 
-  async draft(input: { fixtureId: string; datasetId: string; task: string; classes: readonly string[]; columns?: readonly string[]; sampleRows?: Array<Record<string, unknown>>; sourceType?: string }): Promise<{ query: string; model: string; classes?: string[] }> {
+  async draft(input: {
+    fixtureId: string
+    datasetId: string
+    task: string
+    classes?: readonly string[]
+    columns?: readonly string[]
+    sampleRows?: Array<Record<string, unknown>>
+    sourceType?: string
+    questionKindHint?: JevQuestionKind
+  }): Promise<{ query: string; model: string; classes?: string[]; questionKind?: JevQuestionKind }> {
     if (!this.apiKey) throw new OpenRouterConfigurationError()
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
@@ -109,8 +123,17 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
           model: this.model,
           temperature: 0,
           messages: [
-            { role: 'system', content: 'Return JSON only: {"query":"...","classes":["..."]}. Draft a concise editable Jev classifier query and 2-32 class labels. Do not include provider credentials, raw secrets, or executable code.' },
-            { role: 'user', content: JSON.stringify({ fixtureId: input.fixtureId, datasetId: input.datasetId, task: input.task, classes: input.classes, columns: input.columns, sampleRows: input.sampleRows, sourceType: input.sourceType }) },
+            { role: 'system', content: 'Return JSON only: {"query":"...","questionKind":"noul"|"score"|"choice","classes":["..."]}. Honor the user task. Choose the Jev primitive that matches the answer: noul = yes/no probability 0-1 (for per-play win likelihood use "Will SEA win given this play state?"); score = ordered levels; choice = categorical labels the user asked for. Do not substitute a leftover demo player-yards classifier (K.Walker, C.Kupp, J.Smith-Njigba, Other). Do not treat CSV columns such as wpa or epa as the model output. Do not include credentials or executable code.' },
+            { role: 'user', content: JSON.stringify({
+              fixtureId: input.fixtureId,
+              datasetId: input.datasetId,
+              task: input.task,
+              ...(input.classes && input.classes.length >= 2 ? { classes: input.classes } : {}),
+              columns: input.columns,
+              sampleRows: input.sampleRows,
+              sourceType: input.sourceType,
+              questionKindHint: input.questionKindHint,
+            }) },
           ],
         }),
         signal: controller.signal,
@@ -127,7 +150,7 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
       const draft = contentDraft(message)
       if (!draft?.query) throw new OpenRouterProviderError('OPENROUTER_MALFORMED', 502, false)
       const model = isRecord(body) && typeof body.model === 'string' && body.model.trim() ? body.model.trim() : this.model
-      return { query: draft.query, model, ...(draft.classes ? { classes: draft.classes } : {}) }
+      return { query: draft.query, model, ...(draft.classes ? { classes: draft.classes } : {}), ...(draft.questionKind ? { questionKind: draft.questionKind } : {}) }
     } catch (error) {
       if (error instanceof AnalysisError) throw error
       if (isAbortError(error)) throw new OpenRouterProviderError('OPENROUTER_TIMEOUT', 504, true)
@@ -140,9 +163,21 @@ export class OpenRouterDraftProvider implements AnalysisDraftProvider {
 
 const isAbortError = (error: unknown): boolean => isRecord(error) && error.name === 'AbortError'
 
-const classifierCriteriaFor = (classes: readonly string[]): Record<string, string> => {
-  const names = classes.length >= 2 ? classes : ANALYSIS_CLASS_NAMES
-  return Object.fromEntries(names.map((name) => [name, `the ${name} class`]))
+const classifierCriteriaFor = (classes: readonly string[]): Record<string, string> => (
+  Object.fromEntries(classes.map((name) => [name, `the ${name} class`]))
+)
+
+const scoreCriteriaFor = (classes: readonly string[]): ScoreCriteria => {
+  const levels = classes.length >= 2 ? classes : ['Low', 'Medium', 'High']
+  return [levels[0], levels[1], ...levels.slice(2)]
+}
+
+const questionFor = (input: Parameters<AnalysisClassifier['classify']>[0]) => {
+  const kind = inferQuestionKind(input.query, input.classes, input.questionKind)
+  if (kind === 'noul') return noul(input.query)
+  if (kind === 'score') return score(input.query, scoreCriteriaFor(input.classes))
+  if (!input.classes || input.classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
+  return choice(input.query, classifierCriteriaFor(input.classes))
 }
 
 export interface ClassifierClientBoundary {
@@ -182,15 +217,15 @@ export class TypeSafeClassifierProvider implements AnalysisClassifier {
       timeoutMs: this.options.timeoutMs,
       fetch: this.options.fetch,
     }))))
-    const classes = input.classes && input.classes.length >= 2 ? input.classes : ANALYSIS_CLASS_NAMES
+    const questionKind = inferQuestionKind(input.query, input.classes, input.questionKind)
     const request: SystemOneRequest = {
       model: JEV_MODEL,
       state: { fixtureId: input.fixtureId, datasetId: input.datasetId, rowIndex: input.rowIndex, input: input.row } as unknown as EntryType,
-      questions: { classification: choice(input.query, classifierCriteriaFor(classes)) },
+      questions: { classification: questionFor(input) },
     }
     try {
       const response = await client.systemOne(request, { headers: { 'Idempotency-Key': `analysis:${input.analysisId}:${input.rowIndex}` } })
-      return parseClassifierResponse(response, classes)
+      return parseClassifierResponse(response, input.classes ?? [], questionKind)
     } catch (error) {
       if (error instanceof AnalysisError) throw error
       if (error instanceof APITimeoutError) throw new AnalysisError('JEV_TIMEOUT', 'Jev request timed out', 504, true)
@@ -204,11 +239,41 @@ export class TypeSafeClassifierProvider implements AnalysisClassifier {
   }
 }
 
-export const parseClassifierResponse = (value: unknown, classes: readonly string[] = ANALYSIS_CLASS_NAMES): AnalysisClassification => {
+export const parseClassifierResponse = (
+  value: unknown,
+  classes: readonly string[] = [],
+  questionKind: JevQuestionKind = inferQuestionKind('', classes),
+): AnalysisClassification => {
   if (!isRecord(value) || !isRecord(value.answers) || !isRecord(value.answers.classification)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
   const answer = value.answers.classification
-  const allowed = classes.length >= 2 ? classes : ANALYSIS_CLASS_NAMES
-  if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !allowed.includes(answer.choice) || !isRecord(answer.probabilities)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
+  const model = typeof value.model === 'string' && value.model.trim() ? value.model.trim() : JEV_MODEL
+  if (questionKind === 'noul' || answer.type === 'noul') {
+    if (answer.type !== 'noul' || typeof answer.noul !== 'number' || !Number.isFinite(answer.noul) || answer.noul < 0 || answer.noul > 1) {
+      throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid noul', 502)
+    }
+    return { model, questionKind: 'noul', value: answer.noul }
+  }
+  if (questionKind === 'score' || answer.type === 'score') {
+    if (answer.type !== 'score' || typeof answer.score !== 'number' || !Number.isFinite(answer.score)) {
+      throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid score', 502)
+    }
+    const levels = classes.length >= 2 ? classes.length : Object.keys(isRecord(answer.legend) ? answer.legend : {}).length
+    const max = Math.max(1, levels - 1)
+    const value01 = Math.min(1, Math.max(0, answer.score / max))
+    if (answer.confidence !== undefined && (typeof answer.confidence !== 'number' || !Number.isFinite(answer.confidence) || answer.confidence < 0 || answer.confidence > 1)) {
+      throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned invalid confidence', 502)
+    }
+    return {
+      model,
+      questionKind: 'score',
+      value: value01,
+      ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }),
+    }
+  }
+  const allowed = classes.length >= 2 ? classes : []
+  if (allowed.length < 2 || answer.type !== 'choice' || typeof answer.choice !== 'string' || !allowed.includes(answer.choice) || !isRecord(answer.probabilities)) {
+    throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned an invalid classification', 502)
+  }
   const probabilities: Record<string, number> = {}
   for (const className of allowed) {
     const probability = answer.probabilities[className]
@@ -218,5 +283,5 @@ export const parseClassifierResponse = (value: unknown, classes: readonly string
   const total = Object.values(probabilities).reduce((sum, probability) => sum + probability, 0)
   if (Math.abs(total - 1) > 1e-6) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev class probabilities are inconsistent', 502)
   if (answer.confidence !== undefined && (typeof answer.confidence !== 'number' || !Number.isFinite(answer.confidence) || answer.confidence < 0 || answer.confidence > 1)) throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Jev returned invalid confidence', 502)
-  return { model: typeof value.model === 'string' && value.model.trim() ? value.model.trim() : JEV_MODEL, selectedClass: answer.choice, probabilities, ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) }
+  return { model, questionKind: 'choice', selectedClass: answer.choice, probabilities, ...(answer.confidence === undefined ? {} : { confidence: answer.confidence }) }
 }

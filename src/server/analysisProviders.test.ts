@@ -35,6 +35,28 @@ describe('OpenRouter analysis draft adapter', () => {
     expect(JSON.stringify(calls[0]?.init?.body)).toContain('Find a useful classification.')
   })
 
+  it('does not send leftover fixture player classes for a win-likelihood draft', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const fetcher: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init })
+      return fetchResponse(draftBody('{"query":"Classify K.Walker vs C.Kupp.","questionKind":"choice","classes":["K.Walker","C.Kupp","J.Smith-Njigba","Other/Tie"]}'))
+    }
+    const result = await new OpenRouterDraftProvider({ apiKey: 'placeholder', fetch: fetcher }).draft({
+      fixtureId: FOOTBALL_FIXTURE_ID,
+      datasetId: FOOTBALL_FIXTURE_ID,
+      task: 'Win likelihood of the game per play.',
+      classes: [],
+      questionKindHint: 'noul',
+    })
+    const payload = JSON.parse(String(calls[0]?.init?.body ?? '{}')) as { messages?: Array<{ role?: string; content?: string }> }
+    const user = JSON.parse(payload.messages?.find((message) => message.role === 'user')?.content ?? '{}') as Record<string, unknown>
+    expect(user.task).toBe('Win likelihood of the game per play.')
+    expect(user.questionKindHint).toBe('noul')
+    expect(user).not.toHaveProperty('classes')
+    expect(JSON.stringify(user)).not.toContain('K.Walker')
+    expect(result.query).toContain('K.Walker')
+  })
+
   it('fails closed when the OpenRouter key is missing', async () => {
     vi.stubEnv('OPENROUTER_KEY', '')
     await expect(new OpenRouterDraftProvider().draft({ fixtureId: FOOTBALL_FIXTURE_ID, datasetId: FOOTBALL_FIXTURE_ID, task: 'task', classes: ['A', 'B'] })).rejects.toBeInstanceOf(OpenRouterConfigurationError)
@@ -64,7 +86,7 @@ describe('editable Jev classifier adapter', () => {
       draftProvider: { async draft() { return { query: 'query', model: 'openrouter/test' } } },
       classifier: new TypeSafeClassifierProvider(),
     })
-    await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: 'query' })).rejects.toMatchObject({ code: 'JEV_NOT_CONFIGURED', statusCode: 503 })
+    await expect(service.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: 'query', classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'] })).rejects.toMatchObject({ code: 'JEV_NOT_CONFIGURED', statusCode: 503 })
   })
 
   it('sends the editable query with one H1 row and parses bounded probabilities', async () => {
@@ -79,6 +101,30 @@ describe('editable Jev classifier adapter', () => {
     await expect(provider.classify({ analysisId: 'analysis-1', fixtureId: FOOTBALL_FIXTURE_ID, datasetId: FOOTBALL_FIXTURE_ID, query: 'custom query', rowIndex: 0, row: input, classes: ['K.Walker', 'C.Kupp', 'J.Smith-Njigba', 'Other/Tie'] })).resolves.toMatchObject({ selectedClass: 'K.Walker', confidence: 0.7 })
     expect(calls).toHaveLength(1)
     expect(calls[0]).toEqual(expect.objectContaining({ state: expect.objectContaining({ fixtureId: FOOTBALL_FIXTURE_ID, datasetId: FOOTBALL_FIXTURE_ID, rowIndex: 0, input }), questions: expect.objectContaining({ classification: expect.objectContaining({ instructions: 'custom query' }) }) }))
+  })
+
+  it('sends a Noul question for win likelihood and parses P(win)', async () => {
+    const calls: unknown[] = []
+    const client: ClassifierClientBoundary = {
+      async systemOne(request) {
+        calls.push(request)
+        return { model: 'jev-latest', answers: { classification: { type: 'noul', noul: 0.63 } } }
+      },
+    }
+    const provider = new TypeSafeClassifierProvider({ client })
+    await expect(provider.classify({
+      analysisId: 'analysis-1',
+      fixtureId: FOOTBALL_FIXTURE_ID,
+      datasetId: FOOTBALL_FIXTURE_ID,
+      query: 'Will SEA win given this play state?',
+      rowIndex: 0,
+      row: input,
+      classes: [],
+      questionKind: 'noul',
+    })).resolves.toMatchObject({ questionKind: 'noul', value: 0.63 })
+    expect(calls[0]).toEqual(expect.objectContaining({
+      questions: expect.objectContaining({ classification: expect.objectContaining({ type: 'noul', instructions: 'Will SEA win given this play state?' }) }),
+    }))
   })
 
   it.each([401, 429, 500])('maps Jev HTTP %s to a truthful stable error', async (status) => {

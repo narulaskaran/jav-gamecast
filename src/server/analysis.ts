@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import {
-  ANALYSIS_CLASS_NAMES,
   ANALYSIS_MAX_CALLS,
   ANALYSIS_MAX_CLASSES,
   ANALYSIS_MAX_CLASS_LENGTH,
@@ -20,7 +19,13 @@ import {
   type AnalysisStartInput,
   type AnalysisStorage,
   type DatasetSourceType,
+  type JevQuestionKind,
 } from '../shared/analysis.js'
+import {
+  inferQuestionKind,
+  isFixturePlayerClassList,
+  resolveDraftedQuery,
+} from '../shared/questionKind.js'
 import { asAnalysisRow } from '../shared/dataset.js'
 import {
   FOOTBALL_FIXTURE_ID,
@@ -51,11 +56,12 @@ export interface AnalysisDraftProvider {
     fixtureId: string
     datasetId: string
     task: string
-    classes: readonly string[]
+    classes?: readonly string[]
     columns?: readonly string[]
     sampleRows?: AnalysisRowInput[]
     sourceType?: DatasetSourceType
-  }): Promise<{ query: string; model: string; classes?: readonly string[] }>
+    questionKindHint?: JevQuestionKind
+  }): Promise<{ query: string; model: string; classes?: readonly string[]; questionKind?: JevQuestionKind }>
 }
 
 export interface AnalysisClassifier {
@@ -68,6 +74,7 @@ export interface AnalysisClassifier {
     rowIndex: number
     row: AnalysisRowInput
     classes: readonly string[]
+    questionKind?: JevQuestionKind
   }): Promise<AnalysisClassification>
 }
 
@@ -126,7 +133,6 @@ export const fixtureAnalysisDataset = (): ResolvedAnalysisDataset => {
     displayName: 'Super Bowl Seahawks demo',
     columns: [...footballFixtureModelInputFields],
     rows,
-    classes: [...ANALYSIS_CLASS_NAMES],
   }
 }
 
@@ -168,15 +174,18 @@ const safeProviderError = (error: unknown): { code: string; retryable: boolean }
   return { code: 'ANALYSIS_PROVIDER_ERROR', retryable: false }
 }
 
-export const normalizeClasses = (value: unknown, fallback: readonly string[] = ANALYSIS_CLASS_NAMES): string[] => {
+export const normalizeClasses = (value: unknown, fallback: readonly string[] = []): string[] => {
   const source = Array.isArray(value) ? value : fallback
   const classes = [...new Set(source.map((item) => typeof item === 'string' ? item.trim() : '').filter((item) => item.length > 0 && item.length <= ANALYSIS_MAX_CLASS_LENGTH && !item.includes('\u0000')))]
+  if (classes.length === 0) return []
   if (classes.length < 2 || classes.length > ANALYSIS_MAX_CLASSES) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
   return classes
 }
 
-const normalizeClassification = (value: AnalysisClassification, classes: readonly string[]): AnalysisClassification => {
-  if (!isRecord(value) || typeof value.model !== 'string' || !value.model.trim() || typeof value.selectedClass !== 'string' || !value.selectedClass.trim()) {
+const finiteUnit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+
+const normalizeChoiceClassification = (value: AnalysisClassification, classes: readonly string[]): AnalysisClassification => {
+  if (typeof value.selectedClass !== 'string' || !value.selectedClass.trim()) {
     throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned an invalid classification', 502)
   }
   if (!isRecord(value.probabilities)) throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned no class probabilities', 502)
@@ -191,15 +200,58 @@ const normalizeClassification = (value: AnalysisClassification, classes: readonl
   if (classes.length >= 2 && !classes.includes(value.selectedClass)) {
     throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned a class outside the query', 502)
   }
-  if (value.confidence !== undefined && (typeof value.confidence !== 'number' || !Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1)) {
+  if (value.confidence !== undefined && !finiteUnit(value.confidence)) {
     throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned invalid confidence', 502)
   }
   return {
     model: value.model.trim().slice(0, 200),
+    questionKind: 'choice',
     selectedClass: value.selectedClass.trim().slice(0, ANALYSIS_MAX_CLASS_LENGTH),
     probabilities: Object.fromEntries(entries.map(([key, probability]) => [key.slice(0, ANALYSIS_MAX_CLASS_LENGTH), probability])),
     ...(value.confidence === undefined ? {} : { confidence: value.confidence }),
   }
+}
+
+const normalizeClassification = (value: AnalysisClassification, classes: readonly string[], questionKind: JevQuestionKind): AnalysisClassification => {
+  if (!isRecord(value) || typeof value.model !== 'string' || !value.model.trim()) {
+    throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned an invalid classification', 502)
+  }
+  if (questionKind === 'noul') {
+    const noul = typeof value.value === 'number' ? value.value : undefined
+    if (!finiteUnit(noul)) throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned an invalid noul', 502)
+    return { model: value.model.trim().slice(0, 200), questionKind: 'noul', value: noul }
+  }
+  if (questionKind === 'score') {
+    const score = typeof value.value === 'number' ? value.value : undefined
+    if (typeof score !== 'number' || !Number.isFinite(score)) throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned an invalid score', 502)
+    if (value.confidence !== undefined && !finiteUnit(value.confidence)) {
+      throw new AnalysisError('MALFORMED_PROVIDER_RESPONSE', 'Provider returned invalid confidence', 502)
+    }
+    return {
+      model: value.model.trim().slice(0, 200),
+      questionKind: 'score',
+      value: finiteUnit(score) ? score : Math.min(1, Math.max(0, score)),
+      ...(value.confidence === undefined ? {} : { confidence: value.confidence }),
+      ...(isRecord(value.probabilities) ? { probabilities: value.probabilities } : {}),
+    }
+  }
+  return normalizeChoiceClassification(value, classes)
+}
+
+const resultFromClassification = (rowIndex: number, row: AnalysisRowInput, classification: AnalysisClassification): AnalysisResultRow => ({
+  rowIndex,
+  input: row,
+  model: classification.model,
+  ...(classification.questionKind ? { questionKind: classification.questionKind } : {}),
+  ...(classification.selectedClass ? { selectedClass: classification.selectedClass } : {}),
+  ...(classification.probabilities ? { probabilities: { ...classification.probabilities } } : {}),
+  ...(classification.confidence === undefined ? {} : { confidence: classification.confidence }),
+  ...(classification.value === undefined ? {} : { value: classification.value }),
+})
+
+const datasetDraftClasses = (dataset: ResolvedAnalysisDataset): string[] => {
+  const classes = dataset.classes && dataset.classes.length >= 2 ? [...dataset.classes] : []
+  return isFixturePlayerClassList(classes) ? [] : classes
 }
 
 export class AnalysisService {
@@ -217,25 +269,36 @@ export class AnalysisService {
   async draft(input: AnalysisDraftInput): Promise<AnalysisDraftResult> {
     const dataset = await this.requireDataset(input)
     if (!validText(input.task, ANALYSIS_MAX_TASK_LENGTH)) throw new AnalysisError('INVALID_TASK', 'Task must be non-empty and within the size limit')
-    const defaultClasses = dataset.classes && dataset.classes.length >= 2 ? dataset.classes : [...ANALYSIS_CLASS_NAMES]
+    const task = input.task.trim()
+    const datasetClasses = datasetDraftClasses(dataset)
+    const questionKindHint = inferQuestionKind(task, datasetClasses)
     const draft = await this.options.draftProvider.draft({
       fixtureId: dataset.fixtureId,
       datasetId: dataset.datasetId,
-      task: input.task.trim(),
-      classes: defaultClasses,
+      task,
+      classes: datasetClasses,
       columns: [...dataset.columns],
       sampleRows: dataset.rows.slice(0, 5).map((row) => ({ ...row })),
       sourceType: dataset.sourceType,
+      questionKindHint,
     })
     if (!validText(draft.query, ANALYSIS_MAX_QUERY_LENGTH) || typeof draft.model !== 'string' || !draft.model.trim()) {
       throw new AnalysisError('MALFORMED_DRAFT', 'OpenRouter returned an invalid classifier query', 502)
     }
-    const classes = draft.classes && draft.classes.length >= 2 ? normalizeClasses(draft.classes, defaultClasses) : [...defaultClasses]
+    const resolved = resolveDraftedQuery({
+      task,
+      query: draft.query,
+      questionKind: draft.questionKind ?? questionKindHint,
+      classes: draft.classes,
+    })
+    const classes = resolved.questionKind === 'choice' || resolved.questionKind === 'score'
+      ? normalizeClasses(resolved.classes, [])
+      : []
     return {
       fixtureId: dataset.fixtureId,
       datasetId: dataset.datasetId,
       sourceType: dataset.sourceType,
-      query: draft.query.trim(),
+      query: resolved.query,
       metadata: {
         provider: 'openrouter',
         model: draft.model.trim().slice(0, 200),
@@ -243,6 +306,7 @@ export class AnalysisService {
         classes,
         columns: [...dataset.columns],
         displayName: dataset.displayName,
+        questionKind: resolved.questionKind,
         ...(dataset.sourceType === 'fixture' ? { inputHalf: 'H1' as const, labelHalf: 'H2' as const } : {}),
       },
     }
@@ -251,8 +315,6 @@ export class AnalysisService {
   async start(input: AnalysisStartInput): Promise<AnalysisSnapshot> {
     const dataset = await this.requireDataset(input)
     const query = this.requireQuery(input.query)
-    const classes = normalizeClasses(input.classes, dataset.classes ?? ANALYSIS_CLASS_NAMES)
-    if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
     const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
     if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
     const analysisId = requestedAnalysisId || this.idFactory()
@@ -276,6 +338,10 @@ export class AnalysisService {
       }
       return cloneAnalysisSnapshot(normalized)
     }
+    const questionKind = inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
+    const classes = questionKind === 'noul' ? [] : normalizeClasses(input.classes, dataset.classes ?? [])
+    if (questionKind === 'choice' && classes.length < 2) throw new AnalysisError('INVALID_CLASSES', 'Query classes must contain between 2 and 32 labels')
+    if (dataset.rows.length > ANALYSIS_MAX_ROWS || dataset.rows.length > ANALYSIS_MAX_CALLS) throw new AnalysisError('ANALYSIS_BOUNDS_EXCEEDED', 'Dataset exceeds analysis bounds', 413)
     this.options.classifier.assertConfigured?.()
     const timestamp = nowIso(this.now)
     const snapshot: AnalysisSnapshot = {
@@ -288,6 +354,7 @@ export class AnalysisService {
       createdAt: timestamp,
       updatedAt: timestamp,
       progress: { completedRows: 0, totalRows: dataset.rows.length, completedCalls: 0, totalCalls: dataset.rows.length },
+      questionKind,
       classes,
       columns: [...dataset.columns],
       resultRows: [],
@@ -331,8 +398,9 @@ export class AnalysisService {
     if (snapshot0.status === 'complete' || snapshot0.status === 'error') return cloneAnalysisSnapshot(snapshot0)
     const dataset = await this.requireDataset({ fixtureId: snapshot0.fixtureId, datasetId: snapshot0.datasetId })
     const rows = dataset.rows
-    const classes = snapshot0.classes.length >= 2 ? snapshot0.classes : (dataset.classes ?? ANALYSIS_CLASS_NAMES)
-    let snapshot: AnalysisSnapshot = { ...snapshot0, status: 'running', updatedAt: nowIso(this.now), resultRows: [...snapshot0.resultRows] }
+    const classes = snapshot0.classes
+    const questionKind = inferQuestionKind(snapshot0.query, classes, snapshot0.questionKind)
+    let snapshot: AnalysisSnapshot = { ...snapshot0, status: 'running', questionKind, updatedAt: nowIso(this.now), resultRows: [...snapshot0.resultRows] }
     await this.options.store.put(snapshot)
     try {
       for (let rowIndex = snapshot.progress.completedRows; rowIndex < rows.length; rowIndex += 1) {
@@ -348,8 +416,9 @@ export class AnalysisService {
             rowIndex,
             row,
             classes,
-          }), classes)
-          const resultRow: AnalysisResultRow = { rowIndex, input: row, model: classification.model, selectedClass: classification.selectedClass, probabilities: { ...classification.probabilities }, ...(classification.confidence === undefined ? {} : { confidence: classification.confidence }) }
+            questionKind,
+          }), classes, questionKind)
+          const resultRow = resultFromClassification(rowIndex, row, classification)
           const resultRows = [...snapshot.resultRows.filter((item) => item.rowIndex !== rowIndex), resultRow].sort((left, right) => left.rowIndex - right.rowIndex)
           snapshot = {
             ...snapshot,

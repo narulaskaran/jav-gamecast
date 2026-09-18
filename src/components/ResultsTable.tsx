@@ -38,7 +38,7 @@ export const ResultsTable = memo(function ResultsTable({
                 <tr key={row.rowIndex}>
                   <td>#{row.rowIndex + 1}</td>
                   {previewColumns.map((name) => <td key={name}>{cell(row.input[name])}</td>)}
-                  <td><span className="class-chip">{row.selectedClass ?? row.error?.code ?? 'Pending'}</span></td>
+                  <td><span className="class-chip">{row.selectedClass ?? (row.value !== undefined ? percent(row.value) : row.error?.code ?? 'Pending')}</span></td>
                   <td>{percent(row.confidence)}</td>
                 </tr>
               ))}
@@ -53,4 +53,5 @@ export const ResultsTable = memo(function ResultsTable({
   && sameStringList(prev.columns, next.columns)
   && prev.rows[prev.rows.length - 1]?.rowIndex === next.rows[next.rows.length - 1]?.rowIndex
   && prev.rows[prev.rows.length - 1]?.selectedClass === next.rows[next.rows.length - 1]?.selectedClass
+  && prev.rows[prev.rows.length - 1]?.value === next.rows[next.rows.length - 1]?.value
 ))

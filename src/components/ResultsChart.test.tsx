@@ -83,6 +83,52 @@ describe('ResultsChart motion', () => {
     expect(goldBar?.style.getPropertyValue('--bar-width')).toBe('20%')
   })
 
+  it('renders a live P(win) series for Noul and class bars only for Choice', () => {
+    const noulRows = [
+      { rowIndex: 0, input: { wpa: 0.9 }, model: 'jev', value: 0.2, questionKind: 'noul' as const },
+      { rowIndex: 1, input: { wpa: 0.1 }, model: 'jev', value: 0.8, questionKind: 'noul' as const },
+    ]
+    const { rerender } = render(
+      <ResultsChart rows={noulRows} playheadIndex={1} totalRows={10} questionKind="noul" onSeek={vi.fn()} />,
+    )
+    expect(screen.getByRole('img', { name: /win probability over play index/i })).toBeInTheDocument()
+    expect(document.querySelector('[data-chart-kind="series"]')).toBeTruthy()
+    expect(document.querySelector('[data-series-points="2"]')).toBeTruthy()
+    expect(document.querySelector('[data-play-cursor="true"]')).toBeTruthy()
+    expect(document.querySelector('[data-class="K.Walker"]')).toBeNull()
+    expect(document.querySelector('.series-line')).toBeTruthy()
+    expect(document.querySelector('.series-fill')).toBeTruthy()
+
+    rerender(
+      <ResultsChart
+        rows={[row(0, 'gold'), row(1, 'silver')]}
+        playheadIndex={1}
+        classes={['gold', 'silver']}
+        totalRows={10}
+        questionKind="choice"
+        onSeek={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('img', { name: /class distribution/i })).toBeInTheDocument()
+    expect(document.querySelector('[data-chart-kind="bars"]')).toBeTruthy()
+    expect(document.querySelector('[data-class="gold"]')).toHaveAttribute('data-count', '1')
+    expect(document.querySelector('.series-line')).toBeNull()
+  })
+
+  it('does not plot CSV wpa as if Jev produced the series', () => {
+    render(
+      <ResultsChart
+        rows={[{ rowIndex: 0, input: { wpa: 0.99 }, model: 'jev', questionKind: 'noul' }]}
+        playheadIndex={0}
+        totalRows={8}
+        questionKind="noul"
+        onSeek={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Waiting for the first row…')).toBeInTheDocument()
+    expect(document.querySelector('[data-series-points]')).toBeNull()
+  })
+
   it('uses instant seek motion while the playhead is dragged off the live edge', () => {
     render(<ChartHarness rows={[row(0, 'gold'), row(1, 'silver'), row(2, 'gold')]} />)
     const shell = document.querySelector('.chart-shell')

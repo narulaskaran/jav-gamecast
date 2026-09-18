@@ -91,6 +91,7 @@ export default defineSchema({
     createdAt: v.string(),
     updatedAt: v.string(),
     progress: analysisProgressValidator,
+    questionKind: v.optional(v.union(v.literal('noul'), v.literal('score'), v.literal('choice'))),
     classes: v.optional(v.array(v.string())),
     columns: v.optional(v.array(v.string())),
     currentFixtureRow: v.optional(v.any()),
@@ -106,6 +107,8 @@ export default defineSchema({
     selectedClass: v.optional(v.string()),
     probabilities: v.optional(v.any()),
     confidence: v.optional(v.number()),
+    value: v.optional(v.number()),
+    questionKind: v.optional(v.union(v.literal('noul'), v.literal('score'), v.literal('choice'))),
     error: v.optional(analysisErrorValidator),
   }).index('by_analysis_row', ['analysisId', 'rowIndex']),
   datasets: defineTable({

@@ -4,6 +4,7 @@ import { App, canConfirmJevRun, defaultAnalysisApi, hasRunnableQuery, type Analy
 import { FOOTBALL_FIXTURE_ID, getHalftimeModelInput } from './fixtures/footballTimeline'
 import { asAnalysisRow } from './shared/dataset'
 import type { AnalysisDraftResult, AnalysisSnapshot } from './shared/analysis'
+import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from './shared/questionKind'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
 
 const input = asAnalysisRow(getHalftimeModelInput()[0])
@@ -101,6 +102,7 @@ describe('Jev playground flow', () => {
     const api = makeApi()
     render(<App api={api} />)
     fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
     expect(api.draft).not.toHaveBeenCalled()
     expect(api.start).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/^Analysis task$/i), { target: { value: 'Find a first-half signal.' } })
@@ -114,7 +116,7 @@ describe('Jev playground flow', () => {
     expect(screen.getByText(/review the query, then confirm run jev/i)).toBeInTheDocument()
     fireEvent.click(runButton)
     await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1))
-    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: draft.query, classes: draft.metadata.classes })
+    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: draft.query, classes: draft.metadata.classes, questionKind: draft.metadata.questionKind })
     expect(api.draft).toHaveBeenCalledTimes(1)
   })
 
@@ -131,7 +133,7 @@ describe('Jev playground flow', () => {
     expect(screen.getByRole('button', { name: /run jev/i })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
     await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1))
-    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: 'Use only visible columns.', classes: draft.metadata.classes })
+    expect(api.start).toHaveBeenCalledWith({ datasetId: FOOTBALL_FIXTURE_ID, fixtureId: FOOTBALL_FIXTURE_ID, query: 'Use only visible columns.', classes: draft.metadata.classes, questionKind: draft.metadata.questionKind })
   })
 
   it('renders progress, live chart, processed-row rail, secondary results, and share action', async () => {
@@ -183,6 +185,50 @@ describe('Jev playground flow', () => {
     await waitFor(() => expect(document.querySelector('[data-class="K.Walker"]')).toHaveAttribute('data-count', '1'))
     await waitFor(() => expect(document.querySelector('[data-class="C.Kupp"]')).toHaveAttribute('data-count', '1'))
     expect(api.read).toHaveBeenCalled()
+  })
+
+  it('charts a Noul win-probability series instead of leftover player-class bars', async () => {
+    const noulDraft: AnalysisDraftResult = {
+      ...draft,
+      query: SAMPLE_WIN_NOUL_QUERY,
+      metadata: { ...draft.metadata, questionKind: 'noul', classes: [] },
+    }
+    const noulRun = snapshot({
+      query: SAMPLE_WIN_NOUL_QUERY,
+      questionKind: 'noul',
+      classes: [],
+      status: 'running',
+      progress: { completedRows: 3, totalRows: 39, completedCalls: 3, totalCalls: 39 },
+      resultRows: Array.from({ length: 3 }, (_, rowIndex) => ({
+        rowIndex,
+        input: { ...input, wpa: 0.91 },
+        model: 'jev-latest',
+        questionKind: 'noul' as const,
+        value: 0.4 + rowIndex * 0.1,
+      })),
+    })
+    const api = makeApi({
+      draft: vi.fn(async () => noulDraft),
+      start: vi.fn(async () => noulRun),
+      read: vi.fn(async () => noulRun),
+    })
+    render(<App api={api} />)
+    fireEvent.click(screen.getByRole('button', { name: /^try sample$/i }))
+    expect(screen.getByLabelText(/^Analysis task$/i)).toHaveValue(SAMPLE_WIN_LIKELIHOOD_TASK)
+    fireEvent.click(screen.getByRole('button', { name: /draft task/i }))
+    await screen.findByDisplayValue(SAMPLE_WIN_NOUL_QUERY)
+    fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
+    expect(await screen.findByRole('img', { name: /win probability over play index/i })).toBeInTheDocument()
+    expect(document.querySelector('[data-chart-kind="series"]')).toBeTruthy()
+    expect(document.querySelector('[data-play-cursor="true"]')).toBeTruthy()
+    expect(document.querySelector('[data-series-points="3"]')).toBeTruthy()
+    expect(document.querySelector('[data-class="K.Walker"]')).toBeNull()
+    expect(document.querySelector('[data-class="Adams"]')).toBeNull()
+    const rail = screen.getByRole('complementary', { name: /processed rows/i })
+    expect(within(rail).getByRole('button', { name: /row 1 of 39/i })).toBeInTheDocument()
+    expect(within(rail).queryByText('K.Walker')).not.toBeInTheDocument()
+    expect(api.draft).toHaveBeenCalledWith(expect.objectContaining({ task: SAMPLE_WIN_LIKELIHOOD_TASK }))
+    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul', classes: [] }))
   })
 
   it('follows the live edge until the user scrubs back, then seeks from the row rail', async () => {

@@ -9,12 +9,15 @@ import type {
   AnalysisDraftResult,
   AnalysisSnapshot,
 } from './shared/analysis'
+import {
+  SAMPLE_WIN_LIKELIHOOD_TASK,
+} from './shared/questionKind'
 import type { DatasetIntakeStatus, DatasetPreview } from './shared/dataset'
 import './styles.css'
 
 export interface AnalysisApiClient {
   draft: (input: { fixtureId?: string; datasetId?: string; task: string }) => Promise<AnalysisDraftResult>
-  start: (input: { fixtureId?: string; datasetId?: string; query: string; classes?: readonly string[] }) => Promise<AnalysisSnapshot>
+  start: (input: { fixtureId?: string; datasetId?: string; query: string; classes?: readonly string[]; questionKind?: AnalysisDraftResult['metadata']['questionKind'] }) => Promise<AnalysisSnapshot>
   read: (analysisId: string) => Promise<AnalysisSnapshot>
   share: (analysisId: string) => Promise<AnalysisSnapshot>
   intakeStatus?: () => Promise<DatasetIntakeStatus>
@@ -59,6 +62,7 @@ export const defaultAnalysisApi: AnalysisApiClient = {
 }
 
 const DEFAULT_TASK = 'Classify each row using the visible columns.'
+const SAMPLE_TASK = SAMPLE_WIN_LIKELIHOOD_TASK
 
 export const hasRunnableQuery = (query: string): boolean => query.trim().length > 0
 
@@ -171,6 +175,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
         fixtureId: dataset?.sourceType === 'fixture' ? SAMPLE_DATASET_ID : undefined,
         query: query.trim(),
         classes: draft.metadata.classes,
+        questionKind: draft.metadata.questionKind,
       }))
     } catch (runError) { setError(shortError(runError, 'Could not start Jev analysis'))
     } finally { setStarting(false) }
@@ -217,7 +222,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
   const handleSample = () => {
     resetRunState()
     setDataset(getSampleDatasetPreview())
-    setTask(DEFAULT_TASK)
+    setTask(SAMPLE_TASK)
   }
 
   const copyShareUrl = useCallback(async () => {
@@ -257,8 +262,8 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
             <DatasetPreviewCard dataset={dataset} onChange={() => { setDataset(undefined); resetRunState() }} />
           )}
           {!isShareView && dataset && <>
-            <section className="task-card" aria-labelledby="task-heading"><div className="section-heading"><div><p className="eyebrow">01 · Prompt</p><h2 id="task-heading">Describe the analysis task</h2></div><span className="step-mark">DRAFT</span></div><label htmlFor="analysis-task">Analysis task</label><textarea id="analysis-task" value={task} onChange={(event) => setTask(event.target.value)} rows={3} placeholder="What should Jev classify?" /><div className="form-footer"><span>Task is sent only when you choose Draft task.</span><button className="primary-button" type="button" onClick={() => void handleDraft()} disabled={drafting}>{drafting ? 'Drafting…' : 'Draft task'}</button></div></section>
-            {draft && <section className="query-card" aria-labelledby="query-heading"><div className="section-heading"><div><p className="eyebrow">02 · Edit</p><h2 id="query-heading">Jev classifier query</h2></div><span className="step-mark">EDITABLE</span></div><label htmlFor="jev-query">Generated query</label><textarea id="jev-query" value={query} onChange={(event) => { setQuery(event.target.value); setQueryEdited(true) }} rows={5} /><div className="query-meta"><span>{draft.metadata.rowCount} rows · {draft.metadata.classes.length} classes · {draft.metadata.model}</span><span>Provider: {draft.metadata.provider}</span></div><div className="form-footer"><span>{hasRunnableQuery(query) ? (queryEdited ? 'Query changed. Ready for an explicit run.' : 'Review the query, then confirm Run Jev.') : 'Enter a query before running Jev.'}</span><button className="primary-button run-button" type="button" onClick={() => void handleRun()} disabled={!canConfirmJevRun({ query, starting })}>{starting ? 'Starting…' : 'Run Jev'}</button></div></section>}
+            <section className="task-card" aria-labelledby="task-heading"><div className="section-heading"><div><p className="eyebrow">01 · Prompt</p><h2 id="task-heading">Describe the analysis task</h2></div><span className="step-mark">DRAFT</span></div><label htmlFor="analysis-task">Analysis task</label><textarea id="analysis-task" value={task} onChange={(event) => setTask(event.target.value)} rows={3} placeholder="What should Jev answer per row?" /><div className="form-footer"><span>Task is sent only when you choose Draft task.</span><button className="primary-button" type="button" onClick={() => void handleDraft()} disabled={drafting}>{drafting ? 'Drafting…' : 'Draft task'}</button></div></section>
+            {draft && <section className="query-card" aria-labelledby="query-heading"><div className="section-heading"><div><p className="eyebrow">02 · Edit</p><h2 id="query-heading">Jev query</h2></div><span className="step-mark">EDITABLE</span></div><label htmlFor="jev-query">Generated query</label><textarea id="jev-query" value={query} onChange={(event) => { setQuery(event.target.value); setQueryEdited(true) }} rows={5} /><div className="query-meta"><span>{draft.metadata.rowCount} rows · {draft.metadata.questionKind ?? 'query'}{draft.metadata.classes.length ? ` · ${draft.metadata.classes.length} classes` : ''} · {draft.metadata.model}</span><span>Provider: {draft.metadata.provider}</span></div><div className="form-footer"><span>{hasRunnableQuery(query) ? (queryEdited ? 'Query changed. Ready for an explicit run.' : 'Review the query, then confirm Run Jev.') : 'Enter a query before running Jev.'}</span><button className="primary-button run-button" type="button" onClick={() => void handleRun()} disabled={!canConfirmJevRun({ query, starting })}>{starting ? 'Starting…' : 'Run Jev'}</button></div></section>}
             {error && <div className="error-banner" role="alert"><b>Action needs attention</b><span>{error}</span></div>}
           </>}
           {isShareView && shareLoading && <p className="empty-copy" role="status">Loading public snapshot…</p>}
@@ -285,7 +290,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
           </div>
           <div className="about-card">
             <p className="eyebrow">How a run works</p>
-            <p>Draft an editable classifier query, confirm Run Jev, then watch the class-distribution chart tick as each row is persisted. Share and replay use stored predictions only.</p>
+            <p>Draft an editable query, confirm Run Jev, then watch the live chart tick as each row is persisted. Share and replay use stored predictions only.</p>
           </div>
         </aside>
       </div>
