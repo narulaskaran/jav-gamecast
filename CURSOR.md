@@ -6,7 +6,7 @@ This repository is the **Jev playground** (Jev Data Analysis). It was originally
 
 - `PLAN.md` — product pivot, MVP scope, contracts, stages, and remaining gates
 - `docs/analysis-api.md` — analysis + BYOD dataset API contract
-- `README.md` — install, test, Convex/Vercel operator notes (still contains leftover Gamecast live-runbook copy)
+- `README.md` — install, test, and Convex/Vercel/UploadThing notes for the playground
 
 ## Product
 

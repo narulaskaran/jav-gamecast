@@ -6,7 +6,7 @@
 
 **Status:** Pivot recorded. Fixture-first analysis plus Stage 5 BYOD intake (CSV upload, public HTTPS CSV URL, sample on-ramp) and a scrubbable live class-distribution run view (sample and BYOD share the same shell) is on the working branch. Remaining work is pause/cancel, browse/share completeness, abuse/cost controls, and production/release gates. Stage 0 provider-contract confirmation is still pending before paid live Jev.
 
-**Last updated:** 2026-09-17 23:35:00 UTC
+**Last updated:** 2026-09-18 12:56:00 UTC
 
 **Goal:** Let a user bring a small CSV dataset, describe an analysis in natural language, review/edit the generated Jev classifier query, run a bounded row-by-row Jev analysis, watch results arrive live, and share/replay the completed analysis at a unique URL.
 
@@ -31,7 +31,7 @@ Treat these as landed starting points, not future tasks:
 - Server-only OpenRouter draft adapter and Jev classifier adapter; browser bundles must stay free of credentials and provider SDKs.
 - Convex analysis snapshot persistence plus leftover Gamecast forecast tables/cron. Gamecast ESPN routes are historical; do not extend them as the product.
 
-Gaps versus this plan: pause/cancel status is still incomplete, leftover Gamecast forecast/ESPN operator copy remains in README, paid live Jev remains fail-closed until operator provisioning and provider-contract confirmation, and UploadThing/Convex production secrets are operator-provisioned (BYOD fails closed without them).
+Gaps versus this plan: pause/cancel status is still incomplete, leftover Gamecast forecast/ESPN code still exists under `historical/`, paid live Jev remains fail-closed until operator provisioning and provider-contract confirmation, and UploadThing/Convex production secrets are operator-provisioned (BYOD fails closed without them).
 
 ---
 
