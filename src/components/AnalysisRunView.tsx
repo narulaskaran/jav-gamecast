@@ -15,8 +15,9 @@ import {
 } from '../runView/format'
 import { downloadTextFile, resultsCsv, resultsCsvFilename } from '../runView/resultsCsv'
 import { snapCompleteMotion, snapCompletePlayhead, useRunPlayhead } from '../runView/playhead'
-import { chartVisualFor, inferQuestionKind } from '../shared/questionKind'
-import type { AnalysisSnapshot, AnalysisStatus } from '../shared/analysis'
+import { inferQuestionKind, type ChartVisualKind } from '../shared/questionKind'
+import { chartIsRowStreamed, resolveChartVisual } from '../dataset/insight'
+import type { AnalysisRowInput, AnalysisSnapshot, AnalysisStatus } from '../shared/analysis'
 
 const statusLabels: Record<AnalysisStatus, string> = {
   queued: 'Queued',
@@ -74,6 +75,8 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   datasetRowCount,
   inputHalf,
   latencyHint,
+  chartKind: chartKindOverride,
+  sourceRows,
 }: {
   snapshot: AnalysisSnapshot
   shareUrl: string
@@ -84,6 +87,8 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   datasetRowCount?: number
   inputHalf?: 'H1'
   latencyHint?: 'saved' | 'live'
+  chartKind?: ChartVisualKind
+  sourceRows?: readonly AnalysisRowInput[]
 }) {
   const rows = snapshot.resultRows
   const playbackEnabled = snapshot.status === 'complete'
@@ -101,7 +106,16 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     toggleRef.current()
   }, [])
   const questionKind = inferQuestionKind(snapshot.query, snapshot.classes, snapshot.questionKind)
-  const chartKind = chartVisualFor(questionKind)
+  const chartKind = resolveChartVisual({
+    datasetId: snapshot.datasetId || snapshot.fixtureId,
+    columns: snapshot.columns,
+    rows: snapshot.resultRows.map((row) => row.input),
+    query: snapshot.query,
+    questionKind,
+    classes: snapshot.classes,
+    visual: chartKindOverride,
+  })
+  const showRail = chartIsRowStreamed(chartKind)
   const canDownload = rows.length > 0
   const subsetCopy = runSubsetCopy({
     analyzedRows: snapshot.progress.totalRows,
@@ -202,11 +216,13 @@ export const AnalysisRunView = memo(function AnalysisRunView({
               questionKind={questionKind}
               chartKind={chartKind}
               playing={playing}
-              playbackEnabled={playbackEnabled}
+              playbackEnabled={playbackEnabled && showRail}
+              sourceRows={sourceRows}
               onSeek={handleSeek}
               onTogglePlayback={handleTogglePlayback}
             />
           </div>
+          {showRail ? (
           <RowRail
             rows={rows}
             totalRows={snapshot.progress.totalRows}
@@ -215,6 +231,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
             chartKind={chartKind}
             onSelect={handleSeek}
           />
+          ) : null}
         </div>
       </CardContent>
     </Card>

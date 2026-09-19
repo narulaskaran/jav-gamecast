@@ -32,6 +32,7 @@ describe('run view copy', () => {
   it('uses Results for the panel and chart labels for the plot', () => {
     expect(runViewHeading()).toBe('Results')
     expect(chartHeading('noul')).toBe('Win probability')
+    expect(chartHeading('noul', 'places')).toBe('Places')
     expect(chartHeading('score')).toBe('Score')
     expect(chartHeading('choice')).toBe('Class distribution')
   })

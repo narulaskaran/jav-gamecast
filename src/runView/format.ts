@@ -25,7 +25,8 @@ export const runProgressCount = (
   status === 'complete' ? `${totalRows} of ${totalRows}` : `${completedRows} / ${totalRows}`
 )
 
-export const chartHeading = (kind: JevQuestionKind): string => {
+export const chartHeading = (kind: JevQuestionKind, visual?: ChartVisualKind): string => {
+  if (visual === 'places') return 'Places'
   if (kind === 'noul') return 'Win probability'
   if (kind === 'score') return 'Score'
   return 'Class distribution'
@@ -126,6 +127,7 @@ export const railMetaLine = (row: AnalysisResultRow, chartKind: ChartVisualKind 
     }
   }
   if (chartKind === 'series' && row.value !== undefined) parts.push(percent(row.value))
+  else if (chartKind === 'places' && row.value !== undefined) parts.push(percent(row.value))
   else if (row.selectedClass) parts.push(row.selectedClass)
   else if (row.value !== undefined) parts.push(percent(row.value))
   return parts.join(' · ')
