@@ -54,6 +54,26 @@ export const playheadMotion = (scrubbing: boolean, followLive: boolean): Playhea
   scrubbing || !followLive ? 'seek' : 'tick'
 )
 
+/** Complete snapshots snap to the last row instead of replaying a live 0→N climb. */
+export const snapCompletePlayhead = (
+  status: 'queued' | 'running' | 'complete' | 'error',
+  completedCount: number,
+  index: number,
+  playing: boolean,
+  followLive: boolean,
+): number => {
+  if (status === 'complete' && !playing && followLive && completedCount > 0) return completedCount - 1
+  return clampPlayhead(index, completedCount)
+}
+
+export const snapCompleteMotion = (
+  status: 'queued' | 'running' | 'complete' | 'error',
+  playing: boolean,
+  motion: PlayheadMotion,
+): PlayheadMotion => (
+  status === 'complete' && !playing ? 'seek' : motion
+)
+
 export const useRunPlayhead = (completedCount: number, runId?: string) => {
   const [index, setIndex] = useState(() => clampPlayhead(completedCount - 1, completedCount))
   const [followLive, setFollowLive] = useState(true)

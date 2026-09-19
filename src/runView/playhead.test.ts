@@ -8,6 +8,8 @@ import {
   PLAYBACK_INTERVAL_MS,
   playheadMotion,
   playIndexFromRatio,
+  snapCompleteMotion,
+  snapCompletePlayhead,
   REDUCED_PLAYBACK_INTERVAL_MS,
   startPlaybackIndex,
   stepPlayback,
@@ -44,6 +46,15 @@ describe('run-view playhead', () => {
     expect(playheadMotion(false, true)).toBe('tick')
     expect(playheadMotion(true, true)).toBe('seek')
     expect(playheadMotion(false, false)).toBe('seek')
+  })
+
+  it('snaps a complete run to the last row instead of climbing from zero', () => {
+    expect(snapCompletePlayhead('complete', 71, 0, false, true)).toBe(70)
+    expect(snapCompletePlayhead('complete', 71, 12, true, false)).toBe(12)
+    expect(snapCompletePlayhead('running', 12, 3, false, true)).toBe(3)
+    expect(snapCompleteMotion('complete', false, 'tick')).toBe('seek')
+    expect(snapCompleteMotion('complete', true, 'tick')).toBe('tick')
+    expect(snapCompleteMotion('running', false, 'tick')).toBe('tick')
   })
 
   it('rewinds from the live edge, then stops on the last play without looping', () => {
