@@ -25,11 +25,13 @@ import {
   fixtureAnalysisSliceFor,
   inferQuestionKind,
   isFixturePlayerClassList,
+  isSampleDefaultEatingTask,
   isSampleDefaultWinTask,
   classesFromLabelColumns,
   mergeClassLists,
   resolveDraftedQuery,
   SAMPLE_WIN_NOUL_QUERY,
+  SQUIRREL_EATING_NOUL_QUERY,
   userAskedForFixturePlayers,
   type FixtureAnalysisSlice,
 } from '../shared/questionKind.js'
@@ -50,6 +52,12 @@ import {
   getHalftimeModelInput,
   getWinLikelihoodModelInput,
 } from '../fixtures/footballTimeline.js'
+import {
+  SQUIRREL_DATASET_NAME,
+  SQUIRREL_FIXTURE_ID,
+  SQUIRREL_FIXTURE_SCHEMA,
+  getSquirrelModelInput,
+} from '../fixtures/squirrelCensus.js'
 
 export type { AnalysisClassification, AnalysisDraftInput, AnalysisDraftResult, AnalysisResultRow, AnalysisSnapshot, AnalysisStartInput, AnalysisStorage } from '../shared/analysis.js'
 export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, ANALYSIS_MAX_ROWS, ANALYSIS_MAX_TASK_LENGTH } from '../shared/analysis.js'
@@ -242,6 +250,18 @@ export const fixtureAnalysisDataset = (slice: FixtureAnalysisSlice = 'win-likeli
   }
 }
 
+export const squirrelAnalysisDataset = (): ResolvedAnalysisDataset => {
+  const rows = getSquirrelModelInput()
+  return {
+    datasetId: SQUIRREL_FIXTURE_ID,
+    fixtureId: SQUIRREL_FIXTURE_ID,
+    sourceType: 'fixture',
+    displayName: SQUIRREL_DATASET_NAME,
+    columns: [...SQUIRREL_FIXTURE_SCHEMA],
+    rows,
+  }
+}
+
 export class InMemoryDatasetSource implements AnalysisDatasetSource {
   private readonly datasets = new Map<string, ResolvedAnalysisDataset>()
 
@@ -255,6 +275,7 @@ export class InMemoryDatasetSource implements AnalysisDatasetSource {
 
   get(datasetId: string): ResolvedAnalysisDataset | undefined {
     if (datasetId === FOOTBALL_FIXTURE_ID) return fixtureAnalysisDataset(fixtureAnalysisSliceFor())
+    if (datasetId === SQUIRREL_FIXTURE_ID) return squirrelAnalysisDataset()
     return this.datasets.get(datasetId)
   }
 }
@@ -589,6 +610,24 @@ export class AnalysisService {
       }
       return withCacheWrite(canned, await this.writeDraftCache(contentKey || flightKey, canned))
     }
+    if (dataset.sourceType === 'fixture' && dataset.datasetId === SQUIRREL_FIXTURE_ID && isSampleDefaultEatingTask(task)) {
+      const canned = {
+        fixtureId: dataset.fixtureId,
+        datasetId: dataset.datasetId,
+        sourceType: dataset.sourceType,
+        query: stringifyJevQuery(buildJevQuery({ type: 'noul', instructions: SQUIRREL_EATING_NOUL_QUERY })),
+        metadata: {
+          provider: 'openrouter',
+          model: 'cached-sample-places',
+          rowCount: dataset.rows.length,
+          classes: [],
+          columns: [...dataset.columns],
+          displayName: dataset.displayName,
+          questionKind: 'noul' as const,
+        },
+      }
+      return withCacheWrite(canned, await this.writeDraftCache(contentKey || flightKey, canned))
+    }
     const draft = await this.options.draftProvider.draft({
       fixtureId: dataset.fixtureId,
       datasetId: dataset.datasetId,
@@ -913,6 +952,9 @@ export class AnalysisService {
         questionKind: input.questionKind,
         classes: input.classes,
       }))
+    }
+    if (datasetId === SQUIRREL_FIXTURE_ID || input.fixtureId === SQUIRREL_FIXTURE_ID) {
+      return squirrelAnalysisDataset()
     }
     const dataset = await this.datasets.get(datasetId)
     if (!dataset) throw new AnalysisError('DATASET_NOT_FOUND', 'Dataset was not found', 404)

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { footballFixture, getHalftimeModelInput, getWinLikelihoodModelInput, FOOTBALL_FIXTURE_ID, FOOTBALL_FIXTURE_SCHEMA } from '../fixtures/footballTimeline'
-import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
+import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY, SQUIRREL_EATING_NOUL_QUERY, SQUIRREL_EATING_TASK } from '../shared/questionKind'
+import { SQUIRREL_FIXTURE_ID } from '../fixtures/squirrelCensus'
 import { parseJevQueryJson } from '../shared/jevQuery'
 import {
   ANALYSIS_CLASSIFY_CONCURRENCY,
@@ -114,6 +115,25 @@ describe('analysis domain contract', () => {
     expect(drafted.metadata.columns).toEqual(expect.arrayContaining(['posteam_score', 'defteam_score', 'score_differential']))
     expect(JSON.stringify(drafted)).not.toMatch(/K\.Walker|C\.Kupp|Smith-Njigba|Other\/Tie/)
     expect(drafted.metadata.model).toBe('cached-sample-noul')
+    expect(draftCalls).toHaveLength(0)
+  })
+
+  it('short-circuits squirrel where-they-eat into eating Noul, not Location vs Activity', async () => {
+    const draftCalls: unknown[] = []
+    const service = serviceWith(makeClassifier([]), makeDraftProvider(draftCalls, {
+      query: JSON.stringify({
+        type: 'choice',
+        instructions: 'Identify common locations where squirrels are spotted eating.',
+        criteria: { Location: 'specific location where squirrels eat', Activity: 'eating or foraging' },
+      }),
+      model: 'openrouter/test',
+    }))
+    const drafted = await service.draft({ fixtureId: SQUIRREL_FIXTURE_ID, task: SQUIRREL_EATING_TASK })
+    expect(parseJevQueryJson(drafted.query)).toEqual({ type: 'noul', instructions: SQUIRREL_EATING_NOUL_QUERY })
+    expect(drafted.metadata.questionKind).toBe('noul')
+    expect(drafted.metadata.classes).toEqual([])
+    expect(drafted.metadata.model).toBe('cached-sample-places')
+    expect(JSON.stringify(drafted)).not.toMatch(/Location|Activity/)
     expect(draftCalls).toHaveLength(0)
   })
 

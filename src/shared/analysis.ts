@@ -6,6 +6,8 @@ export type { JevQuestionKind } from './questionKind.js'
 export {
   SAMPLE_WIN_LIKELIHOOD_TASK,
   SAMPLE_WIN_NOUL_QUERY,
+  SQUIRREL_EATING_NOUL_QUERY,
+  SQUIRREL_EATING_TASK,
 } from './questionKind.js'
 
 export const ANALYSIS_MAX_CALLS = 5_000
