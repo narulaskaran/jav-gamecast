@@ -89,6 +89,8 @@ export interface AnalysisDraftResult {
     questionKind?: JevQuestionKind
     inputHalf?: 'H1'
     labelHalf?: 'H2'
+    /** Dogfood: durable draft cache write outcome. Omitted from stored Convex drafts. */
+    cacheWrite?: 'ok' | 'skipped'
   }
 }
 

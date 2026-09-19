@@ -11,9 +11,10 @@ import {
   runProgressCount,
   runProgressPercent,
   runSubsetCopy,
+  savedRunCopy,
 } from '../runView/format'
 import { downloadTextFile, resultsCsv, resultsCsvFilename } from '../runView/resultsCsv'
-import { useRunPlayhead } from '../runView/playhead'
+import { snapCompleteMotion, snapCompletePlayhead, useRunPlayhead } from '../runView/playhead'
 import { chartVisualFor, inferQuestionKind } from '../shared/questionKind'
 import type { AnalysisSnapshot, AnalysisStatus } from '../shared/analysis'
 
@@ -72,6 +73,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   resuming,
   datasetRowCount,
   inputHalf,
+  latencyHint,
 }: {
   snapshot: AnalysisSnapshot
   shareUrl: string
@@ -87,7 +89,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   const playbackEnabled = snapshot.status === 'complete'
   const live = snapshot.status === 'queued' || snapshot.status === 'running'
   const [elapsedMs, setElapsedMs] = useState(0)
-  const { index, motion, playing, seek, togglePlayback } = useRunPlayhead(rows.length, snapshot.analysisId)
+  const { index, followLive, motion, playing, seek, togglePlayback } = useRunPlayhead(rows.length, snapshot.analysisId)
   const seekRef = useRef(seek)
   const toggleRef = useRef(togglePlayback)
   seekRef.current = seek
@@ -123,14 +125,19 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     return () => window.clearInterval(timer)
   }, [live, snapshot.analysisId, snapshot.createdAt])
 
+  const completeSnap = snapshot.status === 'complete'
+  const savedReuse = latencyHint === 'saved' && completeSnap
+  const savedCopy = savedReuse ? savedRunCopy() : undefined
+  const chartIndex = snapCompletePlayhead(snapshot.status, rows.length, index, playing, followLive)
+  const chartMotion = snapCompleteMotion(snapshot.status, playing, motion)
   const latencyCopy = live
     ? subsetCopy
       ? `Live run · ${formatElapsed(elapsedMs)} · ${subsetCopy} Can take a few minutes.`
       : `Live run · ${formatElapsed(elapsedMs)} · ${snapshot.progress.totalRows} rows can take a few minutes.`
-    : subsetCopy
+    : [savedCopy, subsetCopy].filter(Boolean).join(' ') || undefined
 
   return (
-    <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
+    <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId} data-complete-snap={completeSnap || undefined} data-saved-run={savedReuse || undefined}>
       <CardHeader className="analysis-head flex-row items-start justify-between space-y-0 p-6 pb-0">
         <div>
           <p className="eyebrow">Run</p>
@@ -188,10 +195,10 @@ export const AnalysisRunView = memo(function AnalysisRunView({
           <div className="run-view-main">
             <ResultsChart
               rows={rows}
-              playheadIndex={index}
+              playheadIndex={chartIndex}
               classes={snapshot.classes}
               totalRows={snapshot.progress.totalRows}
-              motion={motion}
+              motion={chartMotion}
               questionKind={questionKind}
               chartKind={chartKind}
               playing={playing}
@@ -203,7 +210,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
           <RowRail
             rows={rows}
             totalRows={snapshot.progress.totalRows}
-            playheadIndex={index}
+            playheadIndex={chartIndex}
             classes={snapshot.classes}
             chartKind={chartKind}
             onSelect={handleSeek}

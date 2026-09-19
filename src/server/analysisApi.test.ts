@@ -78,8 +78,52 @@ describe('analysis API contract', () => {
     await createAnalysisDraftHandler(instance)({ method: 'POST', headers: {}, body: { datasetId: 'tickets', task: `  ${task}  ` } }, response(second))
     expect(first.code).toBe(200)
     expect(second.code).toBe(200)
+    expect(first.headers['X-Analysis-Cache-Write']).toBe('ok')
+    expect(second.headers['X-Analysis-Cache-Write']).toBe('ok')
     expect(second.body).toEqual(first.body)
+    expect((second.body as { metadata: { cacheWrite?: string } }).metadata.cacheWrite).toBe('ok')
     expect(draftCalls).toHaveLength(1)
+  })
+
+  it('skips the provider and dataset load on a second draft with a known datasetId', async () => {
+    const draftCalls: unknown[] = []
+    let loads = 0
+    const instance = new AnalysisService({
+      store: new InMemoryAnalysisStore(),
+      datasets: {
+        async get(datasetId: string) {
+          loads += 1
+          if (datasetId !== 'tickets') return undefined
+          return {
+            datasetId: 'tickets',
+            fixtureId: 'tickets',
+            sourceType: 'upload' as const,
+            displayName: 'tickets.csv',
+            columns: ['message'],
+            rows: [{ message: 'one' }, { message: 'two' }],
+            classes: ['urgent', 'routine'],
+          }
+        },
+      },
+      draftProvider: {
+        async draft(input) {
+          draftCalls.push(input)
+          return { query: JSON.stringify({ type: 'choice', instructions: 'Classify each ticket.', criteria: { urgent: 'urgent', routine: 'routine' } }), model: 'openrouter/test' }
+        },
+      } satisfies AnalysisDraftProvider,
+      classifier: { async classify() { return { model: 'jev-latest', selectedClass: 'urgent', probabilities: { urgent: 0.7, routine: 0.3 } } } } satisfies AnalysisClassifier,
+      idFactory: () => 'draft-api-fast-1',
+      now: () => 1_800_000_000_000,
+    })
+    const task = 'Classify each ticket as urgent or routine using the message.'
+    const first: ResponseState = { headers: {} }
+    await createAnalysisDraftHandler(instance)({ method: 'POST', headers: {}, body: { datasetId: 'tickets', task } }, response(first))
+    const second: ResponseState = { headers: {} }
+    await createAnalysisDraftHandler(instance)({ method: 'POST', headers: {}, body: { datasetId: 'tickets', task } }, response(second))
+    expect(first.code).toBe(200)
+    expect(second.code).toBe(200)
+    expect(draftCalls).toHaveLength(1)
+    expect(loads).toBe(1)
   })
 
   it('starts a run with queued status and reads it without starting another provider call', async () => {

@@ -598,6 +598,9 @@ describe('Jev playground flow', () => {
       render(<App api={api} />)
       expect(await screen.findByRole('heading', { level: 2, name: '100%' })).toBeInTheDocument()
       expect(screen.getByText('39 of 39')).toBeInTheDocument()
+      expect(document.querySelector('.analysis-card')).toHaveAttribute('data-complete-snap')
+      expect(document.querySelector('.chart-shell')).toHaveAttribute('data-motion', 'seek')
+      expect(screen.queryByText(/using saved run/i)).not.toBeInTheDocument()
       expect(screen.getByRole('heading', { level: 3, name: 'Class distribution' })).toBeInTheDocument()
       expect(api.share).toHaveBeenCalledWith(analysisId)
       expect(screen.queryByText(/no provider credentials|bounded jev worker|engineer playground/i)).not.toBeInTheDocument()
@@ -768,11 +771,41 @@ describe('Jev playground flow', () => {
       read: vi.fn(async () => snapshot({ status: 'complete' })),
     })
     await startSampleRun(api)
-    expect(await screen.findByText('Classified 39 of 71 rows (H1 plays).')).toBeInTheDocument()
+    const latency = await screen.findByText(/using saved run/i)
+    expect(latency).toHaveTextContent(/classified 39 of 71 rows \(h1 plays\)/i)
     expect(screen.getByRole('button', { name: /copy shareable public url/i })).toBeInTheDocument()
     expect(screen.queryByText(/saved\. share copies a public link/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/^saved run\.$/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/can take a few minutes/i)).not.toBeInTheDocument()
+  })
+
+  it('reuses a complete start as a saved run without forceNew or a live climb', async () => {
+    const complete = snapshot({
+      status: 'complete',
+      progress: { completedRows: 39, totalRows: 39, completedCalls: 39, totalCalls: 39 },
+    })
+    const start = vi.fn(async () => complete)
+    const api = makeApi({
+      start,
+      read: vi.fn(async () => complete),
+    })
+    await startSampleRun(api)
+    await screen.findByText(/using saved run/i)
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(start).toHaveBeenNthCalledWith(1, expect.not.objectContaining({ forceNew: true }))
+    expect(screen.queryByText(/live run/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: '100%' })).toBeInTheDocument()
+    expect(screen.getByText('39 of 39')).toBeInTheDocument()
+    expect(document.querySelector('.analysis-card')).toHaveAttribute('data-complete-snap')
+    expect(document.querySelector('.analysis-card')).toHaveAttribute('data-saved-run')
+    expect(document.querySelector('.chart-shell')).toHaveAttribute('data-motion', 'seek')
+    fireEvent.click(screen.getByRole('button', { name: /run jev/i }))
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(2))
+    expect(start).toHaveBeenNthCalledWith(2, expect.not.objectContaining({ forceNew: true }))
+    expect(JSON.stringify(start.mock.calls)).not.toContain('forceNew')
+    expect(screen.getByText(/using saved run/i)).toBeInTheDocument()
+    expect(screen.queryByText(/live run/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: '100%' })).toBeInTheDocument()
   })
 
   it('sets live-run expectations while a run is in flight', async () => {

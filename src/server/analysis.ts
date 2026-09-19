@@ -114,6 +114,43 @@ export class AnalysisError extends Error {
 
 const cloneDraftResult = (draft: AnalysisDraftResult): AnalysisDraftResult => JSON.parse(JSON.stringify(draft)) as AnalysisDraftResult
 
+const persistableDraft = (draft: AnalysisDraftResult): AnalysisDraftResult => {
+  const cloned = cloneDraftResult(draft)
+  delete cloned.metadata.cacheWrite
+  return cloned
+}
+
+const withCacheWrite = (draft: AnalysisDraftResult, cacheWrite: 'ok' | 'skipped'): AnalysisDraftResult => ({
+  ...cloneDraftResult(draft),
+  metadata: { ...draft.metadata, cacheWrite },
+})
+
+const resolveDatasetHint = (input: { datasetId?: string; fixtureId?: string }): string => {
+  if (typeof input.datasetId === 'string' && input.datasetId.trim()) return input.datasetId.trim()
+  if (typeof input.fixtureId === 'string' && input.fixtureId.trim()) return input.fixtureId.trim()
+  return ''
+}
+
+const cacheFailureReason = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) return error.message.replace(/\s+/g, ' ').slice(0, 240)
+  return 'unknown'
+}
+
+const startReuseParts = (
+  query: string,
+  parsedQuery: ReturnType<typeof parseJevQueryJson>,
+  input: Pick<AnalysisStartInput, 'classes' | 'questionKind'>,
+  datasetClasses?: readonly string[],
+) => {
+  const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? datasetClasses ?? [], input.questionKind)
+  const lookupClasses = questionKind === 'noul'
+    ? []
+    : [...(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes ?? datasetClasses ?? [])]
+      .map((item) => typeof item === 'string' ? item.trim() : '')
+      .filter(Boolean)
+  return { questionKind, lookupClasses }
+}
+
 const reusableStatusRank = (status: AnalysisSnapshot['status']): number | undefined => {
   if (status === 'complete') return 0
   if (status === 'running') return 1
@@ -414,10 +451,12 @@ export class AnalysisService {
 
   async draft(input: AnalysisDraftInput): Promise<AnalysisDraftResult> {
     if (!validText(input.task, ANALYSIS_MAX_TASK_LENGTH)) throw new AnalysisError('INVALID_TASK', 'Task must be non-empty and within the size limit')
-    const datasetHint = typeof input.datasetId === 'string' && input.datasetId.trim()
-      ? input.datasetId.trim()
-      : typeof input.fixtureId === 'string' && input.fixtureId.trim() ? input.fixtureId.trim() : ''
+    const datasetHint = resolveDatasetHint(input)
     const contentKey = draftContentKey({ datasetId: datasetHint, task: input.task })
+    if (datasetHint) {
+      const cached = await this.readDraftCache(contentKey)
+      if (cached) return withCacheWrite(cached, 'ok')
+    }
     const existingDraft = this.draftInFlight.get(contentKey)
     if (existingDraft) return existingDraft
     const pending = this.draftOnce(input, contentKey)
@@ -432,24 +471,34 @@ export class AnalysisService {
   async start(input: AnalysisStartInput): Promise<AnalysisSnapshot> {
     const query = this.requireQuery(input.query)
     const parsedQuery = parseJevQueryJson(query)
+    const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
+    if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
+    const datasetHint = resolveDatasetHint(input)
+    const earlyReuse = startReuseParts(query, parsedQuery, input)
+    const canReuseEarly = input.forceNew !== true && (earlyReuse.questionKind !== 'choice' || earlyReuse.lookupClasses.length >= 2)
+    if (datasetHint && canReuseEarly && !requestedAnalysisId) {
+      const contentKey = analysisContentKey({
+        datasetId: datasetHint,
+        query,
+        questionKind: earlyReuse.questionKind,
+        classes: earlyReuse.lookupClasses,
+      })
+      const cached = await this.options.store.findCompleteByContentKey(contentKey)
+      if (cached?.status === 'complete') return cloneAnalysisSnapshot(normalizeSnapshot(cached))
+      const inFlightStart = this.startInFlight.get(contentKey)
+      if (inFlightStart) return inFlightStart
+    }
     const dataset = await this.requireDataset({
       ...input,
       query,
       questionKind: parsedQuery?.type ?? input.questionKind,
     })
-    const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
-    if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
-    const questionKind = parsedQuery?.type ?? inferQuestionKind(query, input.classes ?? dataset.classes ?? [], input.questionKind)
-    const lookupClasses = questionKind === 'noul'
-      ? []
-      : [...(parsedQuery ? classesFromJevQuery(parsedQuery) : input.classes ?? dataset.classes ?? [])]
-        .map((item) => typeof item === 'string' ? item.trim() : '')
-        .filter(Boolean)
     if (requestedAnalysisId) {
       if (!validText(requestedAnalysisId, 200)) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
       const existing = await this.options.store.get(requestedAnalysisId)
       if (existing) return this.resumeExisting(existing, dataset.datasetId, query, input.resume === true)
     }
+    const { questionKind, lookupClasses } = startReuseParts(query, parsedQuery, input, dataset.classes)
     const canReuse = input.forceNew !== true && (questionKind !== 'choice' || lookupClasses.length >= 2)
     const contentKey = analysisContentKey({
       datasetId: dataset.datasetId,
@@ -519,7 +568,7 @@ export class AnalysisService {
     const task = input.task.trim()
     const contentKey = draftContentKey({ datasetId: dataset.datasetId, task })
     const cached = await this.readDraftCache(contentKey)
-    if (cached) return cached
+    if (cached) return withCacheWrite(cached, 'ok')
     const datasetClasses = datasetDraftClasses(dataset)
     const questionKindHint = inferQuestionKind(task, datasetClasses)
     if (dataset.sourceType === 'fixture' && isSampleDefaultWinTask(task) && !userAskedForFixturePlayers(task)) {
@@ -538,8 +587,7 @@ export class AnalysisService {
           questionKind: 'noul' as const,
         },
       }
-      await this.writeDraftCache(contentKey || flightKey, canned)
-      return canned
+      return withCacheWrite(canned, await this.writeDraftCache(contentKey || flightKey, canned))
     }
     const draft = await this.options.draftProvider.draft({
       fixtureId: dataset.fixtureId,
@@ -605,8 +653,7 @@ export class AnalysisService {
         }) === 'halftime-eval' ? { inputHalf: 'H1' as const, labelHalf: 'H2' as const } : {}),
       },
     }
-    await this.writeDraftCache(contentKey, result)
-    return result
+    return withCacheWrite(result, await this.writeDraftCache(contentKey, result))
   }
 
   private async createOrJoin(input: {
@@ -673,17 +720,20 @@ export class AnalysisService {
   private async readDraftCache(contentKey: string): Promise<AnalysisDraftResult | undefined> {
     try {
       const cached = await this.options.store.getDraftByContentKey(contentKey)
-      return cached ? cloneDraftResult(cached) : undefined
-    } catch {
+      return cached ? persistableDraft(cached) : undefined
+    } catch (error) {
+      console.error('[analysis] draft cache read failed', { contentKey, message: cacheFailureReason(error) })
       return undefined
     }
   }
 
-  private async writeDraftCache(contentKey: string, draft: AnalysisDraftResult): Promise<void> {
+  private async writeDraftCache(contentKey: string, draft: AnalysisDraftResult): Promise<'ok' | 'skipped'> {
     try {
-      await this.options.store.putDraft(contentKey, cloneDraftResult(draft))
-    } catch {
-      // Durable cache is best-effort; a successful draft still returns to the caller.
+      await this.options.store.putDraft(contentKey, persistableDraft(draft))
+      return 'ok'
+    } catch (error) {
+      console.error('[analysis] draft cache write failed', { contentKey, message: cacheFailureReason(error) })
+      return 'skipped'
     }
   }
 

@@ -286,6 +286,79 @@ describe('analysis domain contract', () => {
       instructions: 'Classify each ticket.',
       criteria: { urgent: 'urgent tickets', routine: 'routine tickets' },
     })
+    expect(first.metadata.cacheWrite).toBe('ok')
+    expect(second.metadata.cacheWrite).toBe('ok')
+  })
+
+  it('skips the provider and dataset load on a second draft when datasetId is already known', async () => {
+    const draftCalls: unknown[] = []
+    let loads = 0
+    const datasets = {
+      async get(datasetId: string) {
+        loads += 1
+        return datasetId === ticketsDataset.datasetId ? ticketsDataset : undefined
+      },
+    }
+    const store = new InMemoryAnalysisStore()
+    const make = () => new AnalysisService({
+      store,
+      classifier: makeClassifier([]),
+      datasets,
+      draftProvider: {
+        async draft(input) {
+          draftCalls.push(input)
+          return {
+            query: JSON.stringify({ type: 'choice', instructions: 'Classify each ticket.', criteria: { urgent: 'urgent', routine: 'routine' } }),
+            model: 'openrouter/test',
+            questionKind: 'choice' as const,
+            classes: ['urgent', 'routine'],
+          }
+        },
+      },
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'draft-fast-1',
+    })
+    const task = 'Classify each ticket as urgent or routine using the message.'
+    const first = await make().draft({ datasetId: 'tickets', task })
+    expect(loads).toBe(1)
+    expect(draftCalls).toHaveLength(1)
+    const second = await make().draft({ datasetId: 'tickets', task })
+    expect(second.query).toBe(first.query)
+    expect(second.metadata.cacheWrite).toBe('ok')
+    expect(loads).toBe(1)
+    expect(draftCalls).toHaveLength(1)
+  })
+
+  it('logs draft cache write failures and still returns the drafted query', async () => {
+    const errors: unknown[] = []
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => { errors.push(args) })
+    const store = new InMemoryAnalysisStore()
+    store.putDraft = () => { throw new Error('convex draft put failed') }
+    const service = new AnalysisService({
+      store,
+      classifier: makeClassifier([]),
+      datasets: new InMemoryDatasetSource([ticketsDataset]),
+      draftProvider: {
+        async draft() {
+          return {
+            query: JSON.stringify({ type: 'choice', instructions: 'Classify each ticket.', criteria: { urgent: 'urgent', routine: 'routine' } }),
+            model: 'openrouter/test',
+            questionKind: 'choice' as const,
+            classes: ['urgent', 'routine'],
+          }
+        },
+      },
+      now: () => 1_800_000_000_000,
+      idFactory: () => 'draft-write-fail',
+    })
+    try {
+      const drafted = await service.draft({ datasetId: 'tickets', task: 'Classify each ticket as urgent or routine using the message.' })
+      expect(parseJevQueryJson(drafted.query)).toEqual(expect.objectContaining({ type: 'choice' }))
+      expect(drafted.metadata.cacheWrite).toBe('skipped')
+      expect(errors.some((entry) => Array.isArray(entry) && entry[0] === '[analysis] draft cache write failed')).toBe(true)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('does not cache failed drafts or INVALID_CLASSES', async () => {
@@ -669,6 +742,43 @@ describe('analysis domain contract', () => {
     const forced = await second.start({ fixtureId: FOOTBALL_FIXTURE_ID, query: SAMPLE_WIN_NOUL_QUERY, questionKind: 'noul', forceNew: true })
     expect(forced).toMatchObject({ analysisId: 'analysis-b', status: 'queued' })
     expect(calls).toHaveLength(71)
+  })
+
+  it('returns the same analysisId on a second start without classifier or dataset load', async () => {
+    const calls: unknown[] = []
+    let loads = 0
+    const datasets = {
+      async get(datasetId: string) {
+        loads += 1
+        return datasetId === ticketsDataset.datasetId ? ticketsDataset : undefined
+      },
+    }
+    const store = new InMemoryAnalysisStore()
+    const classifier: AnalysisClassifier = {
+      async classify(input) {
+        calls.push(input)
+        return byodClassification()
+      },
+    }
+    const make = (id: string) => new AnalysisService({
+      store,
+      classifier,
+      datasets,
+      draftProvider: makeDraftProvider([]),
+      idFactory: () => id,
+      now: () => 1_800_000_000_000,
+    })
+    const first = make('byod-fast-a')
+    const started = await first.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
+    await first.run(started.analysisId)
+    expect(calls).toHaveLength(3)
+    expect(loads).toBeGreaterThanOrEqual(1)
+    const loadsAfterFirst = loads
+    const reused = await make('byod-fast-b').start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
+    expect(reused.analysisId).toBe(started.analysisId)
+    expect(reused.status).toBe('complete')
+    expect(calls).toHaveLength(3)
+    expect(loads).toBe(loadsAfterFirst)
   })
 
   it('creates a new run when the sample query differs', async () => {

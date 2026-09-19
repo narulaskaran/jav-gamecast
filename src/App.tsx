@@ -287,7 +287,7 @@ const App = ({ api = defaultAnalysisApi }: { api?: AnalysisApiClient }) => {
     if (!draft || !hasRunnableQuery(query) || !datasetId) return
     const parsed = parseJevQueryJson(query)
     if (!parsed) return
-    setStarting(true); setError(undefined); setIntakeError(undefined); setSnapshot(undefined); setShareMessage(''); setRunLatency(undefined)
+    setStarting(true); setError(undefined); setIntakeError(undefined); setShareMessage(''); setRunLatency(undefined)
     try {
       const started = await api.start({
         datasetId,

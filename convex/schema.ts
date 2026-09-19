@@ -117,6 +117,7 @@ export default defineSchema({
       questionKind: v.optional(v.union(v.literal('noul'), v.literal('score'), v.literal('choice'))),
       inputHalf: v.optional(v.literal('H1')),
       labelHalf: v.optional(v.literal('H2')),
+      cacheWrite: v.optional(v.union(v.literal('ok'), v.literal('skipped'))),
     }),
     createdAt: v.string(),
     updatedAt: v.string(),
