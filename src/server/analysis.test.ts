@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { footballFixture, getHalftimeModelInput, getWinLikelihoodModelInput, FOOTBALL_FIXTURE_ID, FOOTBALL_FIXTURE_SCHEMA } from '../fixtures/footballTimeline'
 import { SAMPLE_WIN_LIKELIHOOD_TASK, SAMPLE_WIN_NOUL_QUERY } from '../shared/questionKind'
 import { parseJevQueryJson } from '../shared/jevQuery'
@@ -12,8 +12,6 @@ import {
   createSnapshotWritePipeline,
   InMemoryAnalysisStore,
   InMemoryDatasetSource,
-  maybeThrowDebugFailAtRow,
-  parseDebugFailAtRow,
   pendingRowIndexes,
   type AnalysisClassifier,
   type AnalysisDraftProvider,
@@ -73,8 +71,6 @@ const serviceWith = (classifier: AnalysisClassifier, draftProvider = makeDraftPr
 })
 
 describe('analysis domain contract', () => {
-  afterEach(() => vi.unstubAllEnvs())
-
   it('drafts without invoking the classifier or Jev', async () => {
     const classifierCalls: unknown[] = []
     const draftCalls: unknown[] = []
@@ -1088,119 +1084,5 @@ describe('analysis domain contract', () => {
     expect(calls).toBeLessThan(39 * 2)
     releaseFirst?.()
     await expect(first).resolves.toMatchObject({ status: 'complete' })
-  })
-
-  it('treats unset, empty, and invalid JEV_DEBUG_FAIL_AT_ROW as a no-op', () => {
-    expect(parseDebugFailAtRow(undefined)).toBeUndefined()
-    expect(parseDebugFailAtRow('')).toBeUndefined()
-    expect(parseDebugFailAtRow('  ')).toBeUndefined()
-    expect(parseDebugFailAtRow('foo')).toBeUndefined()
-    expect(parseDebugFailAtRow('-1')).toBeUndefined()
-    expect(parseDebugFailAtRow('3.5')).toBeUndefined()
-    expect(parseDebugFailAtRow('3')).toBe(3)
-    expect(parseDebugFailAtRow(' 2 ')).toBe(2)
-    expect(parseDebugFailAtRow('0')).toBe(0)
-    expect(() => maybeThrowDebugFailAtRow(3, 0, {})).not.toThrow()
-    expect(() => maybeThrowDebugFailAtRow(3, 0, { JEV_DEBUG_FAIL_AT_ROW: 'nope' })).not.toThrow()
-    expect(() => maybeThrowDebugFailAtRow(2, 0, { JEV_DEBUG_FAIL_AT_ROW: '3' })).not.toThrow()
-    expect(() => maybeThrowDebugFailAtRow(3, 0, { JEV_DEBUG_FAIL_AT_ROW: '3' })).toThrow(AnalysisError)
-    try {
-      maybeThrowDebugFailAtRow(3, 0, { JEV_DEBUG_FAIL_AT_ROW: '3' })
-      throw new Error('expected inject')
-    } catch (error) {
-      expect(error).toMatchObject({ code: 'JEV_MALFORMED_RESPONSE', retryable: true, statusCode: 502 })
-    }
-    expect(() => maybeThrowDebugFailAtRow(3, 3, { JEV_DEBUG_FAIL_AT_ROW: '3' })).not.toThrow()
-  })
-
-  it('injects a retryable classify failure at JEV_DEBUG_FAIL_AT_ROW and keeps prior rows', async () => {
-    vi.stubEnv('JEV_DEBUG_FAIL_AT_ROW', '1')
-    const classified: number[] = []
-    const store = new InMemoryAnalysisStore()
-    const service = new AnalysisService({
-      store,
-      classifier: {
-        async classify(input) {
-          classified.push(input.rowIndex)
-          return byodClassification()
-        },
-      },
-      draftProvider: makeDraftProvider([]),
-      datasets: new InMemoryDatasetSource([ticketsDataset]),
-      now: () => 1_800_000_000_000,
-      idFactory: () => 'debug-fail-at-row',
-      classifyConcurrency: 1,
-    })
-    const started = await service.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
-    const failed = await service.run(started.analysisId)
-    expect(failed).toMatchObject({
-      status: 'error',
-      progress: { completedRows: 1, totalRows: 3 },
-      error: { code: 'JEV_MALFORMED_RESPONSE', retryable: true },
-    })
-    expect(failed.resultRows.map((row) => row.rowIndex)).toEqual([0])
-    expect(classified).toEqual([0])
-    expect(JSON.stringify(failed)).not.toMatch(/JEV_DEBUG_FAIL_AT_ROW|Injected mid-run/)
-    const recovered = await service.start({
-      datasetId: 'tickets',
-      query: byodTicketQuery,
-      analysisId: started.analysisId,
-      classes: ['urgent', 'routine'],
-      resume: true,
-    })
-    expect(recovered).toMatchObject({ status: 'queued', progress: { completedRows: 1 } })
-    const completed = await service.run(started.analysisId)
-    expect(completed).toMatchObject({ status: 'complete', progress: { completedRows: 3 } })
-    expect(classified).toEqual([0, 1, 2])
-  })
-
-  it('skips complete snapshot reuse when JEV_DEBUG_FAIL_AT_ROW is set so the inject can run', async () => {
-    const store = new InMemoryAnalysisStore()
-    let n = 0
-    const make = () => new AnalysisService({
-      store,
-      classifier: { async classify() { return byodClassification() } },
-      draftProvider: makeDraftProvider([]),
-      datasets: new InMemoryDatasetSource([ticketsDataset]),
-      now: () => 1_800_000_000_000,
-      idFactory: () => `debug-reuse-${n++}`,
-      classifyConcurrency: 1,
-    })
-    const first = make()
-    const started = await first.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
-    await expect(first.run(started.analysisId)).resolves.toMatchObject({ status: 'complete' })
-    vi.stubEnv('JEV_DEBUG_FAIL_AT_ROW', '1')
-    const second = make()
-    const injected = await second.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
-    expect(injected.status).toBe('queued')
-    expect(injected.analysisId).not.toBe(started.analysisId)
-    await expect(second.run(injected.analysisId)).resolves.toMatchObject({
-      status: 'error',
-      progress: { completedRows: 1 },
-      error: { code: 'JEV_MALFORMED_RESPONSE', retryable: true },
-    })
-  })
-
-  it('does not inject a classify failure when JEV_DEBUG_FAIL_AT_ROW is unset', async () => {
-    const classified: number[] = []
-    const service = new AnalysisService({
-      store: new InMemoryAnalysisStore(),
-      classifier: {
-        async classify(input) {
-          classified.push(input.rowIndex)
-          return byodClassification()
-        },
-      },
-      draftProvider: makeDraftProvider([]),
-      datasets: new InMemoryDatasetSource([ticketsDataset]),
-      now: () => 1_800_000_000_000,
-      idFactory: () => 'debug-fail-unset',
-      classifyConcurrency: 1,
-    })
-    const started = await service.start({ datasetId: 'tickets', query: byodTicketQuery, classes: ['urgent', 'routine'] })
-    const completed = await service.run(started.analysisId)
-    expect(completed).toMatchObject({ status: 'complete', progress: { completedRows: 3 } })
-    expect(completed.error).toBeUndefined()
-    expect(classified).toEqual([0, 1, 2])
   })
 })
