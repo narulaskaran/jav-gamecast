@@ -57,6 +57,26 @@ export { ANALYSIS_CLASS_NAMES, ANALYSIS_MAX_CALLS, ANALYSIS_MAX_QUERY_LENGTH, AN
 /** Bounded Jev pool size. Large BYOD runs overlap classify with Convex puts. */
 export const ANALYSIS_CLASSIFY_CONCURRENCY = 6
 
+/**
+ * Temporary QA inject (bash #44). Unset after PASS.
+ * 0-based `rowIndex`; unset / empty / invalid = no-op.
+ */
+export const DEBUG_FAIL_AT_ROW_ENV = 'JEV_DEBUG_FAIL_AT_ROW'
+
+/** Parse `JEV_DEBUG_FAIL_AT_ROW`. Only a non-negative integer is active. */
+export const parseDebugFailAtRow = (value: unknown): number | undefined => {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (!trimmed || !/^[0-9]+$/.test(trimmed)) return undefined
+  const parsed = Number(trimmed)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return undefined
+  return parsed
+}
+
+const debugFailInjectActive = (env: NodeJS.ProcessEnv = process.env): boolean => (
+  parseDebugFailAtRow(env[DEBUG_FAIL_AT_ROW_ENV]) !== undefined
+)
+
 export interface ResolvedAnalysisDataset {
   datasetId: string
   fixtureId: string
@@ -110,6 +130,21 @@ export class AnalysisError extends Error {
     this.statusCode = statusCode
     this.retryable = retryable
   }
+}
+
+/**
+ * Throw a retryable mid-run classify error when `rowIndex` matches the inject.
+ * Skip when this execute already has the consecutive prefix at `failAt` (resume).
+ */
+export const maybeThrowDebugFailAtRow = (
+  rowIndex: number,
+  initialCompletedRows = 0,
+  env: NodeJS.ProcessEnv = process.env,
+): void => {
+  const failAt = parseDebugFailAtRow(env[DEBUG_FAIL_AT_ROW_ENV])
+  if (failAt === undefined || rowIndex !== failAt) return
+  if (initialCompletedRows > 0 && initialCompletedRows === failAt) return
+  throw new AnalysisError('JEV_MALFORMED_RESPONSE', 'Injected mid-run classify failure', 502, true)
 }
 
 const cloneDraftResult = (draft: AnalysisDraftResult): AnalysisDraftResult => JSON.parse(JSON.stringify(draft)) as AnalysisDraftResult
@@ -473,9 +508,10 @@ export class AnalysisService {
     const parsedQuery = parseJevQueryJson(query)
     const requestedAnalysisId = input.analysisId === undefined ? undefined : typeof input.analysisId === 'string' ? input.analysisId.trim() : undefined
     if (input.analysisId !== undefined && requestedAnalysisId === undefined) throw new AnalysisError('INVALID_ANALYSIS_ID', 'Analysis ID is invalid')
+    const debugInject = debugFailInjectActive()
     const datasetHint = resolveDatasetHint(input)
     const earlyReuse = startReuseParts(query, parsedQuery, input)
-    const canReuseEarly = input.forceNew !== true && (earlyReuse.questionKind !== 'choice' || earlyReuse.lookupClasses.length >= 2)
+    const canReuseEarly = input.forceNew !== true && !debugInject && (earlyReuse.questionKind !== 'choice' || earlyReuse.lookupClasses.length >= 2)
     if (datasetHint && canReuseEarly && !requestedAnalysisId) {
       const contentKey = analysisContentKey({
         datasetId: datasetHint,
@@ -499,7 +535,7 @@ export class AnalysisService {
       if (existing) return this.resumeExisting(existing, dataset.datasetId, query, input.resume === true)
     }
     const { questionKind, lookupClasses } = startReuseParts(query, parsedQuery, input, dataset.classes)
-    const canReuse = input.forceNew !== true && (questionKind !== 'choice' || lookupClasses.length >= 2)
+    const canReuse = input.forceNew !== true && !debugInject && (questionKind !== 'choice' || lookupClasses.length >= 2)
     const contentKey = analysisContentKey({
       datasetId: dataset.datasetId,
       query,
@@ -787,6 +823,7 @@ export class AnalysisService {
         return await persistFinal(snapshot)
       }
       let resultRows = [...snapshot.resultRows]
+      const initialCompletedRows = consecutiveCompletedRows(resultRows)
       let firstError: unknown
       let stopped = false
       let cursor = 0
@@ -822,6 +859,7 @@ export class AnalysisService {
           const row = rows[rowIndex]
           if (!row) continue
           try {
+            maybeThrowDebugFailAtRow(rowIndex, initialCompletedRows)
             const classification = normalizeClassification(await this.options.classifier.classify({
               analysisId,
               fixtureId: snapshot.fixtureId,
