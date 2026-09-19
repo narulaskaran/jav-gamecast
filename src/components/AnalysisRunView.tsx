@@ -10,6 +10,7 @@ import {
   runErrorCopy,
   runProgressCount,
   runProgressPercent,
+  runStallCopy,
   runSubsetCopy,
   savedRunCopy,
 } from '../runView/format'
@@ -89,6 +90,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   const playbackEnabled = snapshot.status === 'complete'
   const live = snapshot.status === 'queued' || snapshot.status === 'running'
   const [elapsedMs, setElapsedMs] = useState(0)
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const { index, followLive, motion, playing, seek, togglePlayback } = useRunPlayhead(rows.length, snapshot.analysisId)
   const seekRef = useRef(seek)
   const toggleRef = useRef(togglePlayback)
@@ -119,7 +121,11 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     if (!live) return undefined
     const startedAt = Date.parse(snapshot.createdAt)
     const origin = Number.isFinite(startedAt) ? startedAt : Date.now()
-    const tick = () => setElapsedMs(Math.max(0, Date.now() - origin))
+    const tick = () => {
+      const now = Date.now()
+      setNowMs(now)
+      setElapsedMs(Math.max(0, now - origin))
+    }
     tick()
     const timer = window.setInterval(tick, 1000)
     return () => window.clearInterval(timer)
@@ -130,6 +136,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   const savedCopy = savedReuse ? savedRunCopy() : undefined
   const chartIndex = snapCompletePlayhead(snapshot.status, rows.length, index, playing, followLive)
   const chartMotion = snapCompleteMotion(snapshot.status, playing, motion)
+  const stallCopy = runStallCopy(snapshot.status, snapshot.updatedAt, nowMs)
   const latencyCopy = live
     ? subsetCopy
       ? `Live run · ${formatElapsed(elapsedMs)} · ${subsetCopy} Can take a few minutes.`
@@ -171,6 +178,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
           percent={progressPercent}
         />
         {latencyCopy ? <p className="run-latency" role="status">{latencyCopy}</p> : null}
+        {stallCopy ? <p className="run-stall" role="status">{stallCopy}</p> : null}
         {errorCopy ? (
           <div className="error-banner compact" role="alert">
             <div className="error-banner-copy">
