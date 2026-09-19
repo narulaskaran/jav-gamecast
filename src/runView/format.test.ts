@@ -54,7 +54,7 @@ describe('run view copy', () => {
       detail: 'Jev returned a response this run could not use. Saved rows are kept. You can resume from row 32.',
     })
     expect(resumeRunLabel(31)).toBe('Resume from row 32')
-    expect(savedRunCopy()).toBe('')
+    expect(savedRunCopy()).toBe('Using saved run.')
   })
 
   it('explains fixture H1 subset runs without changing the 39 vs 71 split', () => {

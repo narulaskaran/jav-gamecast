@@ -73,6 +73,9 @@ export const createAnalysisDraftHandler = (service: AnalysisService): AnalysisAp
       datasetId: typeof body.datasetId === 'string' ? body.datasetId : undefined,
       task: body.task as string,
     })
+    if (result.metadata.cacheWrite === 'ok' || result.metadata.cacheWrite === 'skipped') {
+      response.setHeader('X-Analysis-Cache-Write', result.metadata.cacheWrite)
+    }
     response.status(200).json(result)
   } catch (error) {
     errorResponse(response, error)

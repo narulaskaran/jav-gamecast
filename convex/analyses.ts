@@ -329,6 +329,7 @@ type DurableDraft = {
     questionKind?: 'noul' | 'score' | 'choice'
     inputHalf?: 'H1'
     labelHalf?: 'H2'
+    cacheWrite?: 'ok' | 'skipped'
   }
   createdAt: string
   updatedAt: string
@@ -360,6 +361,7 @@ const validateDraft: (value: unknown) => asserts value is DurableDraft = (value)
   if (metadata.questionKind !== undefined && metadata.questionKind !== 'noul' && metadata.questionKind !== 'score' && metadata.questionKind !== 'choice') throw new Error('Invalid draft question kind')
   if (metadata.inputHalf !== undefined && metadata.inputHalf !== 'H1') throw new Error('Invalid draft input half')
   if (metadata.labelHalf !== undefined && metadata.labelHalf !== 'H2') throw new Error('Invalid draft label half')
+  if (metadata.cacheWrite !== undefined && metadata.cacheWrite !== 'ok' && metadata.cacheWrite !== 'skipped') throw new Error('Invalid draft cache write')
   if (JSON.stringify(value).length > 200_000) throw new Error('Draft snapshot is too large')
 }
 
@@ -417,13 +419,15 @@ export const authorizedPutDraft = action({
     if (typeof contentKey !== 'string' || !/^[a-f0-9]{64}$/.test(contentKey)) throw new Error('Invalid draft content key')
     if (!isRecord(draft)) throw new Error('Invalid draft snapshot')
     const now = new Date().toISOString()
+    const metadata = isRecord(draft.metadata) ? { ...draft.metadata } : draft.metadata
+    if (isRecord(metadata)) delete metadata.cacheWrite
     const snapshot = {
       contentKey,
       fixtureId: draft.fixtureId,
       datasetId: draft.datasetId,
       sourceType: draft.sourceType,
       query: draft.query,
-      metadata: draft.metadata,
+      metadata,
       createdAt: typeof draft.createdAt === 'string' ? draft.createdAt : now,
       updatedAt: now,
     }

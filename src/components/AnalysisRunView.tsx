@@ -11,6 +11,7 @@ import {
   runProgressCount,
   runProgressPercent,
   runSubsetCopy,
+  savedRunCopy,
 } from '../runView/format'
 import { downloadTextFile, resultsCsv, resultsCsvFilename } from '../runView/resultsCsv'
 import { useRunPlayhead } from '../runView/playhead'
@@ -72,6 +73,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
   resuming,
   datasetRowCount,
   inputHalf,
+  latencyHint,
 }: {
   snapshot: AnalysisSnapshot
   shareUrl: string
@@ -123,11 +125,12 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     return () => window.clearInterval(timer)
   }, [live, snapshot.analysisId, snapshot.createdAt])
 
+  const savedCopy = latencyHint === 'saved' && snapshot.status === 'complete' ? savedRunCopy() : undefined
   const latencyCopy = live
     ? subsetCopy
       ? `Live run · ${formatElapsed(elapsedMs)} · ${subsetCopy} Can take a few minutes.`
       : `Live run · ${formatElapsed(elapsedMs)} · ${snapshot.progress.totalRows} rows can take a few minutes.`
-    : subsetCopy
+    : [savedCopy, subsetCopy].filter(Boolean).join(' ') || undefined
 
   return (
     <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
