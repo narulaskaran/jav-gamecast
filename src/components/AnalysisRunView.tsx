@@ -125,7 +125,9 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     return () => window.clearInterval(timer)
   }, [live, snapshot.analysisId, snapshot.createdAt])
 
-  const savedCopy = latencyHint === 'saved' && snapshot.status === 'complete' ? savedRunCopy() : undefined
+  const savedReuse = latencyHint === 'saved' && snapshot.status === 'complete'
+  const savedCopy = savedReuse ? savedRunCopy() : undefined
+  const chartMotion = savedReuse ? 'seek' : motion
   const latencyCopy = live
     ? subsetCopy
       ? `Live run · ${formatElapsed(elapsedMs)} · ${subsetCopy} Can take a few minutes.`
@@ -133,7 +135,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
     : [savedCopy, subsetCopy].filter(Boolean).join(' ') || undefined
 
   return (
-    <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId}>
+    <Card className="analysis-card" aria-labelledby="analysis-heading" data-analysis-id={snapshot.analysisId} data-saved-run={savedReuse || undefined}>
       <CardHeader className="analysis-head flex-row items-start justify-between space-y-0 p-6 pb-0">
         <div>
           <p className="eyebrow">Run</p>
@@ -194,7 +196,7 @@ export const AnalysisRunView = memo(function AnalysisRunView({
               playheadIndex={index}
               classes={snapshot.classes}
               totalRows={snapshot.progress.totalRows}
-              motion={motion}
+              motion={chartMotion}
               questionKind={questionKind}
               chartKind={chartKind}
               playing={playing}
